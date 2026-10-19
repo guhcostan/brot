@@ -113,7 +113,10 @@ export interface DshEngineOptions {
 }
 
 export interface DshEngine extends EngineDriver {
-  /** Stops every DSH server process. Runs in flight fail; the next run on a thread resumes its session. */
+  /**
+   * Stops every DSH server process of every bot in every thread. Runs in flight fail; the next run of a
+   * bot in a thread resumes that bot's session.
+   */
   close(): Promise<void>;
 }
 
@@ -158,8 +161,11 @@ interface ActiveRun {
   onAbort: () => void;
 }
 
-/** One Brot thread: its DSH server process while alive, and the DSH session that process hosts. */
-interface ThreadState {
+/**
+ * One bot's DSH state in one Brot thread. A room runs several bots in one thread, each with its own
+ * process and session.
+ */
+interface BotThreadState {
   server: ServerProcess | undefined;
   sessionId: string | undefined;
   sessionServer: ServerProcess | undefined;
@@ -206,11 +212,11 @@ export function pinnedDshCommand(): DshCommand | undefined {
 }
 
 /**
- * Drives DeepSeek Harness through its ACP server (`dsh --profile acp`). Each Brot thread gets its
- * own server process and one DSH session, both kept in memory while the process is alive. A run
- * with a computer executes DSH inside it; a run without one executes DSH locally with every tool
- * row disabled. When a process dies or is stopped, the next run starts a new one and resumes the
- * thread's session by its engine session id.
+ * Drives DeepSeek Harness through its ACP server (`dsh --profile acp`). Each bot in each Brot thread
+ * gets its own server process and one DSH session, both kept in memory while the process is alive.
+ * A run with a computer executes DSH inside it; a run without one executes DSH locally with every
+ * tool row disabled. When a process dies or is stopped, the next run of that bot in that thread
+ * starts a new one and resumes the bot's session by its engine session id.
  */
 export function createDshEngine(opts: DshEngineOptions = {}): DshEngine {
   const command = opts.command ?? pinnedDshCommand();
@@ -219,14 +225,15 @@ export function createDshEngine(opts: DshEngineOptions = {}): DshEngine {
   const env: NodeJS.ProcessEnv = opts.dshHome === undefined ? process.env : { ...process.env, DSH_HOME: opts.dshHome };
   const computerEnv = { ...DEFAULT_COMPUTER_ENV, ...opts.computerEnv };
 
-  const threads = new Map<string, ThreadState>();
+  const states = new Map<string, BotThreadState>();
   let knownModels: ModelEntry[] = [];
   let patchDir: string | undefined;
 
-  function threadFor(threadId: string): ThreadState {
-    let thread = threads.get(threadId);
-    if (thread === undefined) {
-      thread = {
+  function stateFor(threadId: string, botId: string): BotThreadState {
+    const key = stateKey(threadId, botId);
+    let state = states.get(key);
+    if (state === undefined) {
+      state = {
         server: undefined,
         sessionId: undefined,
         sessionServer: undefined,
@@ -238,33 +245,33 @@ export function createDshEngine(opts: DshEngineOptions = {}): DshEngine {
         catalog: [],
         active: undefined,
       };
-      threads.set(threadId, thread);
+      states.set(key, state);
     }
-    return thread;
+    return state;
   }
 
-  function attach(thread: ThreadState) {
+  function attach(state: BotThreadState) {
     return client({ name: 'brot' })
-      .onRequest(methods.client.session.requestPermission, ({ params }) => answerPermission(thread, params))
-      .onNotification(methods.client.session.update, ({ params }) => receiveUpdate(thread, params));
+      .onRequest(methods.client.session.requestPermission, ({ params }) => answerPermission(state, params))
+      .onNotification(methods.client.session.update, ({ params }) => receiveUpdate(state, params));
   }
 
-  function receiveUpdate(thread: ThreadState, params: SessionNotification): void {
+  function receiveUpdate(state: BotThreadState, params: SessionNotification): void {
     const { update } = params;
     if (update.sessionUpdate === 'config_option_update') {
-      applyConfig(thread, update.configOptions);
+      applyConfig(state, update.configOptions);
       return;
     }
-    const run = thread.active;
+    const run = state.active;
     if (run === undefined) return;
     for (const event of updateEvents(update, run.tools)) run.mailbox.push({ kind: 'event', event });
   }
 
   async function answerPermission(
-    thread: ThreadState,
+    state: BotThreadState,
     params: RequestPermissionRequest,
   ): Promise<RequestPermissionResponse> {
-    const run = thread.active;
+    const run = state.active;
     if (run === undefined) return cancelledAnswer();
 
     const callId = params.toolCall.toolCallId;
@@ -291,17 +298,17 @@ export function createDshEngine(opts: DshEngineOptions = {}): DshEngine {
     return rejectId === undefined ? cancelledAnswer() : selectedAnswer(rejectId);
   }
 
-  function applyConfig(thread: ThreadState, options: readonly SessionConfigOption[] | null | undefined): void {
+  function applyConfig(state: BotThreadState, options: readonly SessionConfigOption[] | null | undefined): void {
     if (options === undefined || options === null) return;
     const entries = modelEntries(options);
     if (entries.length > 0) {
-      thread.catalog = entries;
+      state.catalog = entries;
       knownModels = entries;
     }
     const current = currentModelValue(options);
     if (current !== undefined) {
-      thread.model = current;
-      thread.defaultModel ??= current;
+      state.model = current;
+      state.defaultModel ??= current;
     }
   }
 
@@ -314,16 +321,16 @@ export function createDshEngine(opts: DshEngineOptions = {}): DshEngine {
     return join(patchDir, PATCH_FILE);
   }
 
-  async function ensureServer(thread: ThreadState, placement: Placement): Promise<ServerProcess> {
+  async function ensureServer(state: BotThreadState, placement: Placement): Promise<ServerProcess> {
     const key = placementKey(placement);
-    const current = thread.server;
+    const current = state.server;
     if (current !== undefined && isLive(current) && current.placement === key) return current;
     if (current !== undefined) {
-      thread.server = undefined;
+      state.server = undefined;
       await stopServer(current);
     }
-    const server = await launch(thread, placement);
-    thread.server = server;
+    const server = await launch(state, placement);
+    state.server = server;
     return server;
   }
 
@@ -344,10 +351,10 @@ export function createDshEngine(opts: DshEngineOptions = {}): DshEngine {
     );
   }
 
-  async function launch(thread: ThreadState, placement: Placement): Promise<ServerProcess> {
+  async function launch(state: BotThreadState, placement: Placement): Promise<ServerProcess> {
     const launched = await startProcess(placement);
     const tail = keepTail(launched.stderr);
-    const connection = attach(thread).connect(ndJsonStream(launched.stdin, protocolLines(launched.stdout)));
+    const connection = attach(state).connect(ndJsonStream(launched.stdin, protocolLines(launched.stdout)));
     const server: ServerProcess = {
       placement: placementKey(placement),
       launched,
@@ -357,8 +364,8 @@ export function createDshEngine(opts: DshEngineOptions = {}): DshEngine {
     };
     void launched.exit.then((exit) => {
       server.exited = true;
-      if (thread.server === server) thread.server = undefined;
-      const run = thread.active;
+      if (state.server === server) state.server = undefined;
+      const run = state.active;
       if (run?.server === server) run.mailbox.push({ kind: 'failed', error: runtimeExitError(exit, tail()) });
     });
 
@@ -386,21 +393,21 @@ export function createDshEngine(opts: DshEngineOptions = {}): DshEngine {
 
   /**
    * Returns the session id for the run. Reuses the open session when its id and MCP servers still match;
-   * otherwise closes it and resumes the wanted id (the run's engine session id, else the thread's last)
+   * otherwise closes it and resumes the wanted id (the run's engine session id, else the bot's last)
    * with this run's MCP servers. Creates a session only when neither can be resumed.
    */
   async function ensureSession(
-    thread: ThreadState,
+    state: BotThreadState,
     server: ServerProcess,
     ctx: RunContext,
     mcpServers: AcpMcpServer[],
   ): Promise<string> {
     const mcpKey = JSON.stringify(mcpServers);
-    const wanted = ctx.engineSessionId ?? thread.sessionId;
-    const open = thread.sessionId !== undefined && thread.sessionServer === server ? thread.sessionId : undefined;
-    if (open !== undefined && open === wanted && thread.mcpKey === mcpKey) return open;
+    const wanted = ctx.engineSessionId ?? state.sessionId;
+    const open = state.sessionId !== undefined && state.sessionServer === server ? state.sessionId : undefined;
+    if (open !== undefined && open === wanted && state.mcpKey === mcpKey) return open;
     if (open !== undefined) {
-      thread.sessionServer = undefined;
+      state.sessionServer = undefined;
       await server.connection.agent.request(methods.agent.session.close, { sessionId: open }).catch(() => undefined);
     }
 
@@ -411,45 +418,45 @@ export function createDshEngine(opts: DshEngineOptions = {}): DshEngine {
         mcpServers,
       }).catch(() => undefined);
       if (resumed !== undefined) {
-        thread.sessionId = wanted;
-        thread.sessionServer = server;
-        thread.mcpKey = mcpKey;
-        thread.primed = true;
-        applyConfig(thread, resumed.configOptions);
+        state.sessionId = wanted;
+        state.sessionServer = server;
+        state.mcpKey = mcpKey;
+        state.primed = true;
+        applyConfig(state, resumed.configOptions);
         return wanted;
       }
     }
 
     const created = await server.connection.agent.request(methods.agent.session.new, { cwd, mcpServers });
-    thread.sessionId = created.sessionId;
-    thread.sessionServer = server;
-    thread.mcpKey = mcpKey;
-    thread.primed = false;
-    thread.model = undefined;
-    thread.defaultModel = undefined;
-    thread.catalog = [];
-    applyConfig(thread, created.configOptions);
+    state.sessionId = created.sessionId;
+    state.sessionServer = server;
+    state.mcpKey = mcpKey;
+    state.primed = false;
+    state.model = undefined;
+    state.defaultModel = undefined;
+    state.catalog = [];
+    applyConfig(state, created.configOptions);
     return created.sessionId;
   }
 
-  async function applyModel(thread: ThreadState, run: ActiveRun, model: string | undefined): Promise<void> {
+  async function applyModel(state: BotThreadState, run: ActiveRun, model: string | undefined): Promise<void> {
     let wanted: string | undefined;
     if (model === undefined || model === DEFAULT_MODEL) {
-      wanted = thread.defaultModel;
+      wanted = state.defaultModel;
     } else {
-      wanted = modelValueFor(thread.catalog, model);
+      wanted = modelValueFor(state.catalog, model);
       if (wanted === undefined) throw new Error(`${LABEL} does not offer model ${model}`);
     }
-    if (wanted === undefined || wanted === thread.model) return;
+    if (wanted === undefined || wanted === state.model) return;
     const response = await run.server.connection.agent.request(methods.agent.session.setConfigOption, {
       sessionId: run.sessionId,
       configId: MODEL_CONFIG_ID,
       value: wanted,
     });
-    applyConfig(thread, response.configOptions);
+    applyConfig(state, response.configOptions);
   }
 
-  function startRun(ctx: RunContext, thread: ThreadState, server: ServerProcess, sessionId: string): ActiveRun {
+  function startRun(ctx: RunContext, state: BotThreadState, server: ServerProcess, sessionId: string): ActiveRun {
     const run: ActiveRun = {
       ctx,
       server,
@@ -462,14 +469,14 @@ export function createDshEngine(opts: DshEngineOptions = {}): DshEngine {
       killTimer: undefined,
       onAbort: () => cancelPrompt(run),
     };
-    thread.active = run;
+    state.active = run;
     ctx.signal.addEventListener('abort', run.onAbort, { once: true });
     return run;
   }
 
-  function endRun(thread: ThreadState, run: ActiveRun): void {
+  function endRun(state: BotThreadState, run: ActiveRun): void {
     run.ctx.signal.removeEventListener('abort', run.onAbort);
-    if (thread.active === run) thread.active = undefined;
+    if (state.active === run) state.active = undefined;
     cancelPrompt(run);
   }
 
@@ -493,26 +500,26 @@ export function createDshEngine(opts: DshEngineOptions = {}): DshEngine {
   }
 
   async function* execute(ctx: RunContext): AsyncGenerator<EngineEvent> {
-    const thread = threadFor(ctx.threadId);
-    if (thread.busy) throw new Error(`${LABEL} already has a run in progress for this thread`);
-    thread.busy = true;
+    const state = stateFor(ctx.threadId, ctx.bot.id);
+    if (state.busy) throw new Error(`${LABEL} already has a run in progress for this bot in this thread`);
+    state.busy = true;
     let run: ActiveRun | undefined;
     try {
       if (ctx.signal.aborted) return;
       const placement: Placement = ctx.computer === undefined ? LOCAL : { kind: 'computer', computer: ctx.computer };
-      const server = await untilAborted(ensureServer(thread, placement), ctx.signal);
+      const server = await untilAborted(ensureServer(state, placement), ctx.signal);
       if (server === undefined) return;
       const mcpServers = (ctx.mcpServers ?? []).map(toAcpMcpServer);
-      const sessionId = await untilAborted(ensureSession(thread, server, ctx, mcpServers), ctx.signal);
+      const sessionId = await untilAborted(ensureSession(state, server, ctx, mcpServers), ctx.signal);
       if (sessionId === undefined) return;
       if (sessionId !== ctx.engineSessionId) yield { type: 'engine.session', sessionId };
 
-      const current = startRun(ctx, thread, server, sessionId);
+      const current = startRun(ctx, state, server, sessionId);
       run = current;
-      await untilAborted(applyModel(thread, current, ctx.bot.model), ctx.signal);
+      await untilAborted(applyModel(state, current, ctx.bot.model), ctx.signal);
       if (ctx.signal.aborted) return;
 
-      const text = thread.primed ? ctx.input : buildPrompt(ctx);
+      const text = state.primed ? ctx.input : buildPrompt(ctx);
       const prompt = server.connection.agent.request(methods.agent.session.prompt, {
         sessionId,
         prompt: [{ type: 'text', text }],
@@ -533,7 +540,7 @@ export function createDshEngine(opts: DshEngineOptions = {}): DshEngine {
           if (ctx.signal.aborted) return;
           throw item.error;
         }
-        thread.primed = true;
+        state.primed = true;
         for (const event of usageEvents(item.response.usage)) yield event;
         if (item.response.stopReason === 'end_turn' || ctx.signal.aborted) return;
         throw new Error(`${LABEL} stopped the run: ${item.response.stopReason}`);
@@ -542,8 +549,12 @@ export function createDshEngine(opts: DshEngineOptions = {}): DshEngine {
       if (ctx.signal.aborted) return;
       throw runError(error);
     } finally {
-      thread.busy = false;
-      if (run !== undefined) endRun(thread, run);
+      state.busy = false;
+      if (run !== undefined) {
+        endRun(state, run);
+        // A run that ends with its server's connection closed may return before the child is reaped.
+        if (!isLive(run.server)) await stopServer(run.server);
+      }
     }
   }
 
@@ -559,9 +570,9 @@ export function createDshEngine(opts: DshEngineOptions = {}): DshEngine {
     },
     run: execute,
     async close(): Promise<void> {
-      const running = [...threads.values()].flatMap((thread) => {
-        const server = thread.server;
-        thread.server = undefined;
+      const running = [...states.values()].flatMap((state) => {
+        const server = state.server;
+        state.server = undefined;
         return server !== undefined && isLive(server) ? [server] : [];
       });
       await Promise.all(running.map(stopServer));
@@ -571,6 +582,11 @@ export function createDshEngine(opts: DshEngineOptions = {}): DshEngine {
       }
     },
   };
+}
+
+/** Engine state is per (Brot thread, bot): a room runs several bots in one thread. */
+function stateKey(threadId: string, botId: string): string {
+  return JSON.stringify([threadId, botId]);
 }
 
 function placementKey(placement: Placement): string {

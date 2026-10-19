@@ -22,6 +22,13 @@
       "when": 1792423442223,
       "tag": "0002_team_rooms_tasks",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1792437088583,
+      "tag": "0003_task_work_run",
+      "breakpoints": true
     }
   ]
 }

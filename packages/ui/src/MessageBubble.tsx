@@ -1,4 +1,4 @@
-import { useRef, type ReactElement } from 'react';
+import { useRef, type ReactElement, type ReactNode } from 'react';
 import { cx } from './cx';
 
 export interface MessageBubbleProps {
@@ -8,6 +8,11 @@ export interface MessageBubbleProps {
   /** True while the engine is still streaming this message. */
   streaming?: boolean;
   time?: string;
+  /**
+   * Renders settled text, e.g. to turn @mentions into chips. Text still streaming is shown as is, so
+   * the chunk fade-in keeps working.
+   */
+  renderText?: (text: string) => ReactNode;
   className?: string;
 }
 
@@ -33,7 +38,15 @@ function useStreamChunks(content: string, streaming: boolean): { settled: string
 }
 
 /** Bot messages are plain text; the user's sit in a quiet bubble on the right. */
-export function MessageBubble({ role, content, author, streaming = false, time, className }: MessageBubbleProps): ReactElement {
+export function MessageBubble({
+  role,
+  content,
+  author,
+  streaming = false,
+  time,
+  renderText,
+  className,
+}: MessageBubbleProps): ReactElement {
   const { settled, chunks } = useStreamChunks(content, streaming);
   return (
     <div
@@ -49,7 +62,7 @@ export function MessageBubble({ role, content, author, streaming = false, time, 
         </span>
       ) : null}
       <div className="brot-msg__body">
-        {settled}
+        {renderText && chunks.length === 0 ? renderText(settled) : settled}
         {chunks.map((chunk) => (
           <span key={chunk.at} className="brot-msg__chunk">
             {chunk.text}

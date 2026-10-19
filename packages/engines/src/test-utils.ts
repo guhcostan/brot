@@ -26,6 +26,7 @@ export const testBot: Bot = {
 
 export interface TestContextOptions {
   input?: string;
+  threadId?: string;
   bot?: Partial<Bot>;
   history?: Message[];
   memories?: Memory[];
@@ -40,7 +41,7 @@ export function makeContext(opts: TestContextOptions = {}): { ctx: RunContext; r
   const requests: ToolRequest[] = [];
   const ctx: RunContext = {
     runId: 'run_1',
-    threadId: 'thread_1',
+    threadId: opts.threadId ?? 'thread_1',
     bot: { ...testBot, ...opts.bot },
     history: opts.history ?? [],
     input: opts.input ?? 'hello',

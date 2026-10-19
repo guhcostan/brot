@@ -1,4 +1,4 @@
-import type { Approval, Bot, CanonicalEvent, Message, Run, Thread } from '@brot/protocol';
+import type { Approval, Bot, CanonicalEvent, Message, Run, Task, Thread } from '@brot/protocol';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BotEvent } from './client';
 import { createHttpClient, type EventStream, type FetchLike } from './httpClient';
@@ -31,6 +31,7 @@ interface Call {
   method: string;
   url: string;
   path: string;
+  search: string;
   headers: Headers;
   body: unknown;
 }
@@ -39,18 +40,24 @@ function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 }
 
-/** Records every request and answers with whatever `respond` returns for it. */
-function fakeFetch(respond: (call: Call) => Response) {
+/**
+ * Records every request and answers with whatever `respond` returns for it. A thread's event log
+ * answers 404, like a server without that route, unless `eventLog` is set.
+ */
+function fakeFetch(respond: (call: Call) => Response, { eventLog = false }: { eventLog?: boolean } = {}) {
   const calls: Call[] = [];
   const fetch: FetchLike = async (input, init = {}) => {
+    const url = new URL(input, 'http://brot.test');
     const call: Call = {
       method: init.method ?? 'GET',
       url: input,
-      path: new URL(input, 'http://brot.test').pathname,
+      path: url.pathname,
+      search: url.search,
       headers: new Headers(init.headers),
       body: typeof init.body === 'string' ? JSON.parse(init.body) : undefined,
     };
     calls.push(call);
+    if (!eventLog && /^\/api\/threads\/[^/]+\/events$/.test(call.path)) return json({ error: 'not found' }, 404);
     return respond(call);
   };
   return { fetch, calls };
@@ -148,7 +155,46 @@ describe('history', () => {
     const client = createHttpClient({ fetch, EventSource: FakeEventSource });
 
     await expect(client.history('bot_1')).resolves.toEqual([]);
-    expect(calls.map((call) => `${call.method} ${call.path}`)).toEqual(['GET /api/bots/bot_1/threads']);
+    expect(calls.map((call) => `${call.method} ${call.path}${call.search}`)).toEqual(['GET /api/bots/bot_1/threads?kind=dm']);
+  });
+
+  it('reads the event log when the server has one', async () => {
+    const event = messageCompleted('evt_log', 'From the log');
+    const { fetch, calls } = fakeFetch(
+      (call) => {
+        if (call.path === '/api/bots/bot_1/threads') return json([thread('thr_1')]);
+        if (call.path === '/api/threads/thr_1/events') return json([event]);
+        return json({ error: 'unexpected' }, 500);
+      },
+      { eventLog: true },
+    );
+    const client = createHttpClient({ fetch, EventSource: FakeEventSource });
+
+    await expect(client.history('bot_1')).resolves.toEqual([event]);
+    expect(calls.map((call) => call.path)).toEqual(['/api/bots/bot_1/threads', '/api/threads/thr_1/events']);
+  });
+
+  it('surfaces an event log failure other than 404 instead of replaying', async () => {
+    const { fetch } = fakeFetch(
+      (call) => (call.path === '/api/bots/bot_1/threads' ? json([thread('thr_1')]) : json({ error: 'boom' }, 500)),
+      { eventLog: true },
+    );
+    const client = createHttpClient({ fetch, EventSource: FakeEventSource });
+
+    await expect(client.history('bot_1')).rejects.toThrow('500 boom');
+  });
+
+  it('skips a room the server lists among a bot\'s threads', async () => {
+    const room: Thread = { ...thread('room_1'), kind: 'room', leadBotId: 'bot_1', responder: 'lead' };
+    const { fetch, calls } = fakeFetch((call) => {
+      if (call.path === '/api/bots/bot_1/threads') return json([room, { ...thread('thr_1'), kind: 'dm' }]);
+      return json({ runId: 'run_1' }, 202);
+    });
+    const client = createHttpClient({ fetch, EventSource: FakeEventSource });
+
+    await client.postMessage('bot_1', { content: 'Hi' });
+
+    expect(calls.at(-1)?.path).toBe('/api/threads/thr_1/messages');
   });
 
   it('rebuilds messages, runs, approvals and costs in time order', async () => {
@@ -468,5 +514,120 @@ describe('live events', () => {
     client.onEvent(() => undefined);
     expect(FakeEventSource.created).toHaveLength(2);
     expect(FakeEventSource.created[1]?.closed).toBe(false);
+  });
+});
+
+describe('team routes', () => {
+  const room: Thread = { ...thread('room_1'), title: 'Acme', kind: 'room', leadBotId: 'bot_1', responder: 'lead' };
+  const task: Task = {
+    id: 'task_1',
+    title: 'Fix the export',
+    status: 'open',
+    assigneeBotId: 'bot_2',
+    createdByUser: true,
+    threadId: 'room_1',
+    chainId: 'task_1',
+    depth: 0,
+    createdAt: at,
+    updatedAt: at,
+  };
+
+  it('lists rooms with their members', async () => {
+    const { fetch } = fakeFetch((call) => {
+      if (call.path === '/api/rooms') return json([room]);
+      if (call.path === '/api/rooms/room_1/members') {
+        return json([
+          { threadId: 'room_1', botId: 'bot_1', joinedAt: at },
+          { threadId: 'room_1', botId: 'bot_2', joinedAt: at },
+        ]);
+      }
+      return json({ error: 'unexpected' }, 500);
+    });
+    const client = createHttpClient({ fetch, EventSource: FakeEventSource });
+
+    await expect(client.listRooms()).resolves.toEqual([{ thread: room, memberIds: ['bot_1', 'bot_2'] }]);
+  });
+
+  it('creates a room with a validated body', async () => {
+    const { fetch, calls } = fakeFetch(() => json(room, 201));
+    const client = createHttpClient({ fetch, EventSource: FakeEventSource });
+
+    const created = await client.createRoom({ title: 'Acme', botIds: ['bot_1', 'bot_2'], leadBotId: 'bot_1', responder: 'mention' });
+
+    expect(calls[0]).toMatchObject({ method: 'POST', path: '/api/rooms' });
+    expect(calls[0]?.body).toEqual({ title: 'Acme', botIds: ['bot_1', 'bot_2'], leadBotId: 'bot_1', responder: 'mention' });
+    expect(created.memberIds).toEqual(['bot_1', 'bot_2']);
+    await expect(client.createRoom({ title: 'Solo', botIds: ['bot_1'], leadBotId: 'bot_1', responder: 'lead' })).rejects.toThrow();
+    expect(calls).toHaveLength(1);
+  });
+
+  it('posts room messages with their mentions', async () => {
+    const { fetch, calls } = fakeFetch(() => json({ runId: 'run_1' }, 202));
+    const client = createHttpClient({ fetch, EventSource: FakeEventSource });
+
+    await client.postRoomMessage('room_1', { content: '@Onça go', mentions: ['bot_2'] });
+    await client.postRoomMessage('room_1', { content: 'anyone', mentions: [] });
+
+    expect(calls.map((call) => call.body)).toEqual([{ content: '@Onça go', mentions: ['bot_2'] }, { content: 'anyone' }]);
+    expect(calls[0]?.path).toBe('/api/threads/room_1/messages');
+  });
+
+  it('filters tasks through the query string', async () => {
+    const { fetch, calls } = fakeFetch(() => json([task]));
+    const client = createHttpClient({ fetch, EventSource: FakeEventSource });
+
+    await expect(client.listTasks({ assigneeBotId: 'bot_2', status: 'open' })).resolves.toEqual([task]);
+    await client.listTasks();
+
+    expect(calls.map((call) => `${call.path}${call.search}`)).toEqual(['/api/tasks?assigneeBotId=bot_2&status=open', '/api/tasks']);
+  });
+
+  it('creates a task in a room, or in the assignee\'s DM', async () => {
+    const { fetch, calls } = fakeFetch((call) => {
+      if (call.path === '/api/bots/bot_2/threads') return json([thread('thr_2', 'bot_2')]);
+      return json(task, 201);
+    });
+    const client = createHttpClient({ fetch, EventSource: FakeEventSource });
+
+    await client.createTask({ title: 'Fix the export', assigneeBotId: 'bot_2', roomId: 'room_1' });
+    await client.createTask({ title: 'Fix the export', assigneeBotId: 'bot_2' });
+
+    const posts = calls.filter((call) => call.method === 'POST');
+    expect(posts.map((call) => call.body)).toEqual([
+      { title: 'Fix the export', assigneeBotId: 'bot_2', threadId: 'room_1' },
+      { title: 'Fix the export', assigneeBotId: 'bot_2', threadId: 'thr_2' },
+    ]);
+  });
+
+  it('cancels a task with PATCH', async () => {
+    const { fetch, calls } = fakeFetch(() => json({ ...task, status: 'cancelled' }));
+    const client = createHttpClient({ fetch, EventSource: FakeEventSource });
+
+    await expect(client.cancelTask('task_1')).resolves.toMatchObject({ status: 'cancelled' });
+    expect(calls[0]).toMatchObject({ method: 'PATCH', path: '/api/tasks/task_1', body: { status: 'cancelled' } });
+  });
+
+  it('routes room events to the room and keeps task events from unknown threads', async () => {
+    const { fetch } = fakeFetch((call) => {
+      if (call.path === '/api/rooms') return json([room]);
+      if (call.path === '/api/rooms/room_1/members') return json([]);
+      return json([]);
+    });
+    const client = createHttpClient({ fetch, EventSource: FakeEventSource });
+    const received: BotEvent[] = [];
+    client.onEvent((item) => received.push(item));
+    await client.listRooms();
+
+    const roomEvent: CanonicalEvent = { id: 'h1', at, threadId: 'room_1', type: 'handoff', fromBotId: 'bot_1', toBotId: 'bot_2' };
+    const taskEvent: CanonicalEvent = { id: 't1', at, threadId: 'thr_far', type: 'task.updated', task: { ...task, threadId: 'thr_far' } };
+    const stray: CanonicalEvent = { ...messageCompleted('m9', 'Stray'), threadId: 'thr_far' };
+    const source = FakeEventSource.created[0];
+    source?.send('handoff', JSON.stringify(roomEvent));
+    source?.send('task.updated', JSON.stringify(taskEvent));
+    source?.send('message.completed', JSON.stringify(stray));
+    await flush();
+    await flush();
+
+    expect(received).toEqual([{ roomId: 'room_1', event: roomEvent }, { event: taskEvent }]);
   });
 });

@@ -38,8 +38,15 @@ export interface BotAvatarProps {
   label?: string;
   /** False renders a still face: no blinks, loops, or pointer following. */
   animated?: boolean;
+  /**
+   * Holds the eyes toward one side, e.g. toward the bot this one is talking to. Overrides the mood's
+   * glance and scan loops. With reduced motion the eyes move without a transition.
+   */
+  gaze?: AvatarGaze;
   className?: string;
 }
+
+export type AvatarGaze = 'left' | 'right';
 
 function Part({ part }: { part: ShapePart }): ReactElement {
   if (part.kind === 'circle') return <circle cx={part.cx} cy={part.cy} r={part.r} />;
@@ -74,6 +81,7 @@ export function BotAvatar({
   size = 'md',
   label,
   animated = true,
+  gaze,
   className,
 }: BotAvatarProps): ReactElement {
   const rootRef = useRef<HTMLSpanElement>(null);
@@ -152,6 +160,7 @@ export function BotAvatar({
       style={style}
       data-shape={shape}
       data-mood={shown}
+      data-gaze={gaze}
       data-animated={live ? 'true' : undefined}
       role={label ? 'img' : undefined}
       aria-label={label}

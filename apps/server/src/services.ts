@@ -5,9 +5,14 @@ import { createEventBus, type EventBus } from './bus';
 import type { ServerConfig } from './config';
 import type { ComputerProvider } from './computers/types';
 import { createHarness, type ComputerProviders, type Harness } from './harness';
-import type { BrotMcpService } from './mcp/types';
+import type { BrotMcpService, BrotTool } from './mcp/types';
 import { createPairing, type Pairing } from './pairing';
+import { createChainLedger, type ChainLedger } from './rooms/chains';
+import { createRoomService, type RoomService } from './rooms/service';
+import { createTaskService, type TaskService } from './rooms/tasks';
+import { createTeamRunner, type TeamRunnerService } from './rooms/team-runner';
 import { createScheduler, type Scheduler } from './scheduler';
+import type { TeamDeps } from './team/context';
 import { createVault, type Vault } from './vault';
 
 export type { ComputerProviders } from './harness';
@@ -18,12 +23,16 @@ export interface McpCore {
   bus: EventBus;
   broker: Broker;
   vault: Vault;
+  /** Team tools from `ServiceExtras.team`, registered next to the built-in ones. */
+  tools: BrotTool[];
 }
 
 /** Optional contained-run services. Absent ones leave `computer: 'sandbox'` runs failing and `none` runs without MCP. */
 export interface ServiceExtras {
   computers?: ComputerProviders;
   mcp?: (core: McpCore) => BrotMcpService;
+  /** Team tools (`ask_bot`, `delegate_task`, `update_my_task`, `handoff`, `list_team`), registered on the Brot MCP server. */
+  team?: (deps: TeamDeps) => BrotTool[];
 }
 
 export interface Services {
@@ -39,6 +48,10 @@ export interface Services {
   pairing: Pairing;
   computers: ComputerProviders;
   mcp: BrotMcpService | undefined;
+  rooms: RoomService;
+  tasks: TaskService;
+  teamRunner: TeamRunnerService;
+  chains: ChainLedger;
   /** Stops the engines, the computer providers, the scheduler and the database. Safe to call twice. */
   close(): Promise<void>;
 }
@@ -56,7 +69,26 @@ export async function createServices(
   const broker = createBroker({ repos, bus });
   const vault = createVault({ dir: config.home });
   const computers = extras.computers ?? {};
-  const mcp = extras.mcp?.({ repos, bus, broker, vault });
+
+  // The harness needs the MCP server, the MCP server needs the team tools, and the team tools need the
+  // harness through the runner. The late reference breaks that cycle: nothing calls it before boot ends.
+  const late: { harness?: Harness } = {};
+  const currentHarness = (): Harness => {
+    if (late.harness === undefined) throw new Error('the harness is not ready');
+    return late.harness;
+  };
+  const chains = createChainLedger();
+  const rooms = createRoomService({ repos, bus, harness: currentHarness });
+  const tasks = createTaskService({ repos, bus, harness: currentHarness });
+  const teamRunner = createTeamRunner({ harness: currentHarness, chains });
+  const teamTools =
+    extras.team?.({
+      repos,
+      bus,
+      runner: teamRunner,
+      onHandoff: (threadId, toBotId) => rooms.setBaton(threadId, toBotId),
+    }) ?? [];
+  const mcp = extras.mcp?.({ repos, bus, broker, vault, tools: teamTools });
   const harness = createHarness({
     repos,
     bus,
@@ -67,7 +99,9 @@ export async function createServices(
     mode: config.mode,
     computerImage: config.computerImage,
     loopbackUrl: () => `http://127.0.0.1:${config.port}`,
+    chains,
   });
+  late.harness = harness;
   const scheduler = createScheduler({ repos, harness });
   const pairing = createPairing({ repos });
 
@@ -99,6 +133,10 @@ export async function createServices(
     pairing,
     computers,
     mcp,
+    rooms,
+    tasks,
+    teamRunner,
+    chains,
     close() {
       closing ??= shutdown();
       return closing;

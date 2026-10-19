@@ -300,6 +300,7 @@ export const tasks = sqliteTable(
       .notNull()
       .references(() => threads.id, { onDelete: 'cascade' }),
     workThreadId: text('work_thread_id').references(() => threads.id, { onDelete: 'set null' }),
+    workRunId: text('work_run_id').references(() => runs.id, { onDelete: 'set null' }),
     result: text('result'),
     chainId: text('chain_id').notNull(),
     depth: integer('depth').notNull(),

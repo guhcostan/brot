@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Readable, Writable } from 'node:stream';
-import type { ComputerHandle, ComputerProcess, EngineEvent, McpServerSpec } from '@brot/protocol';
+import type { ComputerHandle, ComputerProcess, EngineEvent, McpServerSpec, RunContext } from '@brot/protocol';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   createDshEngine,
@@ -16,7 +16,7 @@ import {
   type DshEngine,
   type DshEngineOptions,
 } from './dsh';
-import { collect, makeContext } from './test-utils';
+import { collect, makeContext, type TestContextOptions } from './test-utils';
 
 const FAKE_AGENT = fileURLToPath(new URL('./test-fixtures/fake-acp-agent.mjs', import.meta.url));
 const FAKE_COMMAND: DshCommand = { file: process.execPath, args: [FAKE_AGENT] };
@@ -315,6 +315,154 @@ describe('dsh engine sessions', () => {
     expect(mcpOf(second).session).toBe(mcpOf(first).session);
     expect(mcpOf(second).pid).toBe(mcpOf(first).pid);
     expect(sessionOf(second)).toBeUndefined();
+  });
+});
+
+/** A run by one bot in a thread (default `thread_1`), the way a room hands runs to the engine. */
+function botRun(botId: string, input: string, opts: Omit<TestContextOptions, 'input' | 'bot'> = {}): RunContext {
+  return makeContext({ ...opts, input, bot: { id: botId } }).ctx;
+}
+
+function alive(pid: string): boolean {
+  try {
+    process.kill(Number(pid), 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const HTTP_ACP = {
+  type: 'http',
+  name: 'brot',
+  url: 'http://127.0.0.1:8799/mcp',
+  headers: [{ name: 'authorization', value: 'Bearer run-token' }],
+};
+const STDIO_ACP = { name: 'docs', command: 'node', args: ['docs.js'], env: [{ name: 'DOCS_HOME', value: '/data' }] };
+
+describe('dsh engine bots in one thread', () => {
+  it('gives each bot its own server process and DSH session', async () => {
+    const engine = engineFor();
+    const first = await collect(engine.run(botRun('bot_a', 'echo a1')));
+    const second = await collect(engine.run(botRun('bot_b', 'echo b1')));
+    const firstAgain = echoOf(await collect(engine.run(botRun('bot_a', 'echo a2'))));
+
+    expect(sessionOf(second)).toBe(echoOf(second).session);
+    expect(echoOf(second).session).not.toBe(echoOf(first).session);
+    expect(echoOf(second).pid).not.toBe(echoOf(first).pid);
+    expect(echoOf(second).prompt).toBe('full');
+    expect(firstAgain).toMatchObject({ session: echoOf(first).session, pid: echoOf(first).pid, prompt: 'input' });
+  });
+
+  it('resumes each bot by its own engine session id, in its process and after close', async () => {
+    const engine = engineFor();
+    const first = echoOf(await collect(engine.run(botRun('bot_a', 'echo a1'))));
+    const other = echoOf(await collect(engine.run(botRun('bot_b', 'echo b1'))));
+    expect(other.session).not.toBe(first.session);
+
+    const resumed = echoOf(await collect(engine.run(botRun('bot_a', 'echo a2', { engineSessionId: first.session }))));
+    expect(resumed).toMatchObject({ session: first.session, pid: first.pid, prompt: 'input' });
+
+    await engine.close();
+    const restarted = await collect(engine.run(botRun('bot_b', 'echo b2', { engineSessionId: other.session })));
+    expect(sessionOf(restarted)).toBeUndefined();
+    expect(echoOf(restarted)).toMatchObject({ session: other.session, prompt: 'input' });
+    expect(echoOf(restarted).pid).not.toBe(other.pid);
+
+    const unnamed = echoOf(await collect(engine.run(botRun('bot_a', 'echo a3'))));
+    expect(unnamed.session).toBe(first.session);
+  });
+
+  it('keeps each bot on its own placement, so a bot with a computer never restarts another bot', async () => {
+    const computer = fakeComputer();
+    const engine = engineFor();
+    const local = echoOf(await collect(engine.run(botRun('bot_a', 'echo local'))));
+    const contained = echoOf(await collect(engine.run(botRun('bot_b', 'echo inside', { computer: computer.handle }))));
+    const localAgain = echoOf(await collect(engine.run(botRun('bot_a', 'echo local again'))));
+    const containedAgain = echoOf(
+      await collect(engine.run(botRun('bot_b', 'echo inside again', { computer: computer.handle }))),
+    );
+
+    expect(contained.pid).not.toBe(local.pid);
+    expect(localAgain).toMatchObject({ pid: local.pid, session: local.session });
+    expect(containedAgain).toMatchObject({ pid: contained.pid, session: contained.session });
+    expect(computer.execs).toHaveLength(1);
+    expect(computer.kills).toEqual([]);
+  });
+
+  it('re-attaches MCP servers only to the bot whose spec changed', async () => {
+    const engine = engineFor();
+    const a = await collect(engine.run(botRun('bot_a', 'mcp a1', { mcpServers: [HTTP_SPEC] })));
+    const b = await collect(engine.run(botRun('bot_b', 'mcp b1', { mcpServers: [HTTP_SPEC] })));
+    const bAgain = await collect(
+      engine.run(botRun('bot_b', 'mcp b2', { engineSessionId: sessionOf(b), mcpServers: [HTTP_SPEC] })),
+    );
+    const aChanged = await collect(
+      engine.run(botRun('bot_a', 'mcp a2', { engineSessionId: sessionOf(a), mcpServers: [STDIO_SPEC] })),
+    );
+
+    expect(sessionOf(bAgain)).toBeUndefined();
+    expect(mcpOf(bAgain)).toEqual({ servers: [HTTP_ACP], pid: mcpOf(b).pid, session: mcpOf(b).session });
+    expect(mcpOf(aChanged)).toEqual({ servers: [STDIO_ACP], pid: mcpOf(a).pid, session: mcpOf(a).session });
+    expect(mcpOf(b).pid).not.toBe(mcpOf(a).pid);
+  });
+
+  it('cancels one bot without touching another bot running in the same thread', async () => {
+    const engine = engineFor();
+    const controller = new AbortController();
+    const hanging = engine.run(botRun('bot_a', 'hang now', { signal: controller.signal }))[Symbol.asyncIterator]();
+    expect(await hanging.next()).toEqual({
+      done: false,
+      value: { type: 'engine.session', sessionId: expect.any(String) },
+    });
+    expect(await hanging.next()).toEqual({ done: false, value: { type: 'text.delta', delta: 'partial ' } });
+
+    const other = echoOf(await collect(engine.run(botRun('bot_b', 'echo b1'))));
+    controller.abort();
+    expect((await hanging.next()).done).toBe(true);
+
+    const otherAfter = echoOf(await collect(engine.run(botRun('bot_b', 'echo b2'))));
+    expect(otherAfter).toMatchObject({ pid: other.pid, session: other.session, prompt: 'input' });
+    expect(echoOf(await collect(engine.run(botRun('bot_a', 'echo a2')))).prompt).toBe('input');
+  });
+
+  it('kills only the stuck process of a bot that ignores cancel', async () => {
+    const engine = engineFor({ cancelGraceMs: 100 });
+    const other = echoOf(await collect(engine.run(botRun('bot_b', 'echo b1'))));
+    const stuckBefore = echoOf(await collect(engine.run(botRun('bot_a', 'echo a1'))));
+
+    const controller = new AbortController();
+    const events: EngineEvent[] = [];
+    for await (const event of engine.run(botRun('bot_a', 'ignore-cancel now', { signal: controller.signal }))) {
+      events.push(event);
+      if (event.type === 'text.delta') controller.abort();
+    }
+    expect(turn(events)).toEqual([{ type: 'text.delta', delta: 'stuck ' }]);
+    expect(alive(stuckBefore.pid)).toBe(false);
+    expect(alive(other.pid)).toBe(true);
+
+    const otherAfter = echoOf(await collect(engine.run(botRun('bot_b', 'echo b2'))));
+    expect(otherAfter.pid).toBe(other.pid);
+    const stuckAfter = echoOf(await collect(engine.run(botRun('bot_a', 'echo a2'))));
+    expect(stuckAfter).toMatchObject({ session: stuckBefore.session, prompt: 'input' });
+    expect(stuckAfter.pid).not.toBe(stuckBefore.pid);
+  });
+
+  it('close stops the process of every bot in every thread, computer ones included', async () => {
+    const computer = fakeComputer();
+    const engine = engineFor();
+    const a = echoOf(await collect(engine.run(botRun('bot_a', 'echo a1'))));
+    const b = echoOf(await collect(engine.run(botRun('bot_b', 'echo b1'))));
+    const otherThread = echoOf(await collect(engine.run(botRun('bot_a', 'echo a1', { threadId: 'thread_2' }))));
+    await collect(engine.run(botRun('bot_c', 'echo c1', { computer: computer.handle })));
+
+    expect(new Set([a.pid, b.pid, otherThread.pid]).size).toBe(3);
+    expect([a.pid, b.pid, otherThread.pid].every((pid) => alive(pid))).toBe(true);
+
+    await engine.close();
+
+    expect([a.pid, b.pid, otherThread.pid].some(alive)).toBe(false);
+    expect(computer.kills).toEqual(['SIGTERM']);
   });
 });
 

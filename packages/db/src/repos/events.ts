@@ -1,4 +1,4 @@
-import { and, asc, eq, gt, sql } from 'drizzle-orm';
+import { and, asc, eq, gt, or, sql } from 'drizzle-orm';
 import { parseEvent, type CanonicalEvent } from '@brot/protocol';
 import type { Db } from '../client';
 import { events } from '../schema';
@@ -44,6 +44,36 @@ export function createEventRepo(db: Db) {
           and(
             options.threadId ? eq(events.threadId, options.threadId) : undefined,
             options.after ? gt(events.at, options.after) : undefined,
+          ),
+        )
+        .orderBy(asc(events.at), asc(sql`rowid`))
+        .limit(options.limit ?? DEFAULT_LIMIT);
+      return rows.map(toEvent);
+    },
+
+    /**
+     * Events of one thread after `afterEventId`, in log order, filtered in SQL. Returns undefined when that
+     * event is not in the thread, so a caller can tell a stale cursor from an empty tail.
+     */
+    async listAfter(
+      threadId: string,
+      afterEventId: string,
+      options: { limit?: number } = {},
+    ): Promise<CanonicalEvent[] | undefined> {
+      const [cursor] = await db
+        .select({ at: events.at, rowid: sql<number>`rowid` })
+        .from(events)
+        .where(and(eq(events.id, afterEventId), eq(events.threadId, threadId)))
+        .limit(1);
+      if (!cursor) return undefined;
+
+      const rows = await db
+        .select()
+        .from(events)
+        .where(
+          and(
+            eq(events.threadId, threadId),
+            or(gt(events.at, cursor.at), and(eq(events.at, cursor.at), gt(sql`rowid`, cursor.rowid))),
           ),
         )
         .orderBy(asc(events.at), asc(sql`rowid`))

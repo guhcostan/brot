@@ -222,6 +222,59 @@
     background: var(--attention);
   }
 
+  /* AvatarStack: overlapping room avatars; the cutout is a background-colored drop shadow, not a ring */
+  .brot-stack {
+    --stack-cutout: var(--surface);
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    line-height: 0;
+  }
+  .brot-stack__item {
+    display: inline-flex;
+    position: relative;
+  }
+  .brot-stack__item + .brot-stack__item {
+    margin-left: calc(var(--stack-size) * -0.34);
+    filter: drop-shadow(-1.5px 0 0 var(--stack-cutout));
+  }
+  .brot-stack__more {
+    margin-left: var(--space-1);
+    color: var(--ink-2);
+    font-size: var(--fs-xs);
+    font-weight: 500;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* TaskStatusLabel: icon + text; only "failed" (an error) takes the attention color */
+  .brot-task-status {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--ink-2);
+    font-size: var(--fs-xs);
+    font-weight: 500;
+    white-space: nowrap;
+  }
+  .brot-task-status > svg {
+    flex: none;
+  }
+  .brot-task-status__fill {
+    fill: currentColor;
+    stroke: none;
+  }
+  .brot-task-status[data-status="in_progress"],
+  .brot-task-status[data-status="done"] {
+    color: var(--ink);
+  }
+  .brot-task-status[data-status="cancelled"] {
+    color: var(--ink-3);
+  }
+  .brot-task-status[data-status="failed"] {
+    color: var(--attention-text);
+  }
+
   /* BotAvatar */
   .brot-bot {
     display: inline-flex;
@@ -289,6 +342,19 @@
   }
   .brot-bot[data-animated][data-mood="success"] .brot-bot__body {
     animation: brot-bot-hop 320ms var(--ease) 1;
+  }
+  /* Gaze: eyes held toward another bot. Listed after the mood loops so it wins at equal specificity. */
+  .brot-bot[data-animated][data-gaze] .brot-bot__look,
+  .brot-bot[data-gaze] .brot-bot__look {
+    animation: none;
+  }
+  .brot-bot[data-animated][data-gaze="right"] .brot-bot__look,
+  .brot-bot[data-gaze="right"] .brot-bot__look {
+    transform: translate(2.4px, 0.3px);
+  }
+  .brot-bot[data-animated][data-gaze="left"] .brot-bot__look,
+  .brot-bot[data-gaze="left"] .brot-bot__look {
+    transform: translate(-2.4px, 0.3px);
   }
   .brot-bot[data-paused] *,
   .brot-bot[data-paused] {

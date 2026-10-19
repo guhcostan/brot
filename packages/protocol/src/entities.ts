@@ -110,6 +110,8 @@ export const Task = z
     threadId: z.string(),
     /** The assignee's DM thread where the work happens. Set when the assignee starts. */
     workThreadId: z.string().optional(),
+    /** The run doing the assignee's work, set when the work starts. Cancelling the task stops this run. */
+    workRunId: z.string().optional(),
     result: z.string().optional(),
     chainId: z.string(),
     depth: z.number().int().min(0).max(TEAM_MAX_DEPTH),

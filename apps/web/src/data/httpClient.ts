@@ -2,14 +2,19 @@ import {
   Approval,
   Bot,
   CanonicalEvent,
+  CreateRoom,
+  CreateTask,
   Message,
   PostMessage,
   ResolveApproval,
+  RoomMember,
   Run,
+  Task,
   Thread,
+  UpdateTask,
   type CanonicalEventType,
 } from '@brot/protocol';
-import type { BotEvent, BrotClient } from './client';
+import type { BotEvent, BrotClient, Room, TaskFilter } from './client';
 
 /** The slice of EventSource this client uses. The browser's EventSource satisfies it; tests pass a fake. */
 export interface EventStream {
@@ -56,9 +61,9 @@ const EVENT_NAMES: Record<CanonicalEventType, true> = {
 };
 
 /**
- * Talks to a running Brot server over its /api routes. The web app is bot-centric, so each bot maps
- * to its primary thread: the first thread the server lists, cached for the session. Reads never
- * create threads; the first postMessage creates one when a bot has none.
+ * Talks to a running Brot server over its /api routes (docs/TEAM-API.md). Each bot maps to its DM:
+ * the first `kind=dm` thread the server lists, cached for the session. Reads never create threads;
+ * the first postMessage creates one when a bot has none. Rooms are their own threads.
  */
 export function createHttpClient({
   baseUrl = '',
@@ -70,7 +75,9 @@ export function createHttpClient({
   const threadOfBot = new Map<string, string>();
   const botOfThread = new Map<string, string>();
   const creatingThread = new Map<string, Promise<string>>();
+  const roomIds = new Set<string>();
   const listeners = new Set<(event: BotEvent) => void>();
+  let roomsLoaded: Promise<void> | undefined;
   let stream: EventStream | undefined;
   let delivery: Promise<void> = Promise.resolve();
 
@@ -87,7 +94,7 @@ export function createHttpClient({
     return schema.parse(await response.json());
   }
 
-  function write(method: 'POST', path: string, body: unknown): Promise<Response> {
+  function write(method: 'POST' | 'PATCH', path: string, body: unknown): Promise<Response> {
     return request(path, {
       method,
       headers: { 'Content-Type': 'application/json' },
@@ -104,7 +111,8 @@ export function createHttpClient({
   async function findThread(botId: string): Promise<string | undefined> {
     const cached = threadOfBot.get(botId);
     if (cached !== undefined) return cached;
-    const [first] = await read(`/api/bots/${encodeURIComponent(botId)}/threads`, Thread.array());
+    const threads = await read(`/api/bots/${encodeURIComponent(botId)}/threads?kind=dm`, Thread.array());
+    const first = threads.find((thread) => (thread.kind ?? 'dm') === 'dm');
     return first === undefined ? undefined : remember(botId, first.id);
   }
 
@@ -127,19 +135,62 @@ export function createHttpClient({
     return pending;
   }
 
+  async function fetchRooms(): Promise<Room[]> {
+    const threads = await read('/api/rooms', Thread.array());
+    const rooms = await Promise.all(
+      threads.map(async (thread) => {
+        roomIds.add(thread.id);
+        const members = await read(`/api/rooms/${encodeURIComponent(thread.id)}/members`, RoomMember.array());
+        return { thread, memberIds: members.map((member) => member.botId) };
+      }),
+    );
+    return rooms;
+  }
+
   /**
-   * Maps a live event's thread to its bot. A bot whose thread the client has not seen yet (created on
-   * another device, or by a routine) gets one lookup before the event is dropped.
+   * Maps a live event's thread to its conversation. A thread the client has not seen yet (created on
+   * another device, or by a routine) gets one lookup of the bots' DMs and one of the rooms.
    */
-  async function botOf(threadId: string): Promise<string | undefined> {
+  async function targetOf(threadId: string): Promise<{ botId: string } | { roomId: string } | undefined> {
     const known = botOfThread.get(threadId);
-    if (known !== undefined) return known;
+    if (known !== undefined) return { botId: known };
+    if (roomIds.has(threadId)) return { roomId: threadId };
     await Promise.all(
       [...knownBots]
         .filter((botId) => !threadOfBot.has(botId))
         .map((botId) => findThread(botId).catch(() => undefined)),
     );
-    return botOfThread.get(threadId);
+    const found = botOfThread.get(threadId);
+    if (found !== undefined) return { botId: found };
+    if (roomsLoaded !== undefined) {
+      await fetchRooms().catch(() => undefined);
+      if (roomIds.has(threadId)) return { roomId: threadId };
+    }
+    return undefined;
+  }
+
+  /**
+   * A thread's events: the server's event log when it has one, else a replay of its records. Only a
+   * 404 falls back, so a real failure still surfaces.
+   */
+  async function threadEvents(threadId: string): Promise<CanonicalEvent[]> {
+    const path = `/api/threads/${encodeURIComponent(threadId)}`;
+    const response = await fetch(`${root}${path}/events`, { headers: { Accept: 'application/json' } });
+    if (response.ok) return CanonicalEvent.array().parse(await response.json());
+    if (response.status !== 404) {
+      throw new Error(`GET ${path}/events failed: ${await describeFailure(response)}`);
+    }
+    const [messages, runs, approvals] = await Promise.all([
+      read(`${path}/messages`, Message.array()),
+      read(`${path}/runs`, Run.array()),
+      read('/api/approvals', Approval.array()),
+    ]);
+    return replay({
+      threadId,
+      messages,
+      runs,
+      approvals: approvals.filter((approval) => approval.threadId === threadId),
+    });
   }
 
   /** Events are delivered in arrival order, even when a thread lookup is needed first. */
@@ -159,9 +210,11 @@ export function createHttpClient({
     const event = result.data;
     delivery = delivery
       .then(async () => {
-        const botId = await botOf(event.threadId);
-        if (botId === undefined) return;
-        for (const listener of [...listeners]) listener({ botId, event });
+        const target = await targetOf(event.threadId);
+        const isTask = event.type === 'task.created' || event.type === 'task.updated';
+        if (target === undefined && !isTask) return;
+        const item: BotEvent = { ...target, event };
+        for (const listener of [...listeners]) listener(item);
       })
       .catch((error: unknown) => {
         console.error('Event delivery failed', error);
@@ -186,18 +239,7 @@ export function createHttpClient({
     async history(botId) {
       const threadId = await findThread(botId);
       if (threadId === undefined) return [];
-      const path = `/api/threads/${encodeURIComponent(threadId)}`;
-      const [messages, runs, approvals] = await Promise.all([
-        read(`${path}/messages`, Message.array()),
-        read(`${path}/runs`, Run.array()),
-        read('/api/approvals', Approval.array()),
-      ]);
-      return replay({
-        threadId,
-        messages,
-        runs,
-        approvals: approvals.filter((approval) => approval.threadId === threadId),
-      });
+      return threadEvents(threadId);
     },
 
     onEvent(listener) {
@@ -222,6 +264,58 @@ export function createHttpClient({
       const body = ResolveApproval.parse(input);
       const response = await write('POST', `/api/approvals/${encodeURIComponent(approvalId)}`, body);
       Approval.parse(await response.json());
+    },
+
+    listRooms() {
+      const pending = fetchRooms();
+      roomsLoaded = pending.then(() => undefined, () => undefined);
+      return pending;
+    },
+
+    async createRoom(input) {
+      const body = CreateRoom.parse(input);
+      const response = await write('POST', '/api/rooms', body);
+      const thread = Thread.parse(await response.json());
+      roomIds.add(thread.id);
+      return { thread, memberIds: [...body.botIds] };
+    },
+
+    roomHistory(roomId) {
+      roomIds.add(roomId);
+      return threadEvents(roomId);
+    },
+
+    async postRoomMessage(roomId, input) {
+      const body = PostMessage.parse(input);
+      await write('POST', `/api/threads/${encodeURIComponent(roomId)}/messages`, {
+        content: body.content,
+        ...(body.mentions?.length ? { mentions: body.mentions } : {}),
+      });
+    },
+
+    listTasks(filter: TaskFilter = {}) {
+      const query = new URLSearchParams();
+      for (const [name, value] of Object.entries(filter)) if (value !== undefined) query.set(name, value);
+      const suffix = query.size > 0 ? `?${query.toString()}` : '';
+      return read(`/api/tasks${suffix}`, Task.array());
+    },
+
+    async createTask(input) {
+      const threadId = input.roomId ?? (await ensureThread(input.assigneeBotId));
+      const body = CreateTask.parse({
+        title: input.title,
+        ...(input.description ? { description: input.description } : {}),
+        assigneeBotId: input.assigneeBotId,
+        threadId,
+      });
+      const response = await write('POST', '/api/tasks', body);
+      return Task.parse(await response.json());
+    },
+
+    async cancelTask(taskId) {
+      const body = UpdateTask.parse({ status: 'cancelled' });
+      const response = await write('PATCH', `/api/tasks/${encodeURIComponent(taskId)}`, body);
+      return Task.parse(await response.json());
     },
   };
 }

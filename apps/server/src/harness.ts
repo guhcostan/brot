@@ -18,6 +18,9 @@ import type { EventBus } from './bus';
 import type { ComputerProvider } from './computers/types';
 import type { ServerMode } from './config';
 import type { BrotMcp } from './mcp/types';
+import type { ChainLedger } from './rooms/chains';
+import { buildTurn, type Turn } from './rooms/context';
+import type { BotRunOutcome, BotRunRequest } from './team/types';
 
 /** Providers by the computer kind they serve. A `none` bot has no computer, so it has no entry. */
 export type ComputerProviders = Partial<Record<Exclude<ComputerKind, 'none'>, ComputerProvider>>;
@@ -33,15 +36,33 @@ export interface HarnessDeps {
   computerImage: string;
   /** This server's loopback URL: the MCP endpoint for runs that have no computer. */
   loopbackUrl(): string;
+  chains: ChainLedger;
+}
+
+/**
+ * A run for one bot in one thread. `inputMessage` is the stored message the run answers. When it is absent,
+ * the harness stores `input` as a new message, authored by `fromBotId` (when a bot caused the run).
+ */
+export interface StartBotRunInput extends BotRunRequest {
+  inputMessage?: Message;
+}
+
+export interface StartedBotRun {
+  runId: string;
+  /** Settles once the run ends, with its final text. Never rejects. */
+  settled: Promise<BotRunOutcome>;
 }
 
 export interface Harness {
+  /** Starts a run for the thread's own bot on a new user message. */
   startRun(threadId: string, input: string): Promise<{ runId: string }>;
+  /** Starts a run for any bot in a thread. Returns once the run is recorded, before it finishes. */
+  startBotRun(input: StartBotRunInput): Promise<StartedBotRun>;
   cancelRun(runId: string): Promise<Run | undefined>;
   cancelBotRuns(botId: string): Promise<void>;
   /** Marks runs left open by a previous process as failed. Call once at boot. */
   recoverInterruptedRuns(): Promise<number>;
-  /** Forgets the engine session of every thread of a bot. Call when the bot's engine changes. */
+  /** Forgets the engine session of every thread and room of a bot. Call when the bot's engine changes. */
   resetEngineSessions(botId: string): Promise<void>;
   /** Aborts in-flight runs without writing state, so the next boot recovers them. */
   shutdown(): void;
@@ -55,60 +76,110 @@ interface ActiveRun {
   controller: AbortController;
   text: string;
   usage: { tokensIn: number; tokensOut: number; costUsd: number };
+  /** Rooms, and runs of a bot that is not the thread's own, keep their session in `thread_sessions`. */
+  ownSession: boolean;
   /** Set by the first terminal write, so completion, failure and cancellation cannot all write. */
   settled: boolean;
+  terminal?: TerminalStatus;
+  error?: string;
+  finish(outcome: BotRunOutcome): void;
 }
 
 type TerminalStatus = 'completed' | 'failed' | 'cancelled';
 
 export function createHarness(deps: HarnessDeps): Harness {
-  const { repos, bus, broker, engines, computers, mcp, mode, computerImage, loopbackUrl } = deps;
+  const { repos, bus, broker, engines, computers, mcp, mode, computerImage, loopbackUrl, chains } = deps;
   const active = new Map<string, ActiveRun>();
+  /** The trigger message of each bot's latest run in each thread. Room context is built from it. */
+  const lastTrigger = new Map<string, string>();
+
+  async function storeMessage(input: {
+    threadId: string;
+    role: Message['role'];
+    content: string;
+    authorBotId?: string;
+    viaBotId?: string;
+  }): Promise<Message> {
+    const message = await repos.messages.create(input);
+    await bus.publish({ type: 'message.completed', threadId: input.threadId, message });
+    return message;
+  }
 
   async function startRun(threadId: string, input: string): Promise<{ runId: string }> {
     const thread = await repos.threads.get(threadId);
     if (!thread) throw new Error(`Thread ${threadId} does not exist`);
     const bot = await repos.bots.get(thread.botId);
     if (!bot) throw new Error(`Bot ${thread.botId} does not exist`);
+    const message = await storeMessage({ threadId, role: 'user', content: input });
+    const started = await startBotRun({ botId: bot.id, threadId, input, inputMessage: message });
+    return { runId: started.runId };
+  }
 
-    const history = await repos.messages.listByThread(threadId);
-    const userMessage = await repos.messages.create({ threadId, role: 'user', content: input });
-    await bus.publish({ type: 'message.completed', threadId, message: userMessage });
+  async function startBotRun(req: StartBotRunInput): Promise<StartedBotRun> {
+    const thread = await repos.threads.get(req.threadId);
+    if (!thread) throw new Error(`Thread ${req.threadId} does not exist`);
+    const bot = await repos.bots.get(req.botId);
+    if (!bot) throw new Error(`Bot ${req.botId} does not exist`);
+    if (req.chain) chains.assertCanStart(req.chain, bot);
 
-    const run = await repos.runs.create({ threadId, botId: bot.id, engine: bot.engine, model: bot.model });
+    const trigger =
+      req.inputMessage ??
+      (await storeMessage({
+        threadId: thread.id,
+        role: 'user',
+        content: req.input,
+        ...(req.fromBotId === undefined ? {} : { authorBotId: req.fromBotId, viaBotId: bot.id }),
+      }));
+    const ownSession = thread.kind === 'room' || bot.id !== thread.botId;
+    const engineSessionId = ownSession
+      ? await repos.threadSessions.get(thread.id, bot.id)
+      : thread.engineSessionId;
+    const key = `${thread.id}\u0000${bot.id}`;
+    const previousTriggerId = lastTrigger.get(key);
+    lastTrigger.set(key, trigger.id);
+    const turn = await buildTurn(repos, {
+      thread,
+      bot,
+      trigger,
+      resumed: engineSessionId !== undefined,
+      ...(previousTriggerId === undefined ? {} : { previousTriggerId }),
+    });
+
+    const run = await repos.runs.create({ threadId: thread.id, botId: bot.id, engine: bot.engine, model: bot.model });
+    if (req.chain) chains.enter(run.id, req.chain, bot);
     await bus.publish({
       type: 'run.started',
-      threadId,
+      threadId: thread.id,
       runId: run.id,
       botId: bot.id,
       engine: bot.engine,
       model: bot.model,
     });
 
+    let finish: (outcome: BotRunOutcome) => void = () => undefined;
+    const settled = new Promise<BotRunOutcome>((resolve) => {
+      finish = resolve;
+    });
     const state: ActiveRun = {
       runId: run.id,
-      threadId,
+      threadId: thread.id,
       botId: bot.id,
       messageId: crypto.randomUUID(),
       controller: new AbortController(),
       text: '',
       usage: { tokensIn: 0, tokensOut: 0, costUsd: 0 },
+      ownSession,
       settled: false,
+      finish,
     };
     active.set(run.id, state);
-    void execute(state, bot, history, input, thread.engineSessionId).catch((error: unknown) => {
+    void execute(state, bot, turn, engineSessionId).catch((error: unknown) => {
       console.error(`run ${run.id} could not be finalized`, error);
     });
-    return { runId: run.id };
+    return { runId: run.id, settled };
   }
 
-  async function execute(
-    state: ActiveRun,
-    bot: Bot,
-    history: Message[],
-    input: string,
-    engineSessionId: string | undefined,
-  ): Promise<void> {
+  async function execute(state: ActiveRun, bot: Bot, turn: Turn, engineSessionId: string | undefined): Promise<void> {
     try {
       const driver = await readyDriver(bot);
       const place = await placeRun(state, bot);
@@ -120,8 +191,8 @@ export function createHarness(deps: HarnessDeps): Harness {
         runId: state.runId,
         threadId: state.threadId,
         bot,
-        history,
-        input,
+        history: turn.history,
+        input: turn.input,
         memories: await repos.memories.listByBot(bot.id),
         skills: await repos.skills.listForBot(bot.id),
         signal: state.controller.signal,
@@ -141,6 +212,7 @@ export function createHarness(deps: HarnessDeps): Harness {
       await settle(state, 'failed', errorMessage(error));
     } finally {
       active.delete(state.runId);
+      state.finish(outcomeOf(state));
     }
   }
 
@@ -250,6 +322,7 @@ export function createHarness(deps: HarnessDeps): Harness {
         state.usage.tokensIn += event.tokensIn;
         state.usage.tokensOut += event.tokensOut;
         state.usage.costUsd += event.costUsd;
+        chains.recordUsage(runId, event.costUsd);
         await repos.runs.update(runId, { ...state.usage });
         // cost.updated carries run totals, matching what the run row stores.
         await bus.publish({ type: 'cost.updated', threadId, runId, ...state.usage });
@@ -264,7 +337,11 @@ export function createHarness(deps: HarnessDeps): Harness {
         return;
       }
       case 'engine.session':
-        await repos.threads.setEngineSessionId(threadId, event.sessionId);
+        if (state.ownSession) {
+          await repos.threadSessions.set(threadId, state.botId, event.sessionId);
+        } else {
+          await repos.threads.setEngineSessionId(threadId, event.sessionId);
+        }
         return;
     }
   }
@@ -276,24 +353,31 @@ export function createHarness(deps: HarnessDeps): Harness {
       threadId: state.threadId,
       role: 'assistant',
       content: state.text,
+      authorBotId: state.botId,
     });
     await bus.publish({ type: 'message.completed', threadId: state.threadId, runId: state.runId, message });
     await settle(state, 'completed');
   }
 
-  /** Writes the run's terminal status and event. Only the first call has any effect. */
+  /** Writes the run's terminal status and event, then settles the run's outcome. Only the first call has any effect. */
   async function settle(state: ActiveRun, status: TerminalStatus, error?: string): Promise<void> {
     if (state.settled) return;
     state.settled = true;
+    state.terminal = status;
+    state.error = error;
     const { threadId, runId } = state;
     mcp?.endRun(runId);
-    await repos.runs.update(runId, { status, endedAt: new Date().toISOString(), error });
-    if (status === 'completed') {
-      await repos.threads.touch(threadId);
-      await bus.publish({ type: 'run.completed', threadId, runId });
-    } else {
-      // The protocol has no run.cancelled event yet, so a cancelled run is reported as run.failed.
-      await bus.publish({ type: 'run.failed', threadId, runId, error: error ?? 'Run cancelled.' });
+    try {
+      await repos.runs.update(runId, { status, endedAt: new Date().toISOString(), error });
+      if (status === 'completed') {
+        await repos.threads.touch(threadId);
+        await bus.publish({ type: 'run.completed', threadId, runId });
+      } else {
+        // The protocol has no run.cancelled event yet, so a cancelled run is reported as run.failed.
+        await bus.publish({ type: 'run.failed', threadId, runId, error: error ?? 'Run cancelled.' });
+      }
+    } finally {
+      state.finish(outcomeOf(state));
     }
   }
 
@@ -334,16 +418,31 @@ export function createHarness(deps: HarnessDeps): Harness {
   }
 
   async function resetEngineSessions(botId: string): Promise<void> {
-    for (const thread of await repos.threads.listByBot(botId)) {
-      if (thread.engineSessionId !== undefined) await repos.threads.setEngineSessionId(thread.id, null);
-    }
+    await repos.threadSessions.clearBot(botId);
   }
 
   function shutdown(): void {
     for (const state of active.values()) state.controller.abort();
   }
 
-  return { startRun, cancelRun, cancelBotRuns, recoverInterruptedRuns, resetEngineSessions, shutdown };
+  return {
+    startRun,
+    startBotRun,
+    cancelRun,
+    cancelBotRuns,
+    recoverInterruptedRuns,
+    resetEngineSessions,
+    shutdown,
+  };
+}
+
+function outcomeOf(state: ActiveRun): BotRunOutcome {
+  return {
+    runId: state.runId,
+    status: state.terminal ?? 'cancelled',
+    text: state.text,
+    ...(state.error === undefined ? {} : { error: state.error }),
+  };
 }
 
 function errorMessage(error: unknown): string {

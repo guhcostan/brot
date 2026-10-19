@@ -62,3 +62,117 @@ body,
 [data-shell="mac-desktop"] .titlebar :is(button, a, input, select, textarea, label, [role="button"], [tabindex]) {
   -webkit-app-region: no-drag;
 }
+
+/* Mention chip: weight and a neutral fill, never color. In a user bubble it sits on --bg instead. */
+.mention-chip {
+  padding: 0 3px;
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  color: var(--ink);
+  font-weight: 600;
+}
+.brot-msg[data-role="user"] .mention-chip {
+  background: var(--bg);
+}
+
+/* Bot-to-bot exchange: one quiet line that opens to the question and the answer. */
+.exchange {
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  font-size: var(--fs-sm);
+  animation: brot-enter var(--dur-base) var(--ease) both;
+}
+.exchange > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  min-height: 40px;
+  padding: 0 var(--space-3);
+  border-radius: var(--r-lg);
+  cursor: pointer;
+  list-style: none;
+  transition: background-color var(--dur-fast) var(--ease);
+}
+.exchange > summary::-webkit-details-marker {
+  display: none;
+}
+.exchange > summary:hover {
+  background: var(--surface-2);
+}
+.exchange > summary::after {
+  content: "";
+  flex: none;
+  width: 5px;
+  height: 5px;
+  margin: 0 2px 2px;
+  border-right: 1.5px solid var(--ink-3);
+  border-bottom: 1.5px solid var(--ink-3);
+  transform: rotate(45deg);
+  transition: transform var(--dur-fast) var(--ease);
+}
+.exchange[open] > summary::after {
+  margin-bottom: -2px;
+  transform: rotate(-135deg);
+}
+.exchange[open] > summary {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.exchange__body {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4) var(--space-3) calc(var(--space-3) + 2px);
+  border-top: 1px solid var(--line);
+  line-height: 1.55;
+}
+
+/* Native dialog as a centered card; a bottom sheet on phones. */
+.brot-dialog {
+  width: calc(100% - 32px);
+  max-height: min(720px, calc(100dvh - 48px));
+  margin: auto;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: var(--shadow-float);
+  overflow: hidden;
+}
+.brot-dialog[open] {
+  animation: brot-rise 200ms var(--ease) both;
+}
+.brot-dialog::backdrop {
+  background: color-mix(in srgb, var(--bg) 72%, transparent);
+}
+@media (max-width: 639px) {
+  .brot-dialog {
+    width: 100%;
+    max-width: none;
+    margin: auto 0 0;
+    border-radius: var(--r-xl) var(--r-xl) 0 0;
+    border-bottom: 0;
+    max-height: calc(100dvh - 40px);
+  }
+}
+
+/* Checkbox and radio drawn with tokens: --ink when on. */
+.room-check {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .exchange,
+  .brot-dialog[open] {
+    animation-name: brot-fade;
+  }
+  .exchange > summary::after {
+    transition: none;
+  }
+}

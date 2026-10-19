@@ -844,6 +844,124 @@ describe('team tasks', () => {
   });
 });
 
+describe('listing rooms', () => {
+  it('lists only room threads, most recently updated first', async () => {
+    const { lead, room: older } = await seedRoom(2);
+    const dm = await repos.threads.create(lead.id, { title: 'Chat' });
+    const newer = await repos.rooms.create({ title: 'Second', botIds: [lead.id, (await repos.bots.create({ name: 'Capy', job: 'x' })).id], leadBotId: lead.id });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await repos.threads.touch(older.id);
+
+    const rooms = await repos.threads.listRooms();
+    expect(rooms.map((room) => room.kind)).toEqual(['room', 'room']);
+    expect(rooms.map((room) => room.id).sort()).toEqual([older.id, newer.id].sort());
+    expect(rooms.find((room) => room.id === dm.id)).toBeUndefined();
+    expect(rooms[0]?.id).toBe(older.id);
+  });
+
+  it('returns no rooms when there are none', async () => {
+    const bot = await repos.bots.create({ name: 'Ada', job: 'x' });
+    await repos.threads.create(bot.id, { title: 'Chat' });
+    expect(await repos.threads.listRooms()).toEqual([]);
+  });
+});
+
+describe('clearing a bot session', () => {
+  it('clears one bot\'s room sessions and DM sessions everywhere, and leaves other bots alone', async () => {
+    const { bots, room } = await seedRoom(2);
+    const [ada, grace] = bots;
+    const dm = await repos.threads.create(ada!.id, { title: 'Chat' });
+    const graceDm = await repos.threads.create(grace!.id, { title: 'Chat' });
+    await repos.threadSessions.set(room.id, ada!.id, 'sess_room_ada');
+    await repos.threadSessions.set(room.id, grace!.id, 'sess_room_grace');
+    await repos.threads.setEngineSessionId(dm.id, 'sess_dm_ada');
+    await repos.threads.setEngineSessionId(graceDm.id, 'sess_dm_grace');
+
+    await repos.threadSessions.clearBot(ada!.id);
+
+    expect(await repos.threadSessions.get(room.id, ada!.id)).toBeUndefined();
+    expect(await repos.threadSessions.get(room.id, grace!.id)).toBe('sess_room_grace');
+    expect((await repos.threads.get(dm.id))?.engineSessionId).toBeUndefined();
+    expect((await repos.threads.get(graceDm.id))?.engineSessionId).toBe('sess_dm_grace');
+    const rows = await handle.client.execute({
+      sql: 'SELECT engine_session_id FROM thread_sessions WHERE thread_id = ? AND bot_id = ?',
+      args: [room.id, ada!.id],
+    });
+    expect(rows.rows).toHaveLength(1);
+    expect(rows.rows[0]?.engine_session_id).toBeNull();
+  });
+
+  it('does not move updatedAt on sessions that were already clear', async () => {
+    const { bots, room } = await seedRoom(2);
+    const ada = bots[0]!;
+    const updatedAt = async () =>
+      (
+        await handle.client.execute({
+          sql: 'SELECT updated_at FROM thread_sessions WHERE thread_id = ? AND bot_id = ?',
+          args: [room.id, ada.id],
+        })
+      ).rows[0]?.updated_at;
+
+    await repos.threadSessions.set(room.id, ada.id, 'sess_1');
+    await repos.threadSessions.clearBot(ada.id);
+    const cleared = await updatedAt();
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await repos.threadSessions.clearBot(ada.id);
+    expect(await updatedAt()).toBe(cleared);
+  });
+});
+
+describe('events after a cursor', () => {
+  it('returns the events after the cursor in log order, filtered in SQL', async () => {
+    const { bot, thread, run } = await seed();
+    const at = '2026-10-19T12:00:00.000Z';
+    const ids = ['evt-a', 'evt-b', 'evt-c', 'evt-d'];
+    for (const [i, id] of ids.entries()) {
+      await repos.events.append({
+        id,
+        at: i < 2 ? at : '2026-10-19T12:00:01.000Z',
+        threadId: thread.id,
+        runId: run.id,
+        type: 'message.delta',
+        messageId: 'm1',
+        delta: String(i),
+      });
+    }
+    await repos.events.append({ id: 'evt-other', at, threadId: (await repos.threads.create(bot.id)).id, type: 'run.completed' });
+
+    const afterFirst = await repos.events.listAfter(thread.id, 'evt-a');
+    expect(afterFirst?.map((event) => event.id)).toEqual(['evt-b', 'evt-c', 'evt-d']);
+    expect((await repos.events.listAfter(thread.id, 'evt-d'))).toEqual([]);
+    expect((await repos.events.listAfter(thread.id, 'evt-a', { limit: 1 }))?.map((e) => e.id)).toEqual(['evt-b']);
+  });
+
+  it('returns undefined for a cursor that is not in the thread', async () => {
+    const { bot, thread } = await seed();
+    const other = await repos.threads.create(bot.id, { title: 'Other' });
+    await repos.events.append({ id: 'evt-x', at: '2026-10-19T12:00:00.000Z', threadId: other.id, type: 'run.completed' });
+
+    expect(await repos.events.listAfter(thread.id, 'evt-x')).toBeUndefined();
+    expect(await repos.events.listAfter(thread.id, 'evt-missing')).toBeUndefined();
+  });
+});
+
+describe('task work run', () => {
+  it('stores the run doing a task, clears it when the run is deleted, and accepts it on update', async () => {
+    const { bot, thread, run } = await seed();
+    const task = await repos.tasks.create({ title: 'Ship', assigneeBotId: bot.id, threadId: thread.id });
+    expect(task.workRunId).toBeUndefined();
+
+    const working = await repos.tasks.update(task.id, { status: 'in_progress', workRunId: run.id });
+    expect(working).toMatchObject({ status: 'in_progress', workRunId: run.id });
+    expect((await repos.tasks.get(task.id))?.workRunId).toBe(run.id);
+
+    await handle.client.execute({ sql: 'DELETE FROM runs WHERE id = ?', args: [run.id] });
+    const orphaned = await repos.tasks.get(task.id);
+    expect(orphaned?.status).toBe('in_progress');
+    expect(orphaned?.workRunId).toBeUndefined();
+  });
+});
+
 describe('bot team budget', () => {
   it('stores a team budget and clears it with null', async () => {
     const bot = await repos.bots.create({ name: 'Onça', job: 'Lead', teamBudgetUsd: 4.5 });

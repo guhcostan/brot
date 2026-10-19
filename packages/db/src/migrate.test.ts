@@ -63,7 +63,7 @@ describe('migrate', () => {
     ]);
 
     const applied = await handle.client.execute('SELECT COUNT(*) AS count FROM __drizzle_migrations');
-    expect(Number(applied.rows[0]?.count)).toBe(3);
+    expect(Number(applied.rows[0]?.count)).toBe(4);
   });
 
   it('adds the rooms, team task, and per-bot session schema on a fresh database', async () => {
@@ -93,6 +93,7 @@ describe('migrate', () => {
       'depth',
       'created_at',
       'updated_at',
+      'work_run_id',
     ]);
     expect(await columnNames(handle, 'thread_sessions')).toEqual(['thread_id', 'bot_id', 'engine_session_id', 'updated_at']);
     expect(await columnNames(handle, 'room_members')).toEqual(['thread_id', 'bot_id', 'joined_at']);
@@ -216,6 +217,70 @@ describe('migrate', () => {
     const thread = await repos.threads.get('thread_old');
     expect(thread?.title).toBe('Chat');
     expect(thread?.engineSessionId).toBeUndefined();
+  });
+
+  it('upgrades a wave 5 team database in place: tasks gain a work run that clears when the run is deleted', async () => {
+    const { handle } = await tempDb();
+    const journal = JSON.parse(await readFile(join(migrationsFolder, 'meta', '_journal.json'), 'utf8')) as {
+      entries: Array<{ tag: string; when: number }>;
+    };
+    const applied = journal.entries.slice(0, 3);
+    if (applied.length !== 3 || applied[2]?.tag !== '0002_team_rooms_tasks') {
+      throw new Error('journal must start with the 0000, 0001 and 0002 migrations');
+    }
+
+    // Recreate the database as it was before the work run column: the first three migrations applied.
+    for (const entry of applied) {
+      await handle.client.executeMultiple(await readFile(join(migrationsFolder, `${entry.tag}.sql`), 'utf8'));
+    }
+    await handle.client.execute(
+      'CREATE TABLE "__drizzle_migrations" ("id" INTEGER PRIMARY KEY AUTOINCREMENT, "hash" text NOT NULL, "created_at" numeric)',
+    );
+    for (const entry of applied) {
+      await handle.client.execute({
+        sql: 'INSERT INTO "__drizzle_migrations" ("hash", "created_at") VALUES (?, ?)',
+        args: [entry.tag, entry.when],
+      });
+    }
+    const stamp = '2026-10-19T10:00:00.000Z';
+    await handle.client.execute({
+      sql: `INSERT INTO bots (id, name, job, instructions, engine, computer, pinned, archived, created_at, updated_at)
+            VALUES ('bot_old', 'Ada', 'Researcher', '', 'mock', 'none', 0, 0, ?, ?)`,
+      args: [stamp, stamp],
+    });
+    await handle.client.execute({
+      sql: `INSERT INTO threads (id, bot_id, title, kind, created_at, updated_at)
+            VALUES ('thread_old', 'bot_old', 'Chat', 'dm', ?, ?)`,
+      args: [stamp, stamp],
+    });
+    await handle.client.execute({
+      sql: `INSERT INTO runs (id, thread_id, bot_id, status, engine, started_at, tokens_in, tokens_out, cost_usd)
+            VALUES ('run_old', 'thread_old', 'bot_old', 'running', 'mock', ?, 0, 0, 0)`,
+      args: [stamp],
+    });
+    await handle.client.execute({
+      sql: `INSERT INTO tasks (id, title, status, assignee_bot_id, created_by_user, thread_id, chain_id, depth, created_at, updated_at)
+            VALUES ('task_old', 'Ship', 'in_progress', 'bot_old', 1, 'thread_old', 'task_old', 0, ?, ?)`,
+      args: [stamp, stamp],
+    });
+
+    await migrate(handle.db);
+
+    const repos = createRepos(handle.db);
+    const before = await repos.tasks.get('task_old');
+    expect(before).toMatchObject({ title: 'Ship', status: 'in_progress', chainId: 'task_old' });
+    expect(before?.workRunId).toBeUndefined();
+
+    const linked = await repos.tasks.update('task_old', { workRunId: 'run_old' });
+    expect(linked?.workRunId).toBe('run_old');
+
+    const foreignKeys = await handle.client.execute('PRAGMA foreign_key_list(tasks)');
+    const workRun = foreignKeys.rows.find((row) => row.from === 'work_run_id');
+    expect(workRun).toMatchObject({ table: 'runs', on_delete: 'SET NULL' });
+
+    await handle.client.execute({ sql: 'DELETE FROM runs WHERE id = ?', args: ['run_old'] });
+    expect((await repos.tasks.get('task_old'))?.workRunId).toBeUndefined();
+    expect((await repos.tasks.get('task_old'))?.status).toBe('in_progress');
   });
 
   it('enables foreign keys on the connection', async () => {

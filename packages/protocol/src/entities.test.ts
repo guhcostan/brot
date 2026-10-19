@@ -257,6 +257,12 @@ describe('rooms, messages, and team tasks', () => {
     expect(roundTrip(Task, child)).toEqual(child);
   });
 
+  it('round-trips the run doing a task, and leaves it absent until work starts', () => {
+    expect(task).not.toHaveProperty('workRunId');
+    const working = { ...task, status: 'in_progress' as const, workRunId: 'run_1' };
+    expect(roundTrip(Task, working)).toEqual(working);
+  });
+
   it('accepts a delegated task at the deepest allowed level', () => {
     expect(Task.parse({ ...task, id: 'task_9', createdByUser: false, createdByBotId: 'bot_1', chainId: 'task_1', depth: TEAM_MAX_DEPTH }).depth).toBe(TEAM_MAX_DEPTH);
   });

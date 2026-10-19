@@ -1,30 +1,36 @@
 import { randomBytes } from 'node:crypto';
-import type { Repos } from '@brot/db';
+import type { Repos, TaskFilter } from '@brot/db';
 import type { EngineRegistry } from '@brot/engines';
 import {
   ApprovalStatus,
   CreateBot,
   CreateMemory,
   CreatePolicy,
+  CreateRoom,
   CreateRoutine,
   CreateSkill,
+  CreateTask,
   CreateThread,
   IsoDateTime,
   PairingComplete,
   PostMessage,
   PROTOCOL_VERSION,
   ResolveApproval,
+  TaskStatus,
+  ThreadKind,
   UpdateBot,
   UpdateMemory,
+  UpdateRoomMembers,
   UpdateRoutine,
   UpdateSkill,
+  UpdateTask,
   type CanonicalEvent,
   type RoutineTrigger,
 } from '@brot/protocol';
 import { Hono, type Context } from 'hono';
 import { cors } from 'hono/cors';
 import { streamSSE } from 'hono/streaming';
-import type { z } from 'zod';
+import { z } from 'zod';
 import { authenticate, isLocalRequest, requireJsonWrites, type AppEnv } from './auth';
 import type { Broker } from './broker';
 import type { EventBus } from './bus';
@@ -32,6 +38,9 @@ import type { Harness } from './harness';
 import { PairingError, type Pairing } from './pairing';
 import { cronError, type Scheduler } from './scheduler';
 import type { BrotMcpService } from './mcp/types';
+import { RuleViolation } from './rooms/errors';
+import type { RoomService } from './rooms/service';
+import type { TaskService } from './rooms/tasks';
 import { SecretBody, SecretName, type Vault } from './vault';
 
 export const SERVER_VERSION = '0.1.0';
@@ -49,6 +58,8 @@ export interface AppDeps {
   vault: Vault;
   pairing: Pairing;
   engines: EngineRegistry;
+  rooms: RoomService;
+  tasks: TaskService;
   config: { host: string; port: number; mode: 'desktop' | 'server' };
   /** Treat loopback callers as the local user. Tests pass false to simulate a remote caller. Defaults to true. */
   trustLoopback?: boolean;
@@ -117,8 +128,28 @@ async function attempt<T>(task: () => Promise<T>, fallback: T): Promise<T> {
   }
 }
 
+/** Ids that name no bot, or an archived one, so they cannot join a room or take a task. */
+async function unknownBots(repos: Repos, ids: readonly string[]): Promise<string[]> {
+  const missing: string[] = [];
+  for (const id of new Set(ids)) {
+    const bot = await repos.bots.get(id);
+    if (!bot || bot.archived) missing.push(id);
+  }
+  return missing;
+}
+
+function invalidReference(c: Context<AppEnv>, path: string, message: string): Response {
+  return c.json({ error: 'Invalid request', issues: [{ path: [path], message }] }, 400);
+}
+
+/** A team rule (depth, chain size, room size, ended task) answers 409. Any other error is a server error. */
+function ruleViolation(c: Context<AppEnv>, error: unknown): Response {
+  if (error instanceof RuleViolation) return c.json({ error: error.message }, 409);
+  throw error;
+}
+
 export function createApp(deps: AppDeps): Hono<AppEnv> {
-  const { repos, bus, broker, harness, scheduler, vault, pairing, engines, config } = deps;
+  const { repos, bus, broker, harness, scheduler, vault, pairing, engines, rooms, tasks, config } = deps;
   const trustLoopback = deps.trustLoopback ?? true;
   const app = new Hono<AppEnv>();
 
@@ -181,10 +212,16 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     return c.body(null, 204);
   });
 
+  /** Without `kind`, every thread the bot owns (its DM, and rooms it leads). `kind=room` lists rooms it is a member of. */
   app.get('/api/bots/:id/threads', async (c) => {
     const id = c.req.param('id');
     if (!(await repos.bots.get(id))) return notFound(c, 'Bot');
-    return c.json(await repos.threads.listByBot(id));
+    const kind = c.req.query('kind');
+    if (kind === undefined) return c.json(await repos.threads.listByBot(id));
+    const parsed = ThreadKind.safeParse(kind);
+    if (!parsed.success) return invalid(c, parsed.error);
+    if (parsed.data === 'room') return c.json(await rooms.listForBot(id));
+    return c.json(await repos.threads.listByBot(id, { kind: 'dm' }));
   });
 
   app.post('/api/bots/:id/threads', async (c) => {
@@ -207,13 +244,115 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     return c.json(await repos.runs.listByThread(id));
   });
 
+  /** In a room, the responders run one after another and `runId` is the first one's (null when nobody answers). */
   app.post('/api/threads/:id/messages', async (c) => {
     const id = c.req.param('id');
-    if (!(await repos.threads.get(id))) return notFound(c, 'Thread');
+    const thread = await repos.threads.get(id);
+    if (!thread) return notFound(c, 'Thread');
     const body = await parseBody(c, PostMessage);
     if (!body.ok) return body.response;
+    if (thread.kind === 'room') {
+      const { runId } = await rooms.post(thread, body.data);
+      return c.json({ runId }, 202);
+    }
     const { runId } = await harness.startRun(id, body.data.content);
     return c.json({ runId }, 202);
+  });
+
+  /** The log in order. Without `after`, the first page; with it, the page of events that follow that event id. */
+  app.get('/api/threads/:id/events', async (c) => {
+    const id = c.req.param('id');
+    if (!(await repos.threads.get(id))) return notFound(c, 'Thread');
+    const after = c.req.query('after');
+    if (after === undefined) return c.json(await repos.events.list({ threadId: id, limit: REPLAY_PAGE_SIZE }));
+    const events = await repos.events.listAfter(id, after, { limit: REPLAY_PAGE_SIZE });
+    return events ? c.json(events) : notFound(c, 'Event');
+  });
+
+  app.post('/api/rooms', async (c) => {
+    const body = await parseBody(c, CreateRoom);
+    if (!body.ok) return body.response;
+    const missing = await unknownBots(repos, body.data.botIds);
+    if (missing.length > 0) return invalidReference(c, 'botIds', `unknown or archived bots: ${missing.join(', ')}`);
+    return c.json(await rooms.create(body.data), 201);
+  });
+
+  app.get('/api/rooms', async (c) => c.json(await rooms.list()));
+
+  app.get('/api/rooms/:id/members', async (c) => {
+    const members = await rooms.members(c.req.param('id'));
+    return members ? c.json(members) : notFound(c, 'Room');
+  });
+
+  app.patch('/api/rooms/:id/members', async (c) => {
+    const id = c.req.param('id');
+    if (!(await rooms.members(id))) return notFound(c, 'Room');
+    const body = await parseBody(c, UpdateRoomMembers);
+    if (!body.ok) return body.response;
+    const missing = await unknownBots(repos, body.data.add ?? []);
+    if (missing.length > 0) return invalidReference(c, 'add', `unknown or archived bots: ${missing.join(', ')}`);
+    try {
+      const members = await rooms.updateMembers(id, body.data);
+      return members ? c.json(members) : notFound(c, 'Room');
+    } catch (error) {
+      return ruleViolation(c, error);
+    }
+  });
+
+  app.get('/api/tasks', async (c) => {
+    const filter: TaskFilter = {};
+    const assigneeBotId = c.req.query('assigneeBotId');
+    const chainId = c.req.query('chainId');
+    const threadId = c.req.query('threadId');
+    if (assigneeBotId) filter.assigneeBotId = assigneeBotId;
+    if (chainId) filter.chainId = chainId;
+    if (threadId) filter.threadId = threadId;
+    const status = c.req.query('status');
+    if (status !== undefined) {
+      const parsed = TaskStatus.safeParse(status);
+      if (!parsed.success) return invalid(c, parsed.error);
+      filter.status = parsed.data;
+    }
+    return c.json(await tasks.list(filter));
+  });
+
+  /** A user's task is depth 0. A body that names `createdByBotId` is a delegation, and goes one level deeper. */
+  app.post('/api/tasks', async (c) => {
+    const body = await parseBody(c, CreateTask);
+    if (!body.ok) return body.response;
+    const data = body.data;
+    const issues: Array<{ path: string[]; message: string }> = [];
+    const assignee = await repos.bots.get(data.assigneeBotId);
+    if (!assignee || assignee.archived) issues.push({ path: ['assigneeBotId'], message: 'unknown or archived bot' });
+    if (data.createdByBotId !== undefined && !(await repos.bots.get(data.createdByBotId))) {
+      issues.push({ path: ['createdByBotId'], message: 'unknown bot' });
+    }
+    if (!(await repos.threads.get(data.threadId))) issues.push({ path: ['threadId'], message: 'unknown thread' });
+    if (data.parentTaskId !== undefined && !(await repos.tasks.get(data.parentTaskId))) {
+      issues.push({ path: ['parentTaskId'], message: 'unknown task' });
+    }
+    if (issues.length > 0) return c.json({ error: 'Invalid request', issues }, 400);
+    try {
+      return c.json(await tasks.create(data), 201);
+    } catch (error) {
+      return ruleViolation(c, error);
+    }
+  });
+
+  app.get('/api/tasks/:id', async (c) => {
+    const task = await tasks.get(c.req.param('id'));
+    return task ? c.json(task) : notFound(c, 'Task');
+  });
+
+  app.patch('/api/tasks/:id', async (c) => {
+    const body = await parseBody(c, UpdateTask);
+    if (!body.ok) return body.response;
+    try {
+      const task = await tasks.update(c.req.param('id'), body.data);
+      return task ? c.json(task) : notFound(c, 'Task');
+    } catch (error) {
+      return ruleViolation(c, error);
+    }
   });
 
   app.post('/api/runs/:id/cancel', async (c) => {

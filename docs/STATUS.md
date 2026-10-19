@@ -46,11 +46,23 @@ Containment model in docs/ARCHITECTURE.md. Docker provider (internal network + p
 
 Known gaps: no `ComputerProvider.remove(botId)` (deleting a bot leaves its container/network/volume); no idle-stop `computer.status`; `network.blocked` can be attributed to the wrong thread when runs overlap; providers get `config.port` before listen (port 0 breaks the docker relay, tests inject providers); provider keys inside the computer (`computerEnv`) are readable by the agent: decide how DSH gets model keys; secret redaction is literal-only; run tokens of runs that never settle stay in memory.
 
-## Wave 5: teams (in progress)
+## Wave 5: teams (✅ pushed)
 
-User priority: bots communicate and work as a team. PRODUCT.md A7, A8, A8b, A8c are now P0.
-- 5a contracts (Haiku, running): rooms (`Thread.kind`, members, responder `mention | lead`), `Message.authorBotId/mentions/viaBotId`, per-bot `thread_sessions`, `Task` board with `chainId`/`depth`, chain limits, events `task.*`, `handoff`, `bot.asked/answered`, `room.members`, MCP input schemas.
-- 5b next, in parallel: server (room routing, team MCP tools `ask_bot`/`delegate_task`/`handoff`/`update_my_task`/`list_team`, loop/cost guards, task API), web UI (Opus: rooms, @mentions, baton, task board), mobile UI (Opus).
+Spec: docs/TEAM-API.md. Contracts `ac08dd8` (rooms, members, responder mode, `Message.authorBotId/mentions/viaBotId`, `thread_sessions`, `Task` with chains, events `task.*`/`handoff`/`bot.asked`/`bot.answered`/`room.members`), then:
+- Server: rooms API, `@mention`/lead routing (sequential responders), per-bot DSH sessions, labeled history, tasks API (user task starts the assignee in its DM, `workRunId`, cancel stops the run), chain tracking and per-chain cost, `GET /api/threads/:id/events?after=`.
+- Team MCP tools (`apps/server/src/team`): `list_team`, `ask_bot`, `delegate_task`, `update_my_task`, `handoff`. Guards: no self-target, ask cycles, hop/depth/chain-size limits, smallest `teamBudgetUsd` in the chain; result posted back and the delegator notified once.
+- DSH driver keyed by (thread, bot); fixed a kill path that returned while the child was still a zombie.
+- DB: WAL + busy timeout + an in-process write gate (libSQL is synchronous, so a pooled connection blocked the transaction holding the lock). Rule: inside `db.transaction` use only `tx`.
+- Web (Opus): rooms in the sidebar, new-room dialog, `@mention` combobox, author per message, collapsible bot-to-bot rows with gaze, handoff baton, task board + context tab. Smoke-tested against the real server with the mock engine (mention routing, task to done).
+
+Open: no UI to add/remove room members; baton is in memory (lost on restart); global SSE replay pages by timestamp and can skip same-millisecond events (needs an id cursor); `workRunId` set without `task.updated`; DSH processes share `DSH_HOME` (concurrent session store unverified); mobile has no team UI yet.
+
+## Next (wave 6 candidates)
+
+1. Run the real stack: start Docker, build the images, run the skipped tests, then a real DSH run with a provider key end to end (approval → send).
+2. Mobile team UI (Opus): rooms, task board, bot-to-bot rows.
+3. SSE id cursor for replay; room member management UI; persist the baton.
+4. Model keys for DSH inside computers via the vault (`secret://`), never plain env.
 
 ## Decision: DeepSeek Harness is the only runtime (2026-10-19)
 

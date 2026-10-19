@@ -1,0 +1,1 @@
+ALTER TABLE `tasks` ADD `work_run_id` text REFERENCES runs(id) ON DELETE set null;

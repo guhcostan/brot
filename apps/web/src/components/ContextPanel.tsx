@@ -1,51 +1,69 @@
 import { useId, useState, type ReactElement } from 'react';
-import type { Bot } from '@brot/protocol';
+import type { Bot, Task } from '@brot/protocol';
 import { Badge, BotAvatar, Button, Card, EmptyState, cx } from '@brot/ui';
+import type { Room } from '../data/client';
 import { avatarOf, formatCount, formatTime, formatUsd } from '../format';
 import { t, type TranslationKey } from '../i18n';
-import { sumCost, type ThreadState } from '../state/thread';
+import { botActivity, sumCost, type ThreadState } from '../state/thread';
+import { Plus } from './icons';
+import { TaskList } from './Tasks';
+import { moodOf } from './team';
 
-const TABS = ['memory', 'skills', 'apps', 'routines', 'cost'] as const;
-type TabId = (typeof TABS)[number];
+const BOT_TABS = ['memory', 'tasks', 'skills', 'apps', 'routines', 'cost'] as const;
+const ROOM_TABS = ['tasks', 'cost'] as const;
+type TabId = (typeof BOT_TABS)[number];
 
 const TAB_LABEL: Record<TabId, TranslationKey> = {
   memory: 'context.memory',
+  tasks: 'context.tasks',
   skills: 'context.skills',
   apps: 'context.apps',
   routines: 'context.routines',
   cost: 'context.cost',
 };
 
+export type ContextSubject = { kind: 'bot'; bot: Bot } | { kind: 'room'; room: Room; members: Bot[] };
+
 export interface ContextPanelProps {
-  bot: Bot;
+  subject: ContextSubject;
   thread: ThreadState;
+  /** Tasks for this bot or room, newest first. */
+  tasks: Task[];
+  onNewTask: () => void;
   onClose: () => void;
   className?: string;
 }
 
-/** The bot's computer on top, then text tabs with an underline (DESIGN.md section 7). */
-export function ContextPanel({ bot, thread, onClose, className }: ContextPanelProps): ReactElement {
-  const [tab, setTab] = useState<TabId>('memory');
+/**
+ * A bot's computer on top, or a room's members, then text tabs with an underline (DESIGN.md
+ * section 7).
+ */
+export function ContextPanel({ subject, thread, tasks, onNewTask, onClose, className }: ContextPanelProps): ReactElement {
+  const tabs: readonly TabId[] = subject.kind === 'bot' ? BOT_TABS : ROOM_TABS;
+  const [chosen, setTab] = useState<TabId>(subject.kind === 'bot' ? 'memory' : 'tasks');
+  const tab = tabs.includes(chosen) ? chosen : tabs[0]!;
   const idBase = useId();
 
   return (
     <aside className={cx('flex min-h-0 flex-col bg-surface md:border-l md:border-line', className)}>
       <div className="titlebar flex h-14 flex-none items-center justify-between gap-2 border-b border-line px-4 mac-shell:pl-20 md:mac-shell:pl-4">
-        <h2 className="m-0 text-base font-semibold tracking-[var(--tracking-heading)]">{t('context.computer')}</h2>
+        <h2 className="m-0 text-base font-semibold tracking-[var(--tracking-heading)]">
+          {subject.kind === 'bot' ? t('context.computer') : t('context.members')}
+        </h2>
         <Button variant="ghost" size="sm" className="xl:hidden" onClick={onClose}>
           {t('context.close')}
         </Button>
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <Computer bot={bot} />
+        {subject.kind === 'bot' ? <Computer bot={subject.bot} /> : <Members room={subject.room} members={subject.members} thread={thread} />}
 
         <div
           role="tablist"
           aria-label={t('context.tablist')}
           className="no-scrollbar sticky top-0 z-10 flex gap-4 overflow-x-auto border-b border-line bg-surface px-4"
         >
-          {TABS.map((id) => (
+          {tabs.map((id) => (
             <button
               key={id}
               type="button"
@@ -65,7 +83,22 @@ export function ContextPanel({ bot, thread, onClose, className }: ContextPanelPr
         </div>
 
         <div role="tabpanel" id={`${idBase}-panel`} aria-labelledby={`${idBase}-tab-${tab}`} className="p-4">
-          <TabBody tab={tab} bot={bot} thread={thread} />
+          {tab === 'tasks' ? (
+            <div className="flex flex-col gap-3">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="m-0 text-sm font-medium text-ink-2">
+                  {subject.kind === 'bot' ? t('context.tasksBot', { name: subject.bot.name }) : t('context.tasksRoom')}
+                </h3>
+                <Button variant="secondary" size="sm" onClick={onNewTask}>
+                  <Plus size={14} />
+                  {t('board.newTask')}
+                </Button>
+              </div>
+              <TaskList tasks={tasks} empty={subject.kind === 'bot' ? t('context.tasksEmptyBot', { name: subject.bot.name }) : t('context.tasksEmptyRoom')} />
+            </div>
+          ) : (
+            <TabBody tab={tab} name={subject.kind === 'bot' ? subject.bot.name : subject.room.thread.title} thread={thread} />
+          )}
         </div>
       </div>
     </aside>
@@ -94,8 +127,34 @@ function Computer({ bot }: { bot: Bot }): ReactElement {
   );
 }
 
-function TabBody({ tab, bot, thread }: { tab: TabId; bot: Bot; thread: ThreadState }): ReactElement {
-  const name = bot.name;
+function Members({ room, members, thread }: { room: Room; members: Bot[]; thread: ThreadState }): ReactElement {
+  return (
+    <div className="flex flex-col gap-1 border-b border-line p-3">
+      <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
+        {members.map((bot) => {
+          const avatar = avatarOf(bot);
+          const activity = botActivity(thread, bot.id);
+          return (
+            <li key={bot.id} data-avatar-zone className="flex items-center gap-3 rounded-md px-1 py-1.5">
+              <BotAvatar shape={avatar.shape} color={avatar.color} mood={moodOf(activity)} size="md" />
+              <span className="flex min-w-0 flex-1 flex-col">
+                <span className="truncate text-sm font-medium">{bot.name}</span>
+                <span className="truncate text-xs text-ink-2">{activity === 'idle' ? bot.job : t(activity === 'waiting' ? 'status.waiting' : 'status.working')}</span>
+              </span>
+              {bot.id === room.thread.leadBotId ? <Badge>{t('room.lead')}</Badge> : null}
+              {bot.id === thread.baton && bot.id !== room.thread.leadBotId ? <Badge>{t('room.next')}</Badge> : null}
+            </li>
+          );
+        })}
+      </ul>
+      <p className="m-0 px-1 pt-1 text-xs text-ink-2">
+        {room.thread.responder === 'mention' ? t('room.ruleMention') : t('room.ruleLeadShort')}
+      </p>
+    </div>
+  );
+}
+
+function TabBody({ tab, name, thread }: { tab: Exclude<TabId, 'tasks'>; name: string; thread: ThreadState }): ReactElement {
 
   switch (tab) {
     case 'memory':

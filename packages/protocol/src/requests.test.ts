@@ -75,6 +75,18 @@ describe('request schemas', () => {
     expect(() => PostMessage.parse({ content: '' })).toThrow();
   });
 
+  it('accepts unique mentions of up to a room of bots', () => {
+    expect(PostMessage.parse({ content: '@Capy look', mentions: ['bot_1', 'bot_2'] })).toEqual({
+      content: '@Capy look',
+      mentions: ['bot_1', 'bot_2'],
+    });
+    const full = Array.from({ length: MAX_ROOM_BOTS }, (_, i) => `bot_${i}`);
+    expect(PostMessage.parse({ content: 'all', mentions: full }).mentions).toHaveLength(MAX_ROOM_BOTS);
+    expect(() => PostMessage.parse({ content: 'x', mentions: ['bot_1', 'bot_1'] })).toThrow(/only once/);
+    expect(() => PostMessage.parse({ content: 'x', mentions: [...full, 'bot_extra'] })).toThrow();
+    expect(() => PostMessage.parse({ content: 'x', mentions: [''] })).toThrow();
+  });
+
   it('validates approval decisions', () => {
     expect(ResolveApproval.parse({ decision: 'allow_always' })).toEqual({ decision: 'allow_always' });
     expect(() => ResolveApproval.parse({ decision: 'maybe' })).toThrow();
@@ -160,6 +172,11 @@ describe('room, membership, and task requests', () => {
   it('requires at least one field on UpdateTask', () => {
     expect(UpdateTask.parse({ status: 'done', result: 'Posted' })).toEqual({ status: 'done', result: 'Posted' });
     expect(UpdateTask.parse({ workThreadId: 'thr_bot_2' })).toEqual({ workThreadId: 'thr_bot_2' });
+    expect(UpdateTask.parse({ workRunId: 'run_1', status: 'cancelled' })).toEqual({
+      workRunId: 'run_1',
+      status: 'cancelled',
+    });
+    expect(() => UpdateTask.parse({ workRunId: '' })).toThrow();
     expect(() => UpdateTask.parse({})).toThrow(/at least one field/);
     expect(() => UpdateTask.parse({ status: 'paused' })).toThrow();
   });

@@ -26,6 +26,7 @@ export function toTask(row: TaskRow): Task {
     parentTaskId: row.parentTaskId ?? undefined,
     threadId: row.threadId,
     workThreadId: row.workThreadId ?? undefined,
+    workRunId: row.workRunId ?? undefined,
     result: row.result ?? undefined,
     chainId: row.chainId,
     depth: row.depth,

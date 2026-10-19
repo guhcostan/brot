@@ -35,6 +35,16 @@ export function createThreadRepo(db: Db) {
       return rows.map(toThread);
     },
 
+    /** Every room thread, most recently updated first. */
+    async listRooms(): Promise<Thread[]> {
+      const rows = await db
+        .select()
+        .from(threads)
+        .where(eq(threads.kind, 'room'))
+        .orderBy(desc(threads.updatedAt), asc(threads.id));
+      return rows.map(toThread);
+    },
+
     async get(id: string): Promise<Thread | undefined> {
       const [row] = await db.select().from(threads).where(eq(threads.id, id)).limit(1);
       return row ? toThread(row) : undefined;

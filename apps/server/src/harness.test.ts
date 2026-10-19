@@ -428,6 +428,28 @@ describe('contained runs: engine sessions', () => {
     await runToEnd(ctx, threadId);
     expect(engine.contexts[1]?.engineSessionId).toBeUndefined();
   });
+
+  it('forgets a bot\'s engine sessions in rooms, and leaves the sessions of other bots alone', async () => {
+    const engine = fakeEngine(async function* () {
+      yield { type: 'engine.session', sessionId: 'sess-room' };
+    });
+    const ctx = await contextWith({ engines: createEngineRegistry([engine.driver]) });
+    const { bot } = await botAndThread(ctx, { computer: 'none' });
+    const other = await ctx.services.repos.bots.create({ name: 'Bea', job: 'Testing', engine: 'dsh', computer: 'none' });
+    const room = await ctx.services.repos.rooms.create({
+      title: 'Team',
+      botIds: [bot.id, other.id],
+      leadBotId: bot.id,
+      responder: 'lead',
+    });
+    await ctx.services.repos.threadSessions.set(room.id, bot.id, 'sess-ada');
+    await ctx.services.repos.threadSessions.set(room.id, other.id, 'sess-bea');
+
+    await ctx.services.harness.resetEngineSessions(bot.id);
+
+    expect(await ctx.services.repos.threadSessions.get(room.id, bot.id)).toBeUndefined();
+    expect(await ctx.services.repos.threadSessions.get(room.id, other.id)).toBe('sess-bea');
+  });
 });
 
 describe('services shutdown', () => {

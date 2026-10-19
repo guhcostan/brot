@@ -28,6 +28,7 @@ export interface TestContextOptions {
   /** Default: a ready `sandbox` provider, because bots default to `computer: 'sandbox'`. Pass `{}` for none. */
   computers?: ServiceExtras['computers'];
   mcp?: ServiceExtras['mcp'];
+  team?: ServiceExtras['team'];
   mode?: ServerMode;
 }
 
@@ -57,6 +58,7 @@ export async function createTestContext(options: TestContextOptions = {}): Promi
   const services = await createServices(config, options.engines ?? createEngineRegistry([createMockEngine()]), {
     computers: options.computers ?? defaultComputers(),
     mcp: options.mcp,
+    team: options.team,
   });
   const deps = { ...services, config: { host: config.host, port: config.port, mode: config.mode } };
   return {

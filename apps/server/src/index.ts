@@ -6,6 +6,7 @@ import type { Hono } from 'hono';
 import { createApp } from './app';
 import { createDockerComputerProvider, createHostComputerProvider } from './computers';
 import { createBrotMcp } from './mcp';
+import { createTeamTools } from './team';
 import type { AppEnv, Bindings } from './auth';
 import { loadConfig, type ConfigOverrides } from './config';
 import { createServices, type ServiceExtras } from './services';
@@ -20,6 +21,8 @@ export interface StartOptions extends ConfigOverrides {
   computers?: ServiceExtras['computers'];
   /** Builds the Brot MCP server for contained runs from the server's own services. Absent: no Brot MCP tools. */
   mcp?: ServiceExtras['mcp'];
+  /** Team tools for bots in rooms and tasks, registered on the Brot MCP server. Absent: the built-in team tools. */
+  team?: ServiceExtras['team'];
 }
 
 export interface ServerHandle {
@@ -32,7 +35,7 @@ export interface ServerHandle {
 
 /** Starts the API and the webhook receiver. Pass port 0 to let the OS choose a free port. */
 export async function startServer(options: StartOptions = {}): Promise<ServerHandle> {
-  const { engines: engineOverride, computers, mcp, ...overrides } = options;
+  const { engines: engineOverride, computers, mcp, team, ...overrides } = options;
   const config = loadConfig(process.env, overrides);
   const services = await createServices(config, engineOverride ?? createEngineRegistry(defaultEngines()), {
     computers: computers ?? {
@@ -42,6 +45,7 @@ export async function startServer(options: StartOptions = {}): Promise<ServerHan
         : {}),
     },
     mcp: mcp ?? createBrotMcp,
+    team: team ?? createTeamTools,
   });
 
   await seedFirstBot(services.repos);

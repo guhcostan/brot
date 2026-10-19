@@ -1,6 +1,6 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNotNull } from 'drizzle-orm';
 import type { Db } from '../client';
-import { threadSessions } from '../schema';
+import { threads, threadSessions } from '../schema';
 import { nowIso } from './common';
 
 /**
@@ -32,6 +32,25 @@ export function createThreadSessionRepo(db: Db) {
           target: [threadSessions.threadId, threadSessions.botId],
           set: { engineSessionId: sessionId, updatedAt: timestamp },
         });
+    },
+
+    /**
+     * Clears every engine session `botId` holds, in rooms and in its DMs, for example when the bot changes
+     * engine: a session cannot resume on another engine. Rows stay with a null session, as after `set`.
+     * Sessions already cleared are left alone, so their `updatedAt` does not move.
+     */
+    async clearBot(botId: string): Promise<void> {
+      const timestamp = nowIso();
+      await db.transaction(async (tx) => {
+        await tx
+          .update(threadSessions)
+          .set({ engineSessionId: null, updatedAt: timestamp })
+          .where(and(eq(threadSessions.botId, botId), isNotNull(threadSessions.engineSessionId)));
+        await tx
+          .update(threads)
+          .set({ engineSessionId: null })
+          .where(and(eq(threads.botId, botId), isNotNull(threads.engineSessionId)));
+      });
     },
   };
 }

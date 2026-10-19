@@ -68,17 +68,26 @@ export const CreateThread = z.object({
 });
 export type CreateThread = z.infer<typeof CreateThread>;
 
-export const PostMessage = z.object({
-  content: z.string().min(1),
-});
-export type PostMessage = z.infer<typeof PostMessage>;
-
 /** Rejects a bot list that names the same bot twice. */
 function requireUniqueBots(bots: string[], ctx: z.RefinementCtx, path: string[]): void {
   if (new Set(bots).size !== bots.length) {
     ctx.addIssue({ code: 'custom', path, message: 'a bot may appear only once' });
   }
 }
+
+/**
+ * A message from the user. `mentions` names the bots it @mentions, by id. Each bot appears once, and a
+ * message names at most a room's worth of bots.
+ */
+export const PostMessage = z
+  .object({
+    content: z.string().min(1),
+    mentions: z.array(z.string().min(1)).max(MAX_ROOM_BOTS).optional(),
+  })
+  .superRefine((value, ctx) => {
+    if (value.mentions) requireUniqueBots(value.mentions, ctx, ['mentions']);
+  });
+export type PostMessage = z.infer<typeof PostMessage>;
 
 export const CreateRoom = z
   .object({
@@ -147,13 +156,17 @@ export const CreateTask = z
 export type CreateTask = z.infer<typeof CreateTask>;
 export type CreateTaskInput = z.input<typeof CreateTask>;
 
-/** Updates a task. `workThreadId` is written by the server when the assignee starts working. */
+/**
+ * Updates a task. `workThreadId` and `workRunId` are written by the server when the assignee starts working.
+ * `workRunId` lets a cancel stop the run that does the work.
+ */
 export const UpdateTask = z
   .object({
     status: TaskStatus.optional(),
     result: z.string().optional(),
     assigneeBotId: z.string().min(1).optional(),
     workThreadId: z.string().min(1).optional(),
+    workRunId: z.string().min(1).optional(),
   })
   .refine((value) => Object.values(value).some((field) => field !== undefined), {
     message: 'expected at least one field to update',
