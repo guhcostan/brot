@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { Approval, Bot, Device, Memory, Message, Policy, Routine, Run, Skill, Thread } from './entities';
+import { Approval, Bot, Computer, Device, Memory, Message, Policy, Routine, Run, Skill, Thread } from './entities';
 
 const at = '2026-10-19T12:00:00.000Z';
 
@@ -94,6 +94,32 @@ describe('entity schemas', () => {
     expect(roundTrip(Routine, cron)).toEqual(cron);
     expect(roundTrip(Routine, webhook)).toEqual(webhook);
     expect(roundTrip(Device, device)).toEqual(device);
+  });
+
+  it('round-trips a bot with an egress policy and a thread with an engine session', () => {
+    const withEgress = { ...bot, egress: { mode: 'allowlist', allow: ['api.github.com', '*.example.com'] } };
+    expect(roundTrip(Bot, withEgress)).toEqual(withEgress);
+
+    const thread = { id: 't1', botId: 'bot_1', title: 'Hello', engineSessionId: 'sess_9', createdAt: at, updatedAt: at };
+    expect(roundTrip(Thread, thread)).toEqual(thread);
+  });
+
+  it('round-trips a computer and rejects unknown states', () => {
+    const computer = {
+      id: 'cmp_1',
+      botId: 'bot_1',
+      state: 'ready',
+      image: 'ghcr.io/brot/computer:0.1.0',
+      createdAt: at,
+      updatedAt: at,
+    };
+    expect(roundTrip(Computer, computer)).toEqual(computer);
+    expect(roundTrip(Computer, { ...computer, state: 'error', error: 'pull failed' })).toMatchObject({
+      state: 'error',
+      error: 'pull failed',
+    });
+    expect(() => Computer.parse({ ...computer, state: 'running' })).toThrow();
+    expect(() => Computer.parse({ ...computer, image: '' })).toThrow();
   });
 
   it('rejects invalid enum values and timestamps', () => {

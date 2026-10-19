@@ -36,6 +36,11 @@ const validEvents: Array<{ type: CanonicalEventType; event: Record<string, unkno
     type: 'cost.updated',
     event: { ...base, type: 'cost.updated', tokensIn: 1, tokensOut: 2, costUsd: 0.01 },
   },
+  {
+    type: 'computer.status',
+    event: { ...base, type: 'computer.status', computerId: 'cmp_1', botId: 'bot_1', state: 'error', reason: 'pull failed' },
+  },
+  { type: 'network.blocked', event: { ...base, type: 'network.blocked', botId: 'bot_1', host: 'evil.example.com' } },
   { type: 'run.completed', event: { ...base, type: 'run.completed' } },
   { type: 'run.failed', event: { ...base, type: 'run.failed', error: 'boom' } },
 ];
@@ -50,6 +55,22 @@ describe('parseEvent', () => {
   it('accepts an event without runId', () => {
     const noRun = { id: 'e1', at, threadId: 't1', type: 'run.completed' };
     expect(parseEvent(noRun)).toEqual(noRun);
+  });
+
+  it('rejects a computer.status with an unknown state', () => {
+    expect(() =>
+      parseEvent({ ...base, type: 'computer.status', computerId: 'cmp_1', botId: 'bot_1', state: 'paused' }),
+    ).toThrow();
+  });
+
+  it('rejects a network.blocked that carries a URL instead of a host', () => {
+    for (const host of ['https://evil.example.com', 'evil.example.com/path?token=x', 'evil.example.com user@x']) {
+      expect(() => parseEvent({ ...base, type: 'network.blocked', botId: 'bot_1', host })).toThrow();
+    }
+  });
+
+  it('rejects a network.blocked without a host', () => {
+    expect(() => parseEvent({ ...base, type: 'network.blocked', botId: 'bot_1' })).toThrow();
   });
 
   it('rejects an unknown event type', () => {

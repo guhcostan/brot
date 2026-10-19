@@ -1,8 +1,17 @@
 import { z } from 'zod';
+import { EgressPolicy } from './egress';
 
 export const IsoDateTime = z.iso.datetime();
 export type IsoDateTime = z.infer<typeof IsoDateTime>;
 
+/**
+ * Where a bot's tools run.
+ * - `sandbox`: a per-bot container, the bot's computer. Shell and file tools run there freely because it
+ *   is disposable, and its network is limited by the bot's `egress` policy. Default for new bots.
+ * - `none`: no shell or filesystem tools. The bot has only Brot MCP tools.
+ * - `host`: runs on the machine that runs Brot. Desktop only, and only with explicit opt-in
+ *   (`hostAcknowledged` on CreateBot/UpdateBot). Container isolation and egress limits do not apply.
+ */
 export const ComputerKind = z.enum(['none', 'sandbox', 'host']);
 export type ComputerKind = z.infer<typeof ComputerKind>;
 
@@ -15,6 +24,8 @@ export const Bot = z.object({
   engine: z.string(),
   model: z.string().optional(),
   computer: ComputerKind,
+  /** Absent means deny-all. Stored bots always carry a policy; the default is `{ mode: 'deny', allow: [] }`. */
+  egress: EgressPolicy.optional(),
   pinned: z.boolean(),
   archived: z.boolean(),
   createdAt: IsoDateTime,
@@ -26,10 +37,35 @@ export const Thread = z.object({
   id: z.string(),
   botId: z.string(),
   title: z.string(),
+  /** The engine session to resume for this thread, as last reported through the `engine.session` event. */
+  engineSessionId: z.string().optional(),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
 export type Thread = z.infer<typeof Thread>;
+
+export const ComputerState = z.enum(['stopped', 'starting', 'ready', 'error']);
+export type ComputerState = z.infer<typeof ComputerState>;
+
+/** A bot's computer: the sandbox container behind `computer: 'sandbox'`. One per bot. */
+export const Computer = z.object({
+  id: z.string(),
+  botId: z.string(),
+  state: ComputerState,
+  image: z.string().min(1),
+  error: z.string().optional(),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+export type Computer = z.infer<typeof Computer>;
+
+/** Writes a bot's computer state. The repository creates the record the first time it is written. */
+export const ComputerStateUpdate = z.object({
+  state: ComputerState,
+  image: z.string().min(1),
+  error: z.string().optional(),
+});
+export type ComputerStateUpdate = z.infer<typeof ComputerStateUpdate>;
 
 export const MessageRole = z.enum(['user', 'assistant', 'system']);
 export type MessageRole = z.infer<typeof MessageRole>;

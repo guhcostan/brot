@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm';
 import {
   index,
   integer,
@@ -12,7 +13,9 @@ import type {
   ApprovalStatus,
   CanonicalEventType,
   ComputerKind,
+  ComputerState,
   DeviceRole,
+  EgressPolicy,
   MemoryKind,
   MessageRole,
   PolicyEffect,
@@ -31,6 +34,10 @@ export const bots = sqliteTable('bots', {
   engine: text('engine').notNull(),
   model: text('model'),
   computer: text('computer').$type<ComputerKind>().notNull(),
+  egress: text('egress', { mode: 'json' })
+    .$type<EgressPolicy>()
+    .notNull()
+    .default(sql`'{"mode":"deny","allow":[]}'`),
   pinned: integer('pinned', { mode: 'boolean' }).notNull().default(false),
   archived: integer('archived', { mode: 'boolean' }).notNull().default(false),
   createdAt: text('created_at').notNull(),
@@ -45,10 +52,27 @@ export const threads = sqliteTable(
       .notNull()
       .references(() => bots.id, { onDelete: 'cascade' }),
     title: text('title').notNull(),
+    engineSessionId: text('engine_session_id'),
     createdAt: text('created_at').notNull(),
     updatedAt: text('updated_at').notNull(),
   },
   (t) => [index('threads_bot_idx').on(t.botId)],
+);
+
+export const computers = sqliteTable(
+  'computers',
+  {
+    id: text('id').primaryKey(),
+    botId: text('bot_id')
+      .notNull()
+      .references(() => bots.id, { onDelete: 'cascade' }),
+    state: text('state').$type<ComputerState>().notNull(),
+    image: text('image').notNull(),
+    error: text('error'),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (t) => [uniqueIndex('computers_bot_uq').on(t.botId)],
 );
 
 export const messages = sqliteTable(

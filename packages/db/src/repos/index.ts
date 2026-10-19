@@ -1,6 +1,7 @@
 import type { Db } from '../client';
 import { createApprovalRepo } from './approvals';
 import { createBotRepo } from './bots';
+import { createComputerRepo } from './computers';
 import { createDeviceRepo } from './devices';
 import { createEventRepo } from './events';
 import { createMemoryRepo } from './memories';
@@ -21,6 +22,7 @@ export function createRepos(db: Db) {
     policies: createPolicyRepo(db),
     memories: createMemoryRepo(db),
     skills: createSkillRepo(db),
+    computers: createComputerRepo(db),
     routines: createRoutineRepo(db),
     devices: createDeviceRepo(db),
     events: createEventRepo(db),

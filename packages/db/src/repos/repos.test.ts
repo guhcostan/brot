@@ -31,13 +31,49 @@ describe('bots', () => {
       job: 'Researcher',
       instructions: '',
       engine: 'mock',
-      computer: 'none',
+      computer: 'sandbox',
+      egress: { mode: 'deny', allow: [] },
       pinned: false,
       archived: false,
     });
     expect(bot.avatar).toBeUndefined();
     expect(bot.model).toBeUndefined();
     expect(await repos.bots.get(bot.id)).toEqual(bot);
+  });
+
+  it('stores an egress allowlist and reads it back', async () => {
+    const bot = await repos.bots.create({
+      name: 'Ada',
+      job: 'x',
+      egress: { mode: 'allowlist', allow: ['api.github.com', '*.example.com'] },
+    });
+    expect(bot.egress).toEqual({ mode: 'allowlist', allow: ['api.github.com', '*.example.com'] });
+    expect((await repos.bots.get(bot.id))?.egress).toEqual(bot.egress);
+
+    const updated = await repos.bots.update(bot.id, { egress: { mode: 'deny', allow: [] } });
+    expect(updated?.egress).toEqual({ mode: 'deny', allow: [] });
+  });
+
+  it('rejects invalid egress hosts on create and update', async () => {
+    await expect(
+      repos.bots.create({ name: 'Ada', job: 'x', egress: { mode: 'allowlist', allow: ['https://github.com'] } }),
+    ).rejects.toThrow();
+    const bot = await repos.bots.create({ name: 'Ada', job: 'x' });
+    await expect(repos.bots.update(bot.id, { egress: { mode: 'deny', allow: ['github.com'] } })).rejects.toThrow();
+  });
+
+  it('requires hostAcknowledged to run on the host, and does not store the acknowledgement', async () => {
+    await expect(repos.bots.create({ name: 'Ada', job: 'x', computer: 'host' })).rejects.toThrow(/hostAcknowledged/);
+
+    const bot = await repos.bots.create({ name: 'Ada', job: 'x', computer: 'host', hostAcknowledged: true });
+    expect(bot.computer).toBe('host');
+    expect(bot).not.toHaveProperty('hostAcknowledged');
+
+    const bare = await repos.bots.create({ name: 'Grace', job: 'x' });
+    await expect(repos.bots.update(bare.id, { computer: 'host' })).rejects.toThrow(/hostAcknowledged/);
+    const moved = await repos.bots.update(bare.id, { computer: 'host', hostAcknowledged: true });
+    expect(moved).toMatchObject({ computer: 'host' });
+    expect(moved).not.toHaveProperty('hostAcknowledged');
   });
 
   it('rejects invalid input', async () => {
@@ -114,7 +150,72 @@ describe('messages', () => {
   });
 });
 
+describe('threads engine session', () => {
+  it('stores and clears the engine session without touching updatedAt', async () => {
+    const { bot } = await seed();
+    const thread = await repos.threads.create(bot.id, { title: 'Chat' });
+
+    const stored = await repos.threads.setEngineSessionId(thread.id, 'sess_9');
+    expect(stored).toMatchObject({ id: thread.id, engineSessionId: 'sess_9', updatedAt: thread.updatedAt });
+    expect((await repos.threads.get(thread.id))?.engineSessionId).toBe('sess_9');
+
+    const cleared = await repos.threads.setEngineSessionId(thread.id, null);
+    expect(cleared?.engineSessionId).toBeUndefined();
+    expect(await repos.threads.setEngineSessionId('missing', 'x')).toBeUndefined();
+  });
+});
+
+describe('computers', () => {
+  it('creates a computer on first write and updates the same record afterwards', async () => {
+    const { bot } = await seed();
+    expect(await repos.computers.getByBot(bot.id)).toBeUndefined();
+
+    const starting = await repos.computers.upsert(bot.id, { state: 'starting', image: 'ghcr.io/brot/computer:0.1.0' });
+    expect(starting).toMatchObject({ botId: bot.id, state: 'starting', image: 'ghcr.io/brot/computer:0.1.0' });
+    expect(starting.error).toBeUndefined();
+
+    const failed = await repos.computers.upsert(bot.id, {
+      state: 'error',
+      image: 'ghcr.io/brot/computer:0.1.0',
+      error: 'image pull failed',
+    });
+    expect(failed).toMatchObject({ id: starting.id, createdAt: starting.createdAt, state: 'error', error: 'image pull failed' });
+    expect(await repos.computers.getByBot(bot.id)).toEqual(failed);
+
+    const ready = await repos.computers.upsert(bot.id, { state: 'ready', image: 'ghcr.io/brot/computer:0.1.1' });
+    expect(ready).toMatchObject({ id: starting.id, state: 'ready', image: 'ghcr.io/brot/computer:0.1.1' });
+    expect(ready.error).toBeUndefined();
+  });
+
+  it('keeps one computer per bot', async () => {
+    const { bot } = await seed();
+    const other = await repos.bots.create({ name: 'Grace', job: 'x' });
+    const a = await repos.computers.upsert(bot.id, { state: 'ready', image: 'img' });
+    const b = await repos.computers.upsert(other.id, { state: 'stopped', image: 'img' });
+
+    expect(a.id).not.toBe(b.id);
+    expect((await repos.computers.getByBot(bot.id))?.state).toBe('ready');
+    expect((await repos.computers.getByBot(other.id))?.state).toBe('stopped');
+  });
+
+  it('rejects an unknown state or an empty image', async () => {
+    const { bot } = await seed();
+    await expect(repos.computers.upsert(bot.id, { state: 'paused' as 'ready', image: 'img' })).rejects.toThrow();
+    await expect(repos.computers.upsert(bot.id, { state: 'ready', image: '' })).rejects.toThrow();
+  });
+});
+
 describe('runs', () => {
+  it('lists runs by status, oldest first', async () => {
+    const { bot, thread, run } = await seed();
+    const second = await repos.runs.create({ threadId: thread.id, botId: bot.id, engine: 'mock' });
+    await repos.runs.update(run.id, { status: 'failed', endedAt: new Date().toISOString() });
+
+    expect((await repos.runs.listByStatus('running')).map((r) => r.id)).toEqual([second.id]);
+    expect((await repos.runs.listByStatus('failed')).map((r) => r.id)).toEqual([run.id]);
+    expect(await repos.runs.listByStatus('cancelled')).toEqual([]);
+  });
+
   it('creates a running run and updates its totals', async () => {
     const { run, thread, bot } = await seed();
     expect(run).toMatchObject({ status: 'running', tokensIn: 0, tokensOut: 0, costUsd: 0, threadId: thread.id, botId: bot.id });
@@ -373,8 +474,10 @@ describe('cascade on bot delete', () => {
       threadId: thread.id,
       type: 'run.completed',
     });
+    await repos.computers.upsert(bot.id, { state: 'ready', image: 'img' });
 
     expect(await repos.bots.remove(bot.id)).toBe(true);
+    expect(await repos.computers.getByBot(bot.id)).toBeUndefined();
 
     expect(await repos.threads.listByBot(bot.id)).toEqual([]);
     expect(await repos.messages.listByThread(thread.id)).toEqual([]);

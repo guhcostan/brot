@@ -11,6 +11,7 @@ export function toThread(row: ThreadRow): Thread {
     id: row.id,
     botId: row.botId,
     title: row.title,
+    engineSessionId: row.engineSessionId ?? undefined,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -46,6 +47,19 @@ export function createThreadRepo(db: Db) {
         })
         .returning();
       return toThread(required(row, 'thread'));
+    },
+
+    /**
+     * Stores the engine session to resume, or clears it with null. Does not change `updatedAt`:
+     * the session id is internal bookkeeping, not thread activity.
+     */
+    async setEngineSessionId(id: string, engineSessionId: string | null): Promise<Thread | undefined> {
+      const rows = await db
+        .update(threads)
+        .set({ engineSessionId })
+        .where(eq(threads.id, id))
+        .returning();
+      return rows[0] ? toThread(rows[0]) : undefined;
     },
 
     async touch(id: string): Promise<Thread | undefined> {

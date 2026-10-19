@@ -147,6 +147,10 @@ export function applyEvent(state: ThreadState, event: CanonicalEvent): ThreadSta
       return { ...state, memories: [...others, event.memory] };
     }
 
+    case 'computer.status':
+    case 'network.blocked':
+      return state;
+
     case 'cost.updated':
       return {
         ...state,

@@ -15,8 +15,44 @@ describe('request schemas', () => {
       job: 'Researcher',
       instructions: '',
       engine: 'mock',
-      computer: 'none',
+      computer: 'sandbox',
+      egress: { mode: 'deny', allow: [] },
     });
+  });
+
+  it('gives each parsed CreateBot its own egress object', () => {
+    const first = CreateBot.parse({ name: 'Ada', job: 'Researcher' });
+    const second = CreateBot.parse({ name: 'Grace', job: 'Researcher' });
+    first.egress.allow.push('example.com');
+    expect(second.egress.allow).toEqual([]);
+  });
+
+  it('requires hostAcknowledged for computer host on CreateBot', () => {
+    const base = { name: 'Ada', job: 'Researcher', computer: 'host' };
+    expect(() => CreateBot.parse(base)).toThrow(/hostAcknowledged/);
+    expect(() => CreateBot.parse({ ...base, hostAcknowledged: false })).toThrow(/hostAcknowledged/);
+    expect(CreateBot.parse({ ...base, hostAcknowledged: true }).computer).toBe('host');
+    expect(CreateBot.parse({ name: 'Ada', job: 'Researcher', computer: 'none' }).computer).toBe('none');
+  });
+
+  it('validates egress on CreateBot', () => {
+    expect(() =>
+      CreateBot.parse({ name: 'Ada', job: 'x', egress: { mode: 'allowlist', allow: ['https://github.com'] } }),
+    ).toThrow();
+    expect(
+      CreateBot.parse({ name: 'Ada', job: 'x', egress: { mode: 'allowlist', allow: ['*.github.com'] } }).egress,
+    ).toEqual({ mode: 'allowlist', allow: ['*.github.com'] });
+  });
+
+  it('requires hostAcknowledged for computer host on UpdateBot only when computer is set', () => {
+    expect(() => UpdateBot.parse({ computer: 'host' })).toThrow(/hostAcknowledged/);
+    expect(UpdateBot.parse({ computer: 'host', hostAcknowledged: true })).toEqual({
+      computer: 'host',
+      hostAcknowledged: true,
+    });
+    expect(UpdateBot.parse({ name: 'Renamed' })).toEqual({ name: 'Renamed' });
+    expect(UpdateBot.parse({ egress: { mode: 'deny', allow: [] } })).toEqual({ egress: { mode: 'deny', allow: [] } });
+    expect(() => UpdateBot.parse({ egress: { mode: 'deny', allow: ['example.com'] } })).toThrow();
   });
 
   it('requires name and job on CreateBot', () => {

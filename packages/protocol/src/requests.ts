@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { defaultEgressPolicy, EgressPolicy } from './egress';
 import {
   ApprovalDecision,
   ComputerKind,
@@ -9,29 +10,51 @@ import {
   RoutineTrigger,
 } from './entities';
 
-export const CreateBot = z.object({
-  name: z.string().min(1),
-  job: z.string().min(1),
-  instructions: z.string().default(''),
-  engine: z.string().min(1).default('mock'),
-  model: z.string().min(1).optional(),
-  computer: ComputerKind.default('none'),
-  avatar: z.string().optional(),
-});
+/** `computer: 'host'` runs tools on the Brot host machine, so it must be opted into explicitly. */
+function requireHostAcknowledgement(
+  value: { computer?: ComputerKind; hostAcknowledged?: boolean },
+  ctx: z.RefinementCtx,
+): void {
+  if (value.computer === 'host' && value.hostAcknowledged !== true) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['hostAcknowledged'],
+      message: 'computer "host" runs on the host machine and needs hostAcknowledged: true',
+    });
+  }
+}
+
+export const CreateBot = z
+  .object({
+    name: z.string().min(1),
+    job: z.string().min(1),
+    instructions: z.string().default(''),
+    engine: z.string().min(1).default('mock'),
+    model: z.string().min(1).optional(),
+    computer: ComputerKind.default('sandbox'),
+    avatar: z.string().optional(),
+    egress: EgressPolicy.default(defaultEgressPolicy),
+    hostAcknowledged: z.boolean().optional(),
+  })
+  .superRefine(requireHostAcknowledgement);
 export type CreateBot = z.infer<typeof CreateBot>;
 export type CreateBotInput = z.input<typeof CreateBot>;
 
-export const UpdateBot = z.object({
-  name: z.string().min(1).optional(),
-  job: z.string().min(1).optional(),
-  instructions: z.string().optional(),
-  avatar: z.string().optional(),
-  engine: z.string().min(1).optional(),
-  model: z.string().min(1).optional(),
-  computer: ComputerKind.optional(),
-  pinned: z.boolean().optional(),
-  archived: z.boolean().optional(),
-});
+export const UpdateBot = z
+  .object({
+    name: z.string().min(1).optional(),
+    job: z.string().min(1).optional(),
+    instructions: z.string().optional(),
+    avatar: z.string().optional(),
+    engine: z.string().min(1).optional(),
+    model: z.string().min(1).optional(),
+    computer: ComputerKind.optional(),
+    egress: EgressPolicy.optional(),
+    hostAcknowledged: z.boolean().optional(),
+    pinned: z.boolean().optional(),
+    archived: z.boolean().optional(),
+  })
+  .superRefine(requireHostAcknowledgement);
 export type UpdateBot = z.infer<typeof UpdateBot>;
 
 export const CreateThread = z.object({

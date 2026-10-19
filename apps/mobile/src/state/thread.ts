@@ -151,6 +151,8 @@ export function applyThreadEvent(state: ThreadState, event: CanonicalEvent): Thr
       };
     case 'memory.written':
     case 'cost.updated':
+    case 'computer.status':
+    case 'network.blocked':
       return base;
   }
 }

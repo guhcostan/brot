@@ -77,6 +77,14 @@ interface EngineDriver {
 
 **Default is one computer per bot.** Rooms can mount a shared folder explicitly.
 
+### Containment model (why approvals hold with DSH)
+DSH asks permission only when a call escalates out of its own sandbox, so Brot does not rely on the runtime to ask. The guarantee comes from three layers:
+1. **Containment**: DSH runs inside the bot's computer. Shell and file actions are free there because the computer is disposable.
+2. **Egress denied by default**: the computer reaches only the model provider's hosts plus the bot's `egress` allowlist. Blocked attempts emit `network.blocked`.
+3. **Brot MCP tools are the only way out**: sending, posting, paying, deleting and permission changes exist only as Brot MCP tools (`BrotToolSpec` with a `risk`). They call the broker before acting and receive `secret://` values only at execution time.
+
+DSH's own `session/request_permission` still routes to the broker as an extra layer. `computer: none` runs DSH with no shell or file tools (Brot MCP tools only). `computer: host` is desktop-only and needs explicit acknowledgement, because layers 1 and 2 don't apply there.
+
 ### Scheduling
 - Desktop: `croner` in-process with persisted next-run times. Missed runs resume on wake (with policy: run-once or skip).
 - Server/Cloud: **pg-boss** (Postgres-native jobs), with no Redis required.

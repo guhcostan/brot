@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { Approval, IsoDateTime, Memory, Message } from './entities';
+import { Approval, ComputerState, IsoDateTime, Memory, Message } from './entities';
 
 const base = {
   id: z.string(),
@@ -7,6 +7,17 @@ const base = {
   threadId: z.string(),
   runId: z.string().optional(),
 };
+
+/**
+ * A blocked-egress host name. Only the host is recorded, never a URL, so paths and query strings
+ * (which can carry tokens) stay out of the log. IP literals are allowed here: a blocked attempt can
+ * target any address.
+ */
+const BlockedHost = z
+  .string()
+  .min(1)
+  .max(253)
+  .refine((host) => !/[\s/?#@]/.test(host), 'expected a bare host, not a URL');
 
 export const CanonicalEvent = z.discriminatedUnion('type', [
   z.object({
@@ -62,6 +73,28 @@ export const CanonicalEvent = z.discriminatedUnion('type', [
     tokensIn: z.number().int().nonnegative(),
     tokensOut: z.number().int().nonnegative(),
     costUsd: z.number().nonnegative(),
+  }),
+  /**
+   * Computer lifecycle. The log is per thread, so `threadId` is the thread whose request or run caused
+   * the change (for an idle stop, the bot's most recent thread).
+   */
+  z.object({
+    ...base,
+    type: z.literal('computer.status'),
+    computerId: z.string(),
+    botId: z.string(),
+    state: ComputerState,
+    reason: z.string().optional(),
+  }),
+  /**
+   * The bot's computer tried to reach `host`, which its egress policy does not allow.
+   * The event's `at` is the time of the attempt.
+   */
+  z.object({
+    ...base,
+    type: z.literal('network.blocked'),
+    botId: z.string(),
+    host: BlockedHost,
   }),
   z.object({
     ...base,

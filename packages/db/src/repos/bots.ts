@@ -16,6 +16,7 @@ export function toBot(row: BotRow): Bot {
     engine: row.engine,
     model: row.model ?? undefined,
     computer: row.computer,
+    egress: row.egress,
     pinned: row.pinned,
     archived: row.archived,
     createdAt: row.createdAt,
@@ -40,7 +41,7 @@ export function createBotRepo(db: Db) {
     },
 
     async create(input: CreateBotInput): Promise<Bot> {
-      const data = CreateBot.parse(input);
+      const { hostAcknowledged: _acknowledged, ...data } = CreateBot.parse(input);
       const timestamp = nowIso();
       const [row] = await db
         .insert(bots)
@@ -57,7 +58,7 @@ export function createBotRepo(db: Db) {
     },
 
     async update(id: string, input: UpdateBot): Promise<Bot | undefined> {
-      const patch = UpdateBot.parse(input);
+      const { hostAcknowledged: _acknowledged, ...patch } = UpdateBot.parse(input);
       const rows = await db
         .update(bots)
         .set({ ...patch, updatedAt: nowIso() })

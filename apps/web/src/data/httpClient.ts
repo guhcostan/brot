@@ -43,6 +43,8 @@ const EVENT_NAMES: Record<CanonicalEventType, true> = {
   'approval.resolved': true,
   'memory.written': true,
   'cost.updated': true,
+  'computer.status': true,
+  'network.blocked': true,
   'run.completed': true,
   'run.failed': true,
 };

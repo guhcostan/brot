@@ -43,7 +43,7 @@ describe('health and engines', () => {
 describe('bots', () => {
   it('creates, reads, updates and deletes a bot', async () => {
     const bot = await createBot({ instructions: 'Be brief.' });
-    expect(bot).toMatchObject({ name: 'Ada', engine: 'mock', computer: 'none', pinned: false, archived: false });
+    expect(bot).toMatchObject({ name: 'Ada', engine: 'mock', computer: 'sandbox', pinned: false, archived: false });
 
     const listed = (await (await call(ctx.app, 'GET', '/api/bots')).json()) as Bot[];
     expect(listed.map((b) => b.id)).toEqual([bot.id]);

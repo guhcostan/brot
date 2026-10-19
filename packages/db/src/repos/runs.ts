@@ -1,5 +1,5 @@
 import { asc, eq } from 'drizzle-orm';
-import type { Run } from '@brot/protocol';
+import { RunStatus, type Run } from '@brot/protocol';
 import type { Db } from '../client';
 import { runs } from '../schema';
 import { newId, nowIso, required } from './common';
@@ -30,6 +30,16 @@ export function createRunRepo(db: Db) {
     async get(id: string): Promise<Run | undefined> {
       const [row] = await db.select().from(runs).where(eq(runs.id, id)).limit(1);
       return row ? toRun(row) : undefined;
+    },
+
+    /** Runs in a given status, oldest first. Used on startup to find runs that a restart left behind. */
+    async listByStatus(status: RunStatus): Promise<Run[]> {
+      const rows = await db
+        .select()
+        .from(runs)
+        .where(eq(runs.status, RunStatus.parse(status)))
+        .orderBy(asc(runs.startedAt), asc(runs.id));
+      return rows.map(toRun);
     },
 
     async listByThread(threadId: string): Promise<Run[]> {
