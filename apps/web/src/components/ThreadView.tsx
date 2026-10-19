@@ -53,7 +53,7 @@ export function ThreadView({
 
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg">
-      <header data-avatar-zone className="flex h-14 flex-none items-center gap-3 border-b border-line bg-bg px-3 md:px-5">
+      <header data-avatar-zone className="titlebar flex h-14 flex-none items-center gap-3 border-b border-line bg-bg px-3 md:px-5">
         <Button variant="ghost" size="sm" className="md:hidden" onClick={onOpenBots} aria-label={t('thread.bots')}>
           <ChevronLeft />
         </Button>

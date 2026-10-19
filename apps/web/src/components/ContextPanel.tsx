@@ -30,7 +30,7 @@ export function ContextPanel({ bot, thread, onClose, className }: ContextPanelPr
 
   return (
     <aside className={cx('flex min-h-0 flex-col bg-surface md:border-l md:border-line', className)}>
-      <div className="flex h-14 flex-none items-center justify-between gap-2 border-b border-line px-4">
+      <div className="titlebar flex h-14 flex-none items-center justify-between gap-2 border-b border-line px-4 mac-shell:pl-20 md:mac-shell:pl-4">
         <h2 className="m-0 text-base font-semibold tracking-[var(--tracking-heading)]">{t('context.computer')}</h2>
         <Button variant="ghost" size="sm" className="xl:hidden" onClick={onClose}>
           {t('context.close')}

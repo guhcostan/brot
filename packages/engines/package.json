@@ -11,8 +11,9 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@agentclientprotocol/sdk": "1.4.0",
     "@brot/protocol": "workspace:*",
-    "zod": "^4.6.7"
+    "@deepseek-ai/dsh": "0.2.1-rc.2"
   },
   "devDependencies": {
     "@types/node": "^24.19.2"

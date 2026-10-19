@@ -26,33 +26,38 @@ Repo: https://github.com/guhcostan/brot (private).
 | 2 | `apps/cli` + `apps/relay` | ✅ pushed | `brot serve | doctor | run` with `--json`. Blind WebSocket relay (2 peers/channel, 1 MiB frames, idle timeout, no logging) |
 | 2 | integration | ✅ pushed | `apps/server/src/e2e.test.ts` (approve + deny over real HTTP/SSE), `Dockerfile`, `deploy/compose.yaml`, `.github/workflows/ci.yml`. Docker build not run (daemon down) |
 
-## In progress (wave 3, uncommitted in the working tree)
+## Wave 3 (✅ pushed)
 
-Paused when the usage limit hit. Nothing below is committed; run the checks before committing.
-
-| Task | State | Paths |
+| Task | Owner | Notes |
 |---|---|---|
-| pt-BR + es locales | ✅ done, verified by worker (55 web tests) | `apps/web/locales`, `apps/web/src/i18n.ts` |
-| Electron shell | ✅ done, 38 tests, build OK; GUI never launched | `apps/desktop` (root: `electron` added to `onlyBuiltDependencies`, `apps/desktop/release/` ignored) |
-| Astro site (Opus) | ✅ done, build + astro check OK, screenshots in scratchpad | `apps/site` |
-| DSH engine over ACP (Haiku) | ⏸ stopped mid-way: `dsh.ts` started, fake ACP agent not finished, lint error (unused import) | `packages/engines` |
-| Expo mobile app (Opus) | ⏸ stopped mid-way: pure logic passing, theme/UI layer not done, lint errors in `src/api/client.test.ts` | `apps/mobile` |
+| DSH engine over ACP | Haiku | `packages/engines`: `mock` + `dsh` only. Pins `@deepseek-ai/dsh@0.2.1-rc.2`, `@agentclientprotocol/sdk@1.4.0`. Launch `node <dsh>/lib/bin.js --profile acp`. One ACP process + session per thread (in memory), `session/resume` after restarts of the process. Handshake verified against real DSH with no keys |
+| Electron shell | Haiku | `apps/desktop`: in-process server on an ephemeral port behind a loopback gateway on 8798 that serves `apps/web/dist` and proxies `/api`. GUI never launched |
+| Expo app | Opus | `apps/mobile`: pairing (QR/paste), inbox, thread, approval sheet (Face ID before sensitive allows), settings. RN avatar reuses `packages/ui` geometry. Bundles for iOS/Android; never run on a device |
+| Astro site | Opus | `apps/site`: en/pt-BR/es, living avatars as islands, static chat mock. Domain placeholder `https://brot.dev` (`SITE_URL`) |
+| Locales + switcher | Haiku + Opus | pt-BR/es, sidebar language switcher without reload |
+| Desktop title bar, avatar hydration | Opus | macOS drag strip via Electron UA detection; `BotAvatar` SSR-safe motion/phase |
+| `LICENSE` | orchestrator | AGPL-3.0 |
 
-To resume: re-spawn the DSH worker (Haiku) and the mobile worker (Opus) with their original specs plus "continue from the existing files". Then one Opus UI follow-up: language switcher in `Sidebar.tsx` (spec in the locales worker's report: select calling `setLocale` + reload), macOS `-webkit-app-region: drag` title strip for desktop, and the stale `data-animated` attribute after SSR hydration under reduced motion in `BotAvatar`.
-Root to-dos: add an AGPL-3.0 `LICENSE` file (site links to gnu.org meanwhile), confirm the site domain (placeholder `https://brot.dev`), add a per-launch server token for desktop (any local process can reach the embedded server through `trustLoopback`), `migrate()` `migrationsFolder` option for the esbuild CJS bundle.
+## Next (wave 4, priority order)
+
+1. **Guardrail gap (blocking real use).** DSH only sends `session/request_permission` for sandbox escalation (per its source, not verified at runtime). Ordinary shell/file calls inside its sandbox never reach the broker. Decide and implement: a DSH profile that escalates every risky call, and/or run DSH inside the bot's computer with irreversible external actions only reachable through Brot's MCP tools that call the broker.
+2. **Contracts** (`packages/protocol`, `packages/db`, own wave first): `engineSessionId` on `RunContext` + `engine.session` event + nullable `threads.engineSessionId`; optional `EngineDriver.close()` called by the server on shutdown (plus idle eviction of DSH processes); decide on `thought.delta`.
+3. DSH gaps: no per-turn usage (cost meter gets nothing), every tool call is `kind: other`, `models()` is only `default` until a session exists.
+4. Server gaps listed below. Desktop per-launch server token. `apps/cli` doctor tests still use fake `claude`/`codex` ids.
+5. Verify on real targets: Electron window + title bar, Expo on a simulator, Docker build.
 
 ## Decision: DeepSeek Harness is the only runtime (2026-10-19)
 
 The user chose DSH (`@deepseek-ai/dsh`, MIT) as the single agent runtime, driven over ACP. Providers are configured inside DSH (DeepSeek, Anthropic API, OpenAI, OpenRouter, local, and DSH's native sign-ins such as ChatGPT/Codex OAuth). Brot must not route Claude Free/Pro/Max OAuth outside Claude Code: Anthropic's terms forbid it. DSH is a developer preview, so pin its version and keep it behind `EngineDriver`.
 
-## Next
+## Backlog
 
-- Wire contract changes the DSH worker reports (likely a persisted engine session id per thread, plan/usage events).
 - Server gaps: `GET /api/threads/:id/events` for exact history; SSE `Last-Event-ID` replay; make `trustLoopback` configurable (a same-host reverse proxy currently skips auth); first-device pairing through Docker's published port; `run.cancelled` event; webhook HMAC; `runs.listByStatus`.
 - Relay: the server must mint channel ids with ≥128 bits of randomness; server-side relay client not built. CLI needs a `--token` flag for remote servers.
 - Docker: digest-pin `node:24-slim`, drop devDependencies from the runtime image, run `docker build` once the daemon is up.
 - `useChat`: buffer live events until `history-loaded` so early deltas aren't lost.
-- Web language switcher once locales land.
+- Mobile: real push notifications, live computer view, typed routes; pairing by 6-digit code needs server support. Stop/Unpair use neutral styling (DESIGN.md says danger for Stop): revisit.
+- Site: waitlist has no backend; Download points to GitHub Releases (empty until the first desktop release).
 
 ## Known decisions and gaps
 

@@ -1,4 +1,4 @@
-import { renderToStaticMarkup } from 'react-dom/server';
+import { renderToStaticMarkup, renderToString } from 'react-dom/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AVATAR_SHAPES } from './avatar';
 import { BotAvatar, BrandMark, STATUS_MOOD } from './BotAvatar';
@@ -31,10 +31,23 @@ describe('BotAvatar', () => {
     expect(html).toContain('data-animated="true"');
   });
 
-  it('stays still under prefers-reduced-motion', () => {
-    vi.stubGlobal('window', { matchMedia: (query: string) => ({ matches: query.includes('reduce') }) });
-    const html = renderToStaticMarkup(<BotAvatar shape="circle" color="pink" mood="approval" />);
+  it('server-renders the motion-agnostic face so hydration matches, whatever the client prefers', () => {
+    const matchMedia = vi.fn((query: string) => ({ matches: query.includes('reduce') }));
+    vi.stubGlobal('window', { matchMedia });
+    const html = renderToString(<BotAvatar shape="circle" color="pink" mood="approval" />);
     expect(html).toContain('data-mood="approval"');
+    expect(html).toContain('data-animated="true"');
+    expect(matchMedia).not.toHaveBeenCalled();
+  });
+
+  it('renders the same markup every time, so server HTML hydrates cleanly', () => {
+    const render = () => renderToString(<BotAvatar shape="cloud" color="teal" mood="thinking" />);
+    expect(render()).toBe(render());
+    expect(render()).not.toContain('--avatar-phase');
+  });
+
+  it('stays still when animation is turned off', () => {
+    const html = renderToString(<BotAvatar shape="circle" color="pink" animated={false} />);
     expect(html).not.toContain('data-animated');
   });
 

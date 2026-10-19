@@ -1,0 +1,184 @@
+---
+import { BrandMark, StatusDot } from '@brot/ui';
+import Base from '../layouts/Base.astro';
+import Header from './Header.astro';
+import ChatMock from './ChatMock.astro';
+import Icon from './Icon.astro';
+import HeroAvatars from './HeroAvatars';
+import LiveAvatar from './LiveAvatar';
+import { GITHUB_URL, LOCALES, LOCALE_LABELS, RELEASES_URL, dict, localePath, type Locale } from '../i18n/ui';
+
+interface Props {
+  locale: Locale;
+}
+
+const { locale } = Astro.props;
+const t = dict(locale);
+const year = new Date().getFullYear();
+---
+
+<Base locale={locale} title={t.meta.title} description={t.meta.description}>
+  <Header locale={locale} />
+
+  <main id="main">
+    <section class="hero" aria-labelledby="hero-title" data-avatar-zone>
+      <div class="wrap hero__inner">
+        <HeroAvatars client:load label={t.hero.avatars} />
+        <p class="eyebrow">{t.hero.eyebrow}</p>
+        <h1 id="hero-title">{t.hero.title}</h1>
+        <p class="lead">{t.hero.lead}</p>
+        <div class="cta-row">
+          <a class="brot-button cta" data-variant="primary" href={RELEASES_URL}>
+            <Icon name="download" />
+            {t.hero.download}
+          </a>
+          <a class="brot-button cta" data-variant="secondary" href="#waitlist">{t.hero.cloud}</a>
+        </div>
+        <p class="note">{t.hero.note}</p>
+      </div>
+    </section>
+
+    <section class="section section--mock" aria-labelledby="chat-title">
+      <div class="wrap">
+        <div class="section__head">
+          <h2 id="chat-title">{t.chat.title}</h2>
+          <p class="section__lead">{t.chat.lead}</p>
+        </div>
+        <ChatMock locale={locale} />
+      </div>
+    </section>
+
+    <section id="team" class="section" aria-labelledby="team-title">
+      <div class="wrap">
+        <div class="section__head">
+          <h2 id="team-title">{t.team.title}</h2>
+          <p class="section__lead">{t.team.lead}</p>
+        </div>
+        <ul class="team">
+          {
+            t.team.bots.map((bot) => (
+              <li class="team__card" data-avatar-zone>
+                <LiveAvatar client:visible shape={bot.shape} color={bot.color} mood={bot.mood} size={48} />
+                <div class="team__text">
+                  <h3>
+                    {bot.name}
+                    <span class="team__role">{bot.role}</span>
+                  </h3>
+                  <p>{bot.job}</p>
+                  <StatusDot status={bot.status} label={bot.statusLabel} />
+                </div>
+              </li>
+            ))
+          }
+        </ul>
+      </div>
+    </section>
+
+    <section id="how" class="section" aria-labelledby="how-title">
+      <div class="wrap">
+        <div class="section__head">
+          <h2 id="how-title">{t.how.title}</h2>
+          <p class="section__lead">{t.how.lead}</p>
+        </div>
+        <ul class="features">
+          {
+            t.how.features.map((feature) => (
+              <li class="feature">
+                <span class="feature__icon">
+                  <Icon name={feature.icon} />
+                </span>
+                <h3>{feature.title}</h3>
+                <p>{feature.body}</p>
+              </li>
+            ))
+          }
+        </ul>
+      </div>
+    </section>
+
+    <section id="deploy" class="section" aria-labelledby="deploy-title">
+      <div class="wrap">
+        <div class="section__head">
+          <h2 id="deploy-title">{t.deploy.title}</h2>
+          <p class="section__lead">{t.deploy.lead}</p>
+        </div>
+        <div class="plans">
+          {
+            [
+              { plan: t.deploy.self, href: RELEASES_URL, variant: 'primary' },
+              { plan: t.deploy.cloud, href: '#waitlist', variant: 'secondary' },
+            ].map(({ plan, href, variant }) => (
+              <article class="plan">
+                <header class="plan__head">
+                  <h3>{plan.name}</h3>
+                  <span class="brot-badge">{plan.tag}</span>
+                </header>
+                <p class="plan__body">{plan.body}</p>
+                <ul class="plan__points">
+                  {plan.points.map((point) => (
+                    <li>{point}</li>
+                  ))}
+                </ul>
+                <a class="brot-button cta" data-variant={variant} href={href}>
+                  {plan.cta}
+                </a>
+              </article>
+            ))
+          }
+        </div>
+        <aside id="waitlist" class="waitlist" aria-labelledby="waitlist-title">
+          <div>
+            <h3 id="waitlist-title">{t.waitlist.title}</h3>
+            <p>{t.waitlist.body}</p>
+          </div>
+          <a class="brot-button" data-variant="secondary" href={GITHUB_URL}>
+            <Icon name="github" />
+            {t.waitlist.cta}
+          </a>
+        </aside>
+      </div>
+    </section>
+
+    <section id="source" class="section" aria-labelledby="source-title">
+      <div class="wrap source">
+        <div class="source__text">
+          <span class="brot-badge">{t.source.license}</span>
+          <h2 id="source-title">{t.source.title}</h2>
+          <p class="section__lead">{t.source.body}</p>
+          <a class="brot-button cta" data-variant="primary" href={GITHUB_URL}>
+            <Icon name="github" />
+            {t.source.cta}
+          </a>
+        </div>
+        <pre class="brot-code source__code" aria-label={t.source.codeLabel}><code><span class="prompt">$</span> git clone https://github.com/guhcostan/brot
+<span class="prompt">$</span> cd brot && pnpm install
+<span class="prompt">$</span> pnpm dev</code></pre>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="wrap site-footer__inner">
+      <div class="site-footer__brand">
+        <BrandMark size={20} />
+        <span class="wordmark">brot</span>
+        <span class="site-footer__tagline">{t.footer.tagline}</span>
+      </div>
+      <p class="site-footer__meta">
+        {t.footer.status}
+        {' · '}
+        <a href="https://github.com/guhcostan/brot/blob/main/LICENSE">{t.footer.license}</a>
+        {' · '}© {year}
+      </p>
+      <nav class="lang" aria-label={t.nav.language}>
+        {
+          LOCALES.map((l) => (
+            <a href={localePath(l)} hreflang={l} lang={l} aria-current={l === locale ? 'page' : undefined}>
+              {LOCALE_LABELS[l].name}
+            </a>
+          ))
+        }
+      </nav>
+    </div>
+  </footer>
+</Base>

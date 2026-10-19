@@ -1,0 +1,50 @@
+---
+import { BrandMark } from '@brot/ui';
+import Icon from './Icon.astro';
+import { GITHUB_URL, LOCALES, LOCALE_LABELS, RELEASES_URL, dict, localePath, type Locale } from '../i18n/ui';
+
+interface Props {
+  locale: Locale;
+}
+
+const { locale } = Astro.props;
+const t = dict(locale);
+---
+
+<a class="skip" href="#main">{t.nav.skip}</a>
+<header class="site-header">
+  <div class="wrap site-header__inner">
+    <a class="brand" href={localePath(locale)} aria-label="brot">
+      <BrandMark size={24} />
+      <span class="wordmark" aria-hidden="true">brot</span>
+    </a>
+    <nav class="site-nav" aria-label={t.nav.label}>
+      <a href="#team">{t.nav.team}</a>
+      <a href="#how">{t.nav.how}</a>
+      <a href="#deploy">{t.nav.deploy}</a>
+      <a href="#source">{t.nav.source}</a>
+    </nav>
+    <div class="site-header__actions">
+      <nav class="lang" aria-label={t.nav.language}>
+        {
+          LOCALES.map((l) => (
+            <a
+              href={localePath(l)}
+              hreflang={l}
+              lang={l}
+              aria-current={l === locale ? 'page' : undefined}
+              title={LOCALE_LABELS[l].name}
+            >
+              <span aria-hidden="true">{LOCALE_LABELS[l].short}</span>
+              <span class="brot-sr-only">{LOCALE_LABELS[l].name}</span>
+            </a>
+          ))
+        }
+      </nav>
+      <a class="brot-button icon-link" data-variant="ghost" data-size="icon" href={GITHUB_URL} aria-label={t.nav.github}>
+        <Icon name="github" />
+      </a>
+      <a class="brot-button header-cta" data-variant="primary" data-size="sm" href={RELEASES_URL}>{t.hero.download}</a>
+    </div>
+  </div>
+</header>

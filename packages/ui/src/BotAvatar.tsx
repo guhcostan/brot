@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type ReactElement } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactElement } from 'react';
 import {
   AVATAR_VIEWBOX,
   EYE_STROKE,
@@ -79,7 +79,6 @@ export function BotAvatar({
   const rootRef = useRef<HTMLSpanElement>(null);
   const blinkRef = useRef<SVGGElement>(null);
   const followRef = useRef<SVGGElement>(null);
-  const [phase] = useState(() => Math.random());
   const reduced = usePrefersReducedMotion();
   const live = animated && !reduced;
   const active = useAvatarActive(rootRef, live);
@@ -89,6 +88,12 @@ export function BotAvatar({
   const [left, right] = eyePaths(shown, geometry.eyes);
   const px = typeof size === 'number' ? size : AVATAR_SIZE_PX[size];
   const blinkRange = BLINK_RANGE[shown];
+
+  // A random phase keeps a row of bots out of sync. It is set after mount so server HTML stays deterministic
+  // and hydrates without a mismatch; before that the loops simply start at zero.
+  useLayoutEffect(() => {
+    rootRef.current?.style.setProperty('--avatar-phase', Math.random().toFixed(3));
+  }, []);
 
   useEffect(() => {
     if (!live || !active || !blinkRange) return;
@@ -137,7 +142,6 @@ export function BotAvatar({
     '--avatar-size': `${px}px`,
     '--avatar-fill': `var(--avatar-${color})`,
     '--avatar-eye': `var(--avatar-${color}-eye)`,
-    '--avatar-phase': phase.toFixed(3),
   } as CSSProperties;
   const eyeOrigin = `${geometry.eyes.x}px ${geometry.eyes.y}px`;
 

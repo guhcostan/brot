@@ -1,4 +1,4 @@
-import { useEffect, useState, type RefObject } from 'react';
+import { useEffect, useState, useSyncExternalStore, type RefObject } from 'react';
 
 const REDUCED_QUERY = '(prefers-reduced-motion: reduce)';
 
@@ -6,18 +6,24 @@ export function prefersReducedMotion(): boolean {
   return typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia(REDUCED_QUERY).matches;
 }
 
+function subscribeReducedMotion(onChange: () => void): () => void {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return () => {};
+  const query = window.matchMedia(REDUCED_QUERY);
+  query.addEventListener('change', onChange);
+  return () => query.removeEventListener('change', onChange);
+}
+
+/**
+ * The server cannot know the preference, so server HTML and the hydrating render both assume motion.
+ * React then re-renders with the real client value, which keeps hydration free of mismatches.
+ */
+function serverReducedMotion(): boolean {
+  return false;
+}
+
 /** Tracks the user's reduced-motion preference live. */
 export function usePrefersReducedMotion(): boolean {
-  const [reduced, setReduced] = useState(prefersReducedMotion);
-  useEffect(() => {
-    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
-    const query = window.matchMedia(REDUCED_QUERY);
-    const onChange = () => setReduced(query.matches);
-    onChange();
-    query.addEventListener('change', onChange);
-    return () => query.removeEventListener('change', onChange);
-  }, []);
-  return reduced;
+  return useSyncExternalStore(subscribeReducedMotion, prefersReducedMotion, serverReducedMotion);
 }
 
 /**

@@ -1,6 +1,3 @@
-import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 import type { Bot, Memory, Message, RunContext, ToolDecision, ToolRequest } from '@brot/protocol';
 
 const AT = '2026-10-19T12:00:00.000Z';
@@ -50,23 +47,4 @@ export async function collect<T>(iterable: AsyncIterable<T>): Promise<T[]> {
   const items: T[] = [];
   for await (const item of iterable) items.push(item);
   return items;
-}
-
-const fakeDirs: string[] = [];
-
-/**
- * Writes an executable Node script that stands in for a CLI binary. `body` gets the
- * script's own directory so it can record the argv it was called with.
- */
-export async function makeFakeCli(body: (dir: string) => string): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), 'brot-engines-'));
-  fakeDirs.push(dir);
-  const bin = join(dir, 'fake-cli');
-  await writeFile(bin, `#!/usr/bin/env node\n${body(dir)}\n`);
-  await chmod(bin, 0o755);
-  return bin;
-}
-
-export async function removeFakeClis(): Promise<void> {
-  await Promise.all(fakeDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 }

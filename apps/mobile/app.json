@@ -1,0 +1,40 @@
+{
+  "expo": {
+    "name": "Brot",
+    "slug": "brot",
+    "scheme": "brot",
+    "version": "0.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "bundleIdentifier": "dev.brot.mobile",
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSAppTransportSecurity": { "NSAllowsLocalNetworking": true }
+      }
+    },
+    "android": {
+      "package": "dev.brot.mobile"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      "expo-font",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Brot uses the camera to scan the pairing code shown on your computer.",
+          "recordAudioAndroid": false
+        }
+      ],
+      [
+        "expo-local-authentication",
+        { "faceIDPermission": "Brot asks for Face ID before you approve sensitive actions." }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": false
+    }
+  }
+}

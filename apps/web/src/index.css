@@ -2,6 +2,9 @@
 @import "@brot/ui/styles.css";
 
 /* Tailwind maps onto the @brot/ui tokens only: its default palette and type scale are removed. */
+/* mac-shell: the macOS desktop window, whose title bar is hidden behind the traffic lights (see components/shell.ts). */
+@custom-variant mac-shell (&:where([data-shell="mac-desktop"], [data-shell="mac-desktop"] *));
+
 @theme {
   --color-*: initial;
   --text-*: initial;
@@ -49,4 +52,13 @@ body,
 }
 .no-scrollbar::-webkit-scrollbar {
   display: none;
+}
+
+/* Electron drags the window by any -webkit-app-region: drag box; controls inside opt out so clicks still land. */
+[data-shell="mac-desktop"] .titlebar {
+  -webkit-app-region: drag;
+  user-select: none;
+}
+[data-shell="mac-desktop"] .titlebar :is(button, a, input, select, textarea, label, [role="button"], [tabindex]) {
+  -webkit-app-region: no-drag;
 }

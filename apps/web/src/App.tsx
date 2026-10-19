@@ -4,7 +4,8 @@ import { ContextPanel } from './components/ContextPanel';
 import { Sidebar } from './components/Sidebar';
 import { ThreadView } from './components/ThreadView';
 import { createClient } from './data';
-import { t } from './i18n';
+import { getLocale, setLocale, t, type Locale } from './i18n';
+import { currentShell } from './components/shell';
 import { botStatus, emptyThread } from './state/thread';
 import { useChat } from './state/useChat';
 
@@ -18,13 +19,23 @@ export function App(): ReactElement {
   const client = useMemo(() => createClient(), []);
   const { state, select, send, decide } = useChat(client);
   const [pane, setPane] = useState<Pane>('thread');
+  const [locale, setLocaleState] = useState<Locale>(getLocale);
+  const [shell] = useState(currentShell);
+
+  const changeLocale = (next: Locale) => {
+    setLocale(next);
+    setLocaleState(next);
+  };
 
   const selected = state.bots.find((bot) => bot.id === state.selectedBotId) ?? null;
   const threadOf = (botId: string) => state.threads[botId] ?? emptyThread;
   const statusOf = (botId: string): BotStatus => botStatus(threadOf(botId));
 
   return (
-    <div className="grid h-dvh grid-cols-1 overflow-hidden bg-bg text-ink md:grid-cols-[264px_minmax(0,1fr)] xl:grid-cols-[264px_minmax(0,1fr)_320px]">
+    <div
+      data-shell={shell}
+      className="grid h-dvh grid-cols-1 overflow-hidden bg-bg text-ink md:grid-cols-[264px_minmax(0,1fr)] xl:grid-cols-[264px_minmax(0,1fr)_320px]"
+    >
       <Sidebar
         bots={state.bots}
         statusOf={statusOf}
@@ -33,6 +44,8 @@ export function App(): ReactElement {
           select(botId);
           setPane('thread');
         }}
+        locale={locale}
+        onLocaleChange={changeLocale}
         className={pane === 'bots' ? 'flex' : 'hidden md:flex'}
       />
 
@@ -60,7 +73,7 @@ export function App(): ReactElement {
           bot={selected}
           thread={threadOf(selected.id)}
           onClose={() => setPane('thread')}
-          className={pane === 'context' ? 'fixed inset-0 z-20 flex xl:static xl:z-auto' : 'hidden xl:flex'}
+          className={pane === 'context' ? 'fixed inset-0 z-20 flex md:left-auto md:w-[360px] md:shadow-float xl:static xl:z-auto xl:w-auto xl:shadow-none' : 'hidden xl:flex'}
         />
       ) : null}
     </div>

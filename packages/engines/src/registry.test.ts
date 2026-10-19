@@ -33,8 +33,8 @@ describe('engine registry', () => {
     expect(registry.list()).toHaveLength(1);
   });
 
-  it('defaults to the mock, claude and codex drivers', () => {
+  it('defaults to the mock and dsh drivers', () => {
     const registry = createEngineRegistry(defaultEngines());
-    expect(registry.list().map((d) => d.id)).toEqual(['mock', 'claude', 'codex']);
+    expect(registry.list().map((d) => d.id)).toEqual(['mock', 'dsh']);
   });
 });

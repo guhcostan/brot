@@ -2,17 +2,20 @@ import { useMemo, useState, type ReactElement } from 'react';
 import type { Bot } from '@brot/protocol';
 import { BotAvatar, BrandMark, Input, STATUS_MOOD, StatusDot, cx, type BotStatus } from '@brot/ui';
 import { avatarOf } from '../format';
-import { t } from '../i18n';
+import { t, type Locale } from '../i18n';
+import { LanguageSwitcher } from './LanguageSwitcher';
 
 export interface SidebarProps {
   bots: Bot[];
   statusOf: (botId: string) => BotStatus;
   selectedId: string | null;
   onSelect: (botId: string) => void;
+  locale: Locale;
+  onLocaleChange: (locale: Locale) => void;
   className?: string;
 }
 
-export function Sidebar({ bots, statusOf, selectedId, onSelect, className }: SidebarProps): ReactElement {
+export function Sidebar({ bots, statusOf, selectedId, onSelect, locale, onLocaleChange, className }: SidebarProps): ReactElement {
   const [query, setQuery] = useState('');
 
   const visible = useMemo(() => {
@@ -28,9 +31,9 @@ export function Sidebar({ bots, statusOf, selectedId, onSelect, className }: Sid
   return (
     <nav
       aria-label={t('thread.bots')}
-      className={cx('flex min-h-0 flex-col gap-4 bg-surface px-3 pt-4 pb-3 md:border-r md:border-line', className)}
+      className={cx('flex min-h-0 flex-col gap-4 bg-surface px-3 pt-4 pb-3 mac-shell:pt-0 md:border-r md:border-line', className)}
     >
-      <div className="flex h-8 items-center gap-2 px-2">
+      <div className="titlebar flex h-8 items-center gap-2 px-2 mac-shell:-mx-3 mac-shell:h-11 mac-shell:pr-5 mac-shell:pl-20">
         <BrandMark size={22} />
         <span className="text-lg leading-none font-semibold tracking-[var(--tracking-tight)]">{t('app.name')}</span>
       </div>
@@ -49,6 +52,10 @@ export function Sidebar({ bots, statusOf, selectedId, onSelect, className }: Sid
         {pinned.length > 0 ? <BotSection title={t('sidebar.pinned')} bots={pinned} {...rowProps} /> : null}
         {others.length > 0 ? <BotSection title={t('sidebar.all')} bots={others} {...rowProps} /> : null}
       </div>
+
+      <footer className="-mx-3 flex flex-none border-t border-line px-3 pt-3">
+        <LanguageSwitcher locale={locale} onChange={onLocaleChange} className="w-full" />
+      </footer>
     </nav>
   );
 }

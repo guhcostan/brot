@@ -1,0 +1,55 @@
+---
+import uiStyles from '@brot/ui/styles.css?url';
+import siteStyles from '../styles/site.css?url';
+import { LOCALES, LOCALE_LABELS, localePath, type Locale } from '../i18n/ui';
+
+interface Props {
+  locale: Locale;
+  title: string;
+  description: string;
+}
+
+const { locale, title, description } = Astro.props;
+const site = Astro.site ?? new URL('https://brot.dev');
+const canonical = new URL(localePath(locale), site).href;
+const ogImage = new URL('/og.png', site).href;
+---
+
+<!doctype html>
+<html lang={locale}>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#FFFFFF" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0A0A0A" />
+    <link rel="canonical" href={canonical} />
+    {LOCALES.map((l) => <link rel="alternate" hreflang={l} href={new URL(localePath(l), site).href} />)}
+    <link rel="alternate" hreflang="x-default" href={new URL(localePath('en'), site).href} />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Brot" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:image" content={ogImage} />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="brot" />
+    <meta property="og:locale" content={LOCALE_LABELS[locale].og} />
+    {LOCALES.filter((l) => l !== locale).map((l) => <meta property="og:locale:alternate" content={LOCALE_LABELS[l].og} />)}
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={ogImage} />
+    <link rel="stylesheet" href={uiStyles} />
+    <link rel="stylesheet" href={siteStyles} />
+  </head>
+  <body>
+    <slot />
+  </body>
+</html>

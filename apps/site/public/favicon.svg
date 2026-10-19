@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">
+  <style>
+    .shape { fill: #111111; }
+    .eye { stroke: #FFFFFF; }
+    @media (prefers-color-scheme: dark) {
+      .shape { fill: #F2F2F2; }
+      .eye { stroke: #111111; }
+    }
+  </style>
+  <path class="shape" d="M20 4C31.6 4 36 8.4 36 20C36 31.6 31.6 36 20 36C8.4 36 4 31.6 4 20C4 8.4 8.4 4 20 4Z"/>
+  <path class="eye" d="M15 15V20M25 15V20" fill="none" stroke-width="3" stroke-linecap="round"/>
+</svg>

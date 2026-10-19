@@ -47,5 +47,6 @@
   "status.working": "Working",
   "status.waiting": "Waiting for you",
   "status.error": "Error",
-  "status.ok": "Done"
+  "status.ok": "Done",
+  "language.label": "Language"
 }

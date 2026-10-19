@@ -9,8 +9,8 @@ const ROLE_LABEL: Record<Message['role'], string> = {
 };
 
 /**
- * Flattens a run into one prompt for a CLI engine. The first line is always a
- * section label, so the prompt never starts with "-" and is not read as a flag.
+ * Flattens a run into one prompt for the first turn of a DSH session. Later turns send only the
+ * new input, because the session keeps its own history.
  */
 export function buildPrompt(ctx: Pick<RunContext, 'bot' | 'memories' | 'history' | 'input'>): string {
   const sections: string[] = [];

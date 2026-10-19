@@ -1,6 +1,5 @@
 import type { EngineDriver } from '@brot/protocol';
-import { createClaudeEngine } from './claude';
-import { createCodexEngine } from './codex';
+import { createDshEngine } from './dsh';
 import { createMockEngine } from './mock';
 
 export interface EngineRegistry {
@@ -24,5 +23,5 @@ export function createEngineRegistry(drivers: EngineDriver[] = []): EngineRegist
 }
 
 export function defaultEngines(): EngineDriver[] {
-  return [createMockEngine(), createClaudeEngine(), createCodexEngine()];
+  return [createMockEngine(), createDshEngine()];
 }
