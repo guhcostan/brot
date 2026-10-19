@@ -26,15 +26,20 @@ Repo: https://github.com/guhcostan/brot (private).
 | 2 | `apps/cli` + `apps/relay` | ✅ pushed | `brot serve | doctor | run` with `--json`. Blind WebSocket relay (2 peers/channel, 1 MiB frames, idle timeout, no logging) |
 | 2 | integration | ✅ pushed | `apps/server/src/e2e.test.ts` (approve + deny over real HTTP/SSE), `Dockerfile`, `deploy/compose.yaml`, `.github/workflows/ci.yml`. Docker build not run (daemon down) |
 
-## In progress (wave 3)
+## In progress (wave 3, uncommitted in the working tree)
 
-| Task | Owner | Paths |
+Paused when the usage limit hit. Nothing below is committed; run the checks before committing.
+
+| Task | State | Paths |
 |---|---|---|
-| DSH engine over ACP; delete `claude`/`codex` drivers | Haiku | `packages/engines` |
-| Electron shell | Haiku | `apps/desktop` |
-| Expo remote-control app | Opus | `apps/mobile` |
-| Astro landing site (en/pt-BR/es) | Opus | `apps/site` |
-| pt-BR + es locales for web | Haiku | `apps/web/locales`, `apps/web/src/i18n.ts` |
+| pt-BR + es locales | ✅ done, verified by worker (55 web tests) | `apps/web/locales`, `apps/web/src/i18n.ts` |
+| Electron shell | ✅ done, 38 tests, build OK; GUI never launched | `apps/desktop` (root: `electron` added to `onlyBuiltDependencies`, `apps/desktop/release/` ignored) |
+| Astro site (Opus) | ✅ done, build + astro check OK, screenshots in scratchpad | `apps/site` |
+| DSH engine over ACP (Haiku) | ⏸ stopped mid-way: `dsh.ts` started, fake ACP agent not finished, lint error (unused import) | `packages/engines` |
+| Expo mobile app (Opus) | ⏸ stopped mid-way: pure logic passing, theme/UI layer not done, lint errors in `src/api/client.test.ts` | `apps/mobile` |
+
+To resume: re-spawn the DSH worker (Haiku) and the mobile worker (Opus) with their original specs plus "continue from the existing files". Then one Opus UI follow-up: language switcher in `Sidebar.tsx` (spec in the locales worker's report: select calling `setLocale` + reload), macOS `-webkit-app-region: drag` title strip for desktop, and the stale `data-animated` attribute after SSR hydration under reduced motion in `BotAvatar`.
+Root to-dos: add an AGPL-3.0 `LICENSE` file (site links to gnu.org meanwhile), confirm the site domain (placeholder `https://brot.dev`), add a per-launch server token for desktop (any local process can reach the embedded server through `trustLoopback`), `migrate()` `migrationsFolder` option for the esbuild CJS bundle.
 
 ## Decision: DeepSeek Harness is the only runtime (2026-10-19)
 
