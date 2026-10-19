@@ -15,7 +15,7 @@ describe('inbox state', () => {
     const rows = botRows(state);
     expect(rows.map((row) => row.bot.id)).toEqual(['b4', 'b2', 'b1']);
     expect(rows[1]).toMatchObject({ status: 'waiting', statusLabel: 'Waiting for you', pending: 1 });
-    expect(rows[2]?.avatar).toEqual({ shape: 'cloud', color: 'teal' });
+    expect(rows[2]?.avatar).toMatchObject({ species: 'preguica', color: 'teal' });
     expect(inboxApprovals(state).map((a) => a.id)).toEqual(['a1']);
   });
 

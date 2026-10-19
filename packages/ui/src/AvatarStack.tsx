@@ -1,12 +1,14 @@
 import type { CSSProperties, ReactElement } from 'react';
-import type { AvatarMood, AvatarShape } from './avatar';
+import type { AvatarMood, AvatarShape, AvatarSpecies } from './avatar';
 import { BotAvatar, AVATAR_SIZE_PX, type AvatarSize } from './BotAvatar';
 import { cx } from './cx';
 import type { AvatarColor } from './tokens';
 
 export interface AvatarStackMember {
   id: string;
-  shape: AvatarShape;
+  species?: AvatarSpecies;
+  /** @deprecated Use `species`. */
+  shape?: AvatarShape;
   color: AvatarColor;
   mood?: AvatarMood;
 }
@@ -25,7 +27,7 @@ export interface AvatarStackProps {
 
 /**
  * Overlapping avatars for a room. Each avatar after the first casts a thin cutout in the row's
- * background (`--stack-cutout`, default `--surface`), so shapes stay distinct without a ring.
+ * background (`--stack-cutout`, default `--surface`), so heads stay distinct without a ring.
  */
 export function AvatarStack({ members, max = 3, size = 'sm', showCount = true, label, className }: AvatarStackProps): ReactElement {
   const shown = members.slice(0, Math.max(1, max));
@@ -41,7 +43,7 @@ export function AvatarStack({ members, max = 3, size = 'sm', showCount = true, l
     >
       {shown.map((member) => (
         <span key={member.id} className="brot-stack__item">
-          <BotAvatar shape={member.shape} color={member.color} mood={member.mood} size={px} />
+          <BotAvatar species={member.species} shape={member.shape} color={member.color} mood={member.mood} size={px} />
         </span>
       ))}
       {showCount && extra > 0 ? <span className="brot-stack__more">+{extra}</span> : null}

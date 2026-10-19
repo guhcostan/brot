@@ -1,13 +1,15 @@
-import { AVATAR_MOODS, SHAPE_GEOMETRY, eyePaths } from '@brot/ui/avatar';
+import { AVATAR_MOODS, AVATAR_SPECIES, SPECIES_GEOMETRY, eyePaths } from '@brot/ui/avatar';
 import { describe, expect, it } from 'vitest';
 import { eyePair, mixPair, parseQuad, posePair, quadPath } from './eyes';
 
 describe('eye geometry', () => {
-  it('round-trips every mood’s eye paths from @brot/ui', () => {
-    const anchor = SHAPE_GEOMETRY.cloud.eyes;
-    for (const mood of AVATAR_MOODS) {
-      const pair = eyePair(mood, anchor);
-      expect([quadPath(pair, 0), quadPath(pair, 6)]).toEqual(eyePaths(mood, anchor));
+  it('round-trips every species’ and mood’s eye paths from @brot/ui', () => {
+    for (const species of AVATAR_SPECIES) {
+      const { eyes, eyeGap } = SPECIES_GEOMETRY[species];
+      for (const mood of AVATAR_MOODS) {
+        const pair = eyePair(mood, eyes, eyeGap);
+        expect([quadPath(pair, 0), quadPath(pair, 6)]).toEqual(eyePaths(mood, eyes, eyeGap));
+      }
     }
   });
 

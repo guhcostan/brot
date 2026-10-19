@@ -23,23 +23,35 @@
   --attention-soft: #FEF2F2;
 
   --avatar-black: #111111;
+  --avatar-black-tone: #444444;
   --avatar-black-eye: #FFFFFF;
   --avatar-teal: #14B8A6;
+  --avatar-teal-tone: #0E7C70;
   --avatar-teal-eye: #FFFFFF;
   --avatar-violet: #8B5CF6;
+  --avatar-violet-tone: #6222F3;
   --avatar-violet-eye: #FFFFFF;
   --avatar-blue: #3B82F6;
+  --avatar-blue-tone: #0A55D1;
   --avatar-blue-eye: #FFFFFF;
   --avatar-orange: #F97316;
+  --avatar-orange-tone: #BE5105;
   --avatar-orange-eye: #FFFFFF;
   --avatar-amber: #F59E0B;
-  --avatar-amber-eye: #FFFFFF;
+  --avatar-amber-tone: #AC6F07;
+  --avatar-amber-eye: #111111;
   --avatar-pink: #EC4899;
+  --avatar-pink-tone: #C8156E;
   --avatar-pink-eye: #FFFFFF;
   --avatar-brown: #92400E;
+  --avatar-brown-tone: #CE5B14;
   --avatar-brown-eye: #FFFFFF;
   --avatar-gray: #9CA3AF;
-  --avatar-gray-eye: #FFFFFF;
+  --avatar-gray-tone: #626A79;
+  --avatar-gray-eye: #111111;
+  --avatar-white: #E5E7EB;
+  --avatar-white-tone: #727D92;
+  --avatar-white-eye: #111111;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -63,6 +75,7 @@
     --attention-soft: #2A1212;
 
     --avatar-black: #F2F2F2;
+    --avatar-black-tone: #A5A5A5;
     --avatar-black-eye: #111111;
   }
 }
@@ -87,6 +100,7 @@
   --attention-soft: #2A1212;
 
   --avatar-black: #F2F2F2;
+  --avatar-black-tone: #A5A5A5;
   --avatar-black-eye: #111111;
 }
 

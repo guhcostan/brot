@@ -7,11 +7,11 @@ import { MessageBubble } from './MessageBubble';
 import { TASK_STATUS_LABELS, TaskStatusLabel } from './TaskStatusLabel';
 
 const members = [
-  { id: 'a', shape: 'circle', color: 'teal' },
-  { id: 'b', shape: 'cloud', color: 'blue' },
-  { id: 'c', shape: 'drop', color: 'pink' },
+  { id: 'a', species: 'capivara', color: 'teal' },
+  { id: 'b', species: 'tucano', color: 'blue' },
+  { id: 'c', species: 'boto', color: 'pink' },
   { id: 'd', shape: 'blob', color: 'amber' },
-  { id: 'e', shape: 'squircle', color: 'black' },
+  { id: 'e', species: 'jabuti', color: 'white' },
 ] as const;
 
 describe('AvatarStack', () => {
@@ -19,6 +19,11 @@ describe('AvatarStack', () => {
     const html = renderToStaticMarkup(<AvatarStack members={members} max={3} />);
     expect(html.match(/class="brot-bot"/g)).toHaveLength(3);
     expect(html).toContain('+2');
+    expect(html).toContain('data-species="tucano"');
+  });
+
+  it('resolves legacy shapes in members', () => {
+    expect(renderToStaticMarkup(<AvatarStack members={members.slice(3)} max={1} />)).toContain('data-species="mico"');
   });
 
   it('is one labeled image when given a label, hidden otherwise', () => {
@@ -29,8 +34,8 @@ describe('AvatarStack', () => {
 
 describe('BotAvatar gaze', () => {
   it('marks the gaze direction only when set', () => {
-    expect(renderToStaticMarkup(<BotAvatar shape="circle" color="teal" gaze="right" />)).toContain('data-gaze="right"');
-    expect(renderToStaticMarkup(<BotAvatar shape="circle" color="teal" />)).not.toContain('data-gaze');
+    expect(renderToStaticMarkup(<BotAvatar species="onca" color="teal" gaze="right" />)).toContain('data-gaze="right"');
+    expect(renderToStaticMarkup(<BotAvatar species="onca" color="teal" />)).not.toContain('data-gaze');
   });
 });
 

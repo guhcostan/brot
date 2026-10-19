@@ -1,12 +1,18 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactElement } from 'react';
 import {
   AVATAR_VIEWBOX,
+  BACK_POSE,
   EYE_STROKE,
-  SHAPE_GEOMETRY,
+  FRONT_POSE,
+  SPECIES_GEOMETRY,
   eyePaths,
+  toSpecies,
   type AvatarMood,
+  type AvatarPart,
   type AvatarShape,
-  type ShapePart,
+  type AvatarSpecies,
+  type PartPose,
+  type Point,
 } from './avatar';
 import { createBlinkScheduler } from './blink';
 import { cx } from './cx';
@@ -30,7 +36,9 @@ const BLINK_MS = 130;
 const MAX_FOLLOW = 2.2;
 
 export interface BotAvatarProps {
-  shape: AvatarShape;
+  species?: AvatarSpecies;
+  /** @deprecated Use `species`. A legacy shape name resolves to its species. */
+  shape?: AvatarShape;
   color: AvatarColor;
   mood?: AvatarMood;
   size?: AvatarSize | number;
@@ -48,14 +56,35 @@ export interface BotAvatarProps {
 
 export type AvatarGaze = 'left' | 'right';
 
-function Part({ part }: { part: ShapePart }): ReactElement {
-  if (part.kind === 'circle') return <circle cx={part.cx} cy={part.cy} r={part.r} />;
-  if (part.kind === 'rect') return <rect x={part.x} y={part.y} width={part.width} height={part.height} rx={part.rx} />;
-  return part.roundness ? (
-    <path d={part.d} strokeWidth={part.roundness} strokeLinejoin="round" className="brot-bot__round" />
-  ) : (
-    <path d={part.d} />
-  );
+function Part({ part }: { part: AvatarPart }): ReactElement {
+  const className = part.ink === 'tone' ? 'brot-bot__tone' : 'brot-bot__fill';
+  switch (part.kind) {
+    case 'circle':
+      return <circle className={className} cx={part.cx} cy={part.cy} r={part.r} />;
+    case 'ellipse':
+      return (
+        <ellipse
+          className={className}
+          cx={part.cx}
+          cy={part.cy}
+          rx={part.rx}
+          ry={part.ry}
+          transform={part.rotate ? `rotate(${part.rotate} ${part.cx} ${part.cy})` : undefined}
+        />
+      );
+    case 'rect':
+      return <rect className={className} x={part.x} y={part.y} width={part.width} height={part.height} rx={part.rx} />;
+    case 'path':
+      return <path className={className} d={part.d} />;
+  }
+}
+
+/** CSS transform for a part pose, so mood changes transition instead of cutting. */
+function poseStyle(pose: PartPose, pivot: Point): CSSProperties {
+  return {
+    transformOrigin: `${pivot.x}px ${pivot.y}px`,
+    transform: `translate(${pose.x}px, ${pose.y}px) rotate(${pose.rotate}deg) scale(${pose.scale})`,
+  };
 }
 
 /** Success shows the smiling hop, then settles back to idle on its own. */
@@ -71,10 +100,12 @@ function useDisplayMood(mood: AvatarMood): AvatarMood {
 }
 
 /**
- * A bot's face: a flat shape in one avatar color with two eye strokes (DESIGN.md section 2).
+ * A bot's face: the flat head of a Brazilian animal in one avatar color, one tone of it for detail,
+ * and two eye strokes (DESIGN.md section 2).
  * Loops run in CSS and pause offscreen or in hidden tabs; blinks are scheduled at random gaps.
  */
 export function BotAvatar({
+  species: speciesProp,
   shape,
   color,
   mood = 'idle',
@@ -92,8 +123,9 @@ export function BotAvatar({
   const active = useAvatarActive(rootRef, live);
   const shown = useDisplayMood(mood);
 
-  const geometry = SHAPE_GEOMETRY[shape];
-  const [left, right] = eyePaths(shown, geometry.eyes);
+  const species = speciesProp ?? (shape ? toSpecies(shape) : undefined) ?? 'capivara';
+  const geometry = SPECIES_GEOMETRY[species];
+  const [left, right] = eyePaths(shown, geometry.eyes, geometry.eyeGap);
   const px = typeof size === 'number' ? size : AVATAR_SIZE_PX[size];
   const blinkRange = BLINK_RANGE[shown];
 
@@ -149,6 +181,7 @@ export function BotAvatar({
   const style = {
     '--avatar-size': `${px}px`,
     '--avatar-fill': `var(--avatar-${color})`,
+    '--avatar-tone': `var(--avatar-${color}-tone)`,
     '--avatar-eye': `var(--avatar-${color}-eye)`,
   } as CSSProperties;
   const eyeOrigin = `${geometry.eyes.x}px ${geometry.eyes.y}px`;
@@ -158,7 +191,7 @@ export function BotAvatar({
       ref={rootRef}
       className={cx('brot-bot', className)}
       style={style}
-      data-shape={shape}
+      data-species={species}
       data-mood={shown}
       data-gaze={gaze}
       data-animated={live ? 'true' : undefined}
@@ -168,18 +201,30 @@ export function BotAvatar({
     >
       <svg viewBox={`0 0 ${AVATAR_VIEWBOX} ${AVATAR_VIEWBOX}`} width={px} height={px} focusable="false">
         <g className="brot-bot__body">
-          <g transform={geometry.rotate ? `rotate(${geometry.rotate} 20 20)` : undefined}>
-            <g className="brot-bot__shape">
-              {geometry.parts.map((part, index) => (
+          {geometry.back.length > 0 ? (
+            <g className="brot-bot__back" style={poseStyle(BACK_POSE[shown], geometry.backPivot)}>
+              {geometry.back.map((part, index) => (
                 <Part key={index} part={part} />
               ))}
             </g>
-            <g ref={followRef} className="brot-bot__follow">
-              <g className="brot-bot__look" style={{ transformOrigin: eyeOrigin }}>
-                <g ref={blinkRef} className="brot-bot__blink" style={{ transformOrigin: eyeOrigin }}>
-                  <path className="brot-bot__eye" d={left} strokeWidth={EYE_STROKE} style={{ d: `path("${left}")` } as CSSProperties} />
-                  <path className="brot-bot__eye" d={right} strokeWidth={EYE_STROKE} style={{ d: `path("${right}")` } as CSSProperties} />
-                </g>
+          ) : null}
+          <g className="brot-bot__head">
+            {geometry.head.map((part, index) => (
+              <Part key={index} part={part} />
+            ))}
+          </g>
+          {geometry.front.length > 0 ? (
+            <g className="brot-bot__front" style={poseStyle(FRONT_POSE[shown], geometry.frontPivot)}>
+              {geometry.front.map((part, index) => (
+                <Part key={index} part={part} />
+              ))}
+            </g>
+          ) : null}
+          <g ref={followRef} className="brot-bot__follow">
+            <g className="brot-bot__look" style={{ transformOrigin: eyeOrigin }}>
+              <g ref={blinkRef} className="brot-bot__blink" style={{ transformOrigin: eyeOrigin }}>
+                <path className="brot-bot__eye" d={left} strokeWidth={EYE_STROKE} style={{ d: `path("${left}")` } as CSSProperties} />
+                <path className="brot-bot__eye" d={right} strokeWidth={EYE_STROKE} style={{ d: `path("${right}")` } as CSSProperties} />
               </g>
             </g>
           </g>
@@ -196,10 +241,10 @@ export interface BrandMarkProps {
   className?: string;
 }
 
-/** The black squircle with idle eyes. Still, like the favicon. */
+/** The black capybara with idle eyes. Still, like the favicon. */
 export function BrandMark({ size = 'sm', label, className }: BrandMarkProps): ReactElement {
   return (
-    <BotAvatar shape="squircle" color="black" size={size} label={label} animated={false} className={cx('brot-brand', className)} />
+    <BotAvatar species="capivara" color="black" size={size} label={label} animated={false} className={cx('brot-brand', className)} />
   );
 }
 

@@ -26,16 +26,16 @@ function bot(
   };
 }
 
-/** One bot per avatar shape in DESIGN.md section 2. */
+/** A demo team across the avatar species and colors in DESIGN.md section 2. */
 export const DEMO_BOTS: Bot[] = [
-  bot('bot_capy', 'Capy', 'Chief of Staff', 'squircle:black', 'sandbox', true),
-  bot('bot_onca', 'Onça', 'Bug Fixer', 'tilted:orange', 'sandbox', false),
-  bot('bot_tuca', 'Tuca', 'Sales follow-up', 'circle:amber', 'none', true),
-  bot('bot_ara', 'Ara', 'Social and content', 'blob:pink', 'none', false),
-  bot('bot_tamu', 'Tamu', 'Researcher', 'cloud:teal', 'sandbox', false),
-  bot('bot_boto', 'Boto', 'Web navigator', 'drop:blue', 'sandbox', false),
-  bot('bot_sol', 'Sol', 'Scheduled routines', 'triangle:violet', 'none', false),
-  bot('bot_mico', 'Mico', 'Quick tasks and triage', 'circle:brown', 'none', false),
+  bot('bot_capy', 'Capy', 'Chief of Staff', 'capivara:black', 'sandbox', true),
+  bot('bot_onca', 'Onça', 'Bug Fixer', 'onca:orange', 'sandbox', false),
+  bot('bot_tuca', 'Tuca', 'Sales follow-up', 'tucano:amber', 'none', true),
+  bot('bot_ara', 'Ara', 'Social and content', 'arara:pink', 'none', false),
+  bot('bot_tamu', 'Tamu', 'Researcher', 'tamandua:teal', 'sandbox', false),
+  bot('bot_boto', 'Boto', 'Web navigator', 'boto:blue', 'sandbox', false),
+  bot('bot_sol', 'Sol', 'Scheduled routines', 'preguica:violet', 'none', false),
+  bot('bot_mico', 'Mico', 'Quick tasks and triage', 'mico:brown', 'none', false),
 ];
 
 /** The DM thread id the mock uses for a bot. */

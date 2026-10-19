@@ -6,6 +6,7 @@ import ChatMock from './ChatMock.astro';
 import Icon from './Icon.astro';
 import HeroAvatars from './HeroAvatars';
 import LiveAvatar from './LiveAvatar';
+import { speciesOf } from './species';
 import { GITHUB_URL, LOCALES, LOCALE_LABELS, RELEASES_URL, dict, localePath, type Locale } from '../i18n/ui';
 
 interface Props {
@@ -58,7 +59,7 @@ const year = new Date().getFullYear();
           {
             t.team.bots.map((bot) => (
               <li class="team__card" data-avatar-zone>
-                <LiveAvatar client:visible shape={bot.shape} color={bot.color} mood={bot.mood} size={48} />
+                <LiveAvatar client:visible species={speciesOf(bot)} color={bot.color} mood={bot.mood} size={48} />
                 <div class="team__text">
                   <h3>
                     {bot.name}
@@ -182,3 +183,40 @@ const year = new Date().getFullYear();
     </div>
   </footer>
 </Base>
+
+<style is:global>
+  /* Hero band: overlapping heads cropped by a dark band, after the avatar reference (DESIGN.md section 2) */
+  .hero-band {
+    --band: clamp(152px, 30vw, 236px);
+    position: relative;
+    width: min(100%, 720px);
+    height: var(--band);
+    margin-bottom: var(--space-12);
+    overflow: hidden;
+    border-radius: var(--r-xl);
+    background: var(--ink);
+    isolation: isolate;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) .hero-band {
+      background: var(--surface);
+    }
+  }
+  :root[data-theme="dark"] .hero-band {
+    background: var(--surface);
+  }
+  .hero-band__head {
+    position: absolute;
+    top: var(--y);
+    left: var(--x);
+    width: calc(var(--band) * var(--k));
+    height: calc(var(--band) * var(--k));
+    transform: translate(-50%, -50%);
+    line-height: 0;
+  }
+  .hero-band__head .brot-bot,
+  .hero-band__head .brot-bot > svg {
+    width: 100%;
+    height: 100%;
+  }
+</style>

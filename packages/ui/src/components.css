@@ -287,11 +287,15 @@
     display: block;
     overflow: visible;
   }
-  .brot-bot__shape {
+  .brot-bot__fill {
     fill: var(--avatar-fill);
   }
-  .brot-bot__round {
-    stroke: var(--avatar-fill);
+  .brot-bot__tone {
+    fill: var(--avatar-tone);
+  }
+  .brot-bot__back,
+  .brot-bot__front {
+    transition: transform 240ms var(--ease);
   }
   .brot-bot__eye {
     fill: none;

@@ -1,12 +1,21 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40">
   <style>
-    .shape { fill: #111111; }
+    .fill { fill: #111111; }
+    .tone { fill: #444444; }
     .eye { stroke: #FFFFFF; }
     @media (prefers-color-scheme: dark) {
-      .shape { fill: #F2F2F2; }
+      .fill { fill: #F2F2F2; }
+      .tone { fill: #A5A5A5; }
       .eye { stroke: #111111; }
     }
   </style>
-  <path class="shape" d="M20 4C31.6 4 36 8.4 36 20C36 31.6 31.6 36 20 36C8.4 36 4 31.6 4 20C4 8.4 8.4 4 20 4Z"/>
-  <path class="eye" d="M15 15V20M25 15V20" fill="none" stroke-width="3" stroke-linecap="round"/>
+  <circle class="fill" cx="9.6" cy="9.4" r="3.9"/>
+  <circle class="fill" cx="30.4" cy="9.4" r="3.9"/>
+  <circle class="tone" cx="9.6" cy="9.4" r="1.9"/>
+  <circle class="tone" cx="30.4" cy="9.4" r="1.9"/>
+  <rect class="fill" x="4.5" y="6.5" width="31" height="28.5" rx="11.5"/>
+  <rect class="tone" x="8.5" y="20.5" width="23" height="14.5" rx="7.25"/>
+  <ellipse class="fill" cx="15.6" cy="25.6" rx="1.7" ry="1.25"/>
+  <ellipse class="fill" cx="24.4" cy="25.6" rx="1.7" ry="1.25"/>
+  <path class="eye" d="M15 12.1Q15 14.6 15 17.1M25 12.1Q25 14.6 25 17.1" fill="none" stroke-width="2.8" stroke-linecap="round"/>
 </svg>

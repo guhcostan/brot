@@ -1,4 +1,16 @@
-import { AVATAR_VIEWBOX, EYE_STROKE, SHAPE_GEOMETRY, type AvatarMood, type AvatarShape, type ShapePart } from '@brot/ui/avatar';
+import {
+  AVATAR_VIEWBOX,
+  BACK_POSE,
+  EYE_STROKE,
+  FRONT_POSE,
+  SPECIES_GEOMETRY,
+  poseTransform,
+  toSpecies,
+  type AvatarMood,
+  type AvatarPart,
+  type AvatarShape,
+  type AvatarSpecies,
+} from '@brot/ui/avatar';
 import { createBlinkScheduler } from '@brot/ui/blink';
 import type { AvatarColor } from '@brot/ui/tokens';
 import { useEffect, useRef, useState, type ReactElement } from 'react';
@@ -16,7 +28,7 @@ import Animated, {
   withSequence,
   withTiming,
 } from 'react-native-reanimated';
-import Svg, { Circle, G, Path, Rect } from 'react-native-svg';
+import Svg, { Circle, Ellipse, G, Path, Rect } from 'react-native-svg';
 import { useTheme } from '../theme/ThemeProvider';
 import { useAppActive } from '../theme/useAppActive';
 import { eyePair, mixPair, posePair, quadPath } from './eyes';
@@ -28,7 +40,9 @@ export type AvatarSize = 'sm' | 'md' | 'lg' | 'xl';
 export const AVATAR_SIZE_PT: Record<AvatarSize, number> = { sm: 24, md: 32, lg: 44, xl: 72 };
 
 export interface BotAvatarProps {
-  shape: AvatarShape;
+  species?: AvatarSpecies;
+  /** @deprecated Use `species`. A legacy shape name resolves to its species. */
+  shape?: AvatarShape;
   color: AvatarColor;
   mood?: AvatarMood;
   size?: AvatarSize | number;
@@ -40,14 +54,26 @@ export interface BotAvatarProps {
 
 const inOut = Easing.inOut(Easing.ease);
 
-function Part({ part, fill }: { part: ShapePart; fill: string }): ReactElement {
-  if (part.kind === 'circle') return <Circle cx={part.cx} cy={part.cy} r={part.r} fill={fill} />;
-  if (part.kind === 'rect') return <Rect x={part.x} y={part.y} width={part.width} height={part.height} rx={part.rx} fill={fill} />;
-  return part.roundness ? (
-    <Path d={part.d} fill={fill} stroke={fill} strokeWidth={part.roundness} strokeLinejoin="round" />
-  ) : (
-    <Path d={part.d} fill={fill} />
-  );
+function Part({ part, fill }: { part: AvatarPart; fill: string }): ReactElement {
+  switch (part.kind) {
+    case 'circle':
+      return <Circle cx={part.cx} cy={part.cy} r={part.r} fill={fill} />;
+    case 'ellipse':
+      return (
+        <Ellipse
+          cx={part.cx}
+          cy={part.cy}
+          rx={part.rx}
+          ry={part.ry}
+          fill={fill}
+          transform={part.rotate ? `rotate(${part.rotate} ${part.cx} ${part.cy})` : undefined}
+        />
+      );
+    case 'rect':
+      return <Rect x={part.x} y={part.y} width={part.width} height={part.height} rx={part.rx} fill={fill} />;
+    case 'path':
+      return <Path d={part.d} fill={fill} />;
+  }
 }
 
 /** Success shows the smiling hop, then settles back to idle on its own, like the web avatar. */
@@ -63,11 +89,11 @@ function useDisplayMood(mood: AvatarMood): AvatarMood {
 }
 
 /**
- * A bot's face (DESIGN.md section 2), drawn from the same geometry as the web BotAvatar. Eye strokes
+ * A bot's face (DESIGN.md section 2): the same Brazilian animal heads as the web BotAvatar. Eye strokes
  * morph between moods on the UI thread; blinks and glances come at random gaps; loops pause while
  * the app is in the background, and reduce motion leaves a still face whose eyes change instantly.
  */
-export function BotAvatar({ shape, color, mood = 'idle', size = 'md', label, animated = true }: BotAvatarProps): ReactElement {
+export function BotAvatar({ species: speciesProp, shape, color, mood = 'idle', size = 'md', label, animated = true }: BotAvatarProps): ReactElement {
   const theme = useTheme();
   const reduced = useReducedMotion();
   const appActive = useAppActive();
@@ -75,12 +101,13 @@ export function BotAvatar({ shape, color, mood = 'idle', size = 'md', label, ani
   const live = animated && !reduced && appActive;
 
   const px = typeof size === 'number' ? size : AVATAR_SIZE_PT[size];
-  const geometry = SHAPE_GEOMETRY[shape];
+  const species = speciesProp ?? (shape ? toSpecies(shape) : undefined) ?? 'capivara';
+  const geometry = SPECIES_GEOMETRY[species];
   const anchorY = geometry.eyes.y;
   const paint = theme.avatar(color);
   const [phase] = useState(() => Math.random());
 
-  const initial = useRef(eyePair(shown, geometry.eyes)).current;
+  const initial = useRef(eyePair(shown, geometry.eyes, geometry.eyeGap)).current;
   const from = useSharedValue<number[]>(initial);
   const to = useSharedValue<number[]>(initial);
   const morph = useSharedValue(1);
@@ -91,12 +118,12 @@ export function BotAvatar({ shape, color, mood = 'idle', size = 'md', label, ani
   const lift = useSharedValue(0);
   const shakeX = useSharedValue(0);
 
-  // Morph the eye strokes to the new mood. Shape changes re-anchor without a morph.
-  const lastShape = useRef(shape);
+  // Morph the eye strokes to the new mood. Species changes re-anchor without a morph.
+  const lastSpecies = useRef(species);
   useEffect(() => {
-    const target = eyePair(shown, geometry.eyes);
-    const instant = !animated || reduced || lastShape.current !== shape;
-    lastShape.current = shape;
+    const target = eyePair(shown, geometry.eyes, geometry.eyeGap);
+    const instant = !animated || reduced || lastSpecies.current !== species;
+    lastSpecies.current = species;
     if (instant) {
       from.value = target;
       to.value = target;
@@ -107,7 +134,7 @@ export function BotAvatar({ shape, color, mood = 'idle', size = 'md', label, ani
     to.value = target;
     morph.value = 0;
     morph.value = withTiming(1, { duration: MORPH_MS, easing: inOut });
-  }, [shown, shape, geometry.eyes, animated, reduced, from, to, morph]);
+  }, [shown, species, geometry.eyes, geometry.eyeGap, animated, reduced, from, to, morph]);
 
   // Per-mood life: blinks, glances, scanning, breathing, bobbing and entrance reactions.
   useEffect(() => {
@@ -232,20 +259,32 @@ export function BotAvatar({ shape, color, mood = 'idle', size = 'md', label, ani
     <View {...a11y} style={{ width: px, height: px }}>
       <Animated.View style={[{ width: px, height: px }, body]}>
         <Svg width={px} height={px} viewBox={`0 0 ${AVATAR_VIEWBOX} ${AVATAR_VIEWBOX}`}>
-          <G transform={geometry.rotate ? `rotate(${geometry.rotate} 20 20)` : undefined}>
-            {geometry.parts.map((part, index) => (
-              <Part key={index} part={part} fill={paint.fill} />
-            ))}
-            <AnimatedPath d={quadPath(initial, 0)} animatedProps={leftEye} stroke={paint.eye} strokeWidth={EYE_STROKE} strokeLinecap="round" fill="none" />
-            <AnimatedPath d={quadPath(initial, 6)} animatedProps={rightEye} stroke={paint.eye} strokeWidth={EYE_STROKE} strokeLinecap="round" fill="none" />
-          </G>
+          {geometry.back.length > 0 ? (
+            <G transform={poseTransform(BACK_POSE[shown], geometry.backPivot)}>
+              {geometry.back.map((part, index) => (
+                <Part key={index} part={part} fill={paint[part.ink]} />
+              ))}
+            </G>
+          ) : null}
+          {geometry.head.map((part, index) => (
+            <Part key={index} part={part} fill={paint[part.ink]} />
+          ))}
+          {geometry.front.length > 0 ? (
+            <G transform={poseTransform(FRONT_POSE[shown], geometry.frontPivot)}>
+              {geometry.front.map((part, index) => (
+                <Part key={index} part={part} fill={paint[part.ink]} />
+              ))}
+            </G>
+          ) : null}
+          <AnimatedPath d={quadPath(initial, 0)} animatedProps={leftEye} stroke={paint.eye} strokeWidth={EYE_STROKE} strokeLinecap="round" fill="none" />
+          <AnimatedPath d={quadPath(initial, 6)} animatedProps={rightEye} stroke={paint.eye} strokeWidth={EYE_STROKE} strokeLinecap="round" fill="none" />
         </Svg>
       </Animated.View>
     </View>
   );
 }
 
-/** The black squircle with idle eyes, still, like the app icon. */
+/** The black capybara with idle eyes, still, like the app icon. */
 export function BrandMark({ size = 'sm' }: { size?: AvatarSize | number }): ReactElement {
-  return <BotAvatar shape="squircle" color="black" size={size} animated={false} />;
+  return <BotAvatar species="capivara" color="black" size={size} animated={false} />;
 }

@@ -1,8 +1,8 @@
 import type { ReactElement } from 'react';
-import { BotAvatar, type AvatarColor, type AvatarMood, type AvatarShape } from '@brot/ui';
+import { BotAvatar, type AvatarColor, type AvatarMood, type AvatarSpecies } from '@brot/ui';
 
 export interface LiveAvatarProps {
-  shape: AvatarShape;
+  species: AvatarSpecies;
   color: AvatarColor;
   mood?: AvatarMood;
   size?: number;

@@ -2,6 +2,8 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   AVATAR_COLORS,
+  AVATAR_COLOR_NAMES,
+  avatarTone,
   colorDark,
   colorLight,
   fontFamily,
@@ -74,16 +76,38 @@ describe('tokens.css mirrors tokens.ts', () => {
 
   it('mirrors the avatar colors in both themes', () => {
     for (const [name, paint] of Object.entries(AVATAR_COLORS)) {
-      expect(light[`avatar-${name}`]?.toLowerCase(), `--avatar-${name}`).toBe(paint.light.fill.toLowerCase());
-      expect(light[`avatar-${name}-eye`]?.toLowerCase(), `--avatar-${name}-eye`).toBe(paint.light.eye.toLowerCase());
-      for (const dark of [darkMedia, darkAttr]) {
-        const fill = dark[`avatar-${name}`] ?? light[`avatar-${name}`];
-        const eye = dark[`avatar-${name}-eye`] ?? light[`avatar-${name}-eye`];
-        expect(fill?.toLowerCase(), `dark --avatar-${name}`).toBe(paint.dark.fill.toLowerCase());
-        expect(eye?.toLowerCase(), `dark --avatar-${name}-eye`).toBe(paint.dark.eye.toLowerCase());
+      for (const key of ['fill', 'tone', 'eye'] as const) {
+        const cssKey = key === 'fill' ? `avatar-${name}` : `avatar-${name}-${key}`;
+        expect(light[cssKey]?.toLowerCase(), `--${cssKey}`).toBe(paint.light[key].toLowerCase());
+        for (const dark of [darkMedia, darkAttr]) {
+          const value = dark[cssKey] ?? light[cssKey];
+          expect(value?.toLowerCase(), `dark --${cssKey}`).toBe(paint.dark[key].toLowerCase());
+        }
       }
     }
-    expect(AVATAR_COLORS.black.dark).toEqual({ fill: '#F2F2F2', eye: '#111111' });
+    expect(AVATAR_COLORS.black.dark).toMatchObject({ fill: '#F2F2F2', eye: '#111111' });
+    expect(AVATAR_COLORS.white.light.fill).toBe('#E5E7EB');
+  });
+
+  it('derives each detail tone from its head color, a visible step away', () => {
+    expect(avatarTone('#808080', -0.1)).toBe('#676767');
+    expect(avatarTone('#111111', 0.2)).toBe('#444444');
+    for (const name of AVATAR_COLOR_NAMES) {
+      for (const theme of ['light', 'dark'] as const) {
+        const { fill, tone } = AVATAR_COLORS[name][theme];
+        expect(contrast(fill, tone), `${name} ${theme}`).toBeGreaterThanOrEqual(1.5);
+      }
+    }
+  });
+
+  it('puts near-black eyes on light heads and white eyes on dark ones', () => {
+    for (const name of AVATAR_COLOR_NAMES) {
+      for (const theme of ['light', 'dark'] as const) {
+        const { fill, eye } = AVATAR_COLORS[name][theme];
+        expect(contrast(fill, eye), `${name} ${theme}`).toBeGreaterThanOrEqual(2.2);
+      }
+    }
+    for (const name of ['white', 'amber', 'gray'] as const) expect(AVATAR_COLORS[name].light.eye).toBe('#111111');
   });
 
   it('keeps radius, spacing, type, shadow, and motion values identical', () => {

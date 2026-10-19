@@ -1,6 +1,7 @@
 ---
 import { MessageBubble, StatusDot, ToolCallCard, Badge } from '@brot/ui';
 import LiveAvatar from './LiveAvatar';
+import { speciesOf } from './species';
 import Icon from './Icon.astro';
 import { dict, type Locale } from '../i18n/ui';
 
@@ -28,7 +29,7 @@ const sidebar = [bots[2]!, bots[0]!, bots[1]!, bots[3]!, bots[5]!];
           {
             sidebar.map((bot) => (
               <li class:list={['mock__row', { 'is-selected': bot.name === tuca.name }]} data-avatar-zone>
-                <LiveAvatar client:visible shape={bot.shape} color={bot.color} mood={bot.mood} size={32} />
+                <LiveAvatar client:visible species={speciesOf(bot)} color={bot.color} mood={bot.mood} size={32} />
                 <span class="mock__row-text">
                   <span class="mock__row-name">{bot.name}</span>
                   {bot.status === 'idle' ? (
@@ -45,7 +46,7 @@ const sidebar = [bots[2]!, bots[0]!, bots[1]!, bots[3]!, bots[5]!];
 
       <section class="mock__thread">
         <header class="mock__thread-head" data-avatar-zone>
-          <LiveAvatar client:visible shape={tuca.shape} color={tuca.color} mood="approval" size={28} />
+          <LiveAvatar client:visible species={speciesOf(tuca)} color={tuca.color} mood="approval" size={28} />
           <span class="mock__thread-name">{tuca.name}</span>
           <span class="mock__thread-role">{t.chat.header}</span>
         </header>

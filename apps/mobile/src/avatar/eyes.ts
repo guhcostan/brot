@@ -13,8 +13,8 @@ export function parseQuad(d: string): EyeQuad {
 }
 
 /** The eye strokes for a mood, from the same geometry the web avatar draws. */
-export function eyePair(mood: AvatarMood, anchor: { x: number; y: number }): EyePair {
-  const [left, right] = eyePaths(mood, anchor);
+export function eyePair(mood: AvatarMood, anchor: { x: number; y: number }, gap?: number): EyePair {
+  const [left, right] = eyePaths(mood, anchor, gap);
   return [...parseQuad(left), ...parseQuad(right)];
 }
 
