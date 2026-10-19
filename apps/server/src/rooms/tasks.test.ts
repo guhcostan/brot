@@ -1,6 +1,7 @@
 import type { Bot, CanonicalEvent, Task, Thread } from '@brot/protocol';
 import { TEAM_MAX_TASKS_PER_CHAIN } from '@brot/protocol';
 import { afterEach, describe, expect, it } from 'vitest';
+import type { RunContext } from '@brot/protocol';
 import { call, recordEvents, type TestContext } from '../testing';
 import { addBot, closeContexts, createDm, json, listMessages, openContext, recordingEngine, until, type Recording } from './fixtures';
 
@@ -248,5 +249,122 @@ describe('team runner', () => {
     await runner.runBot({ botId: dex.id, threadId: dexDm.id, input: 'first', chain });
     expect(runner.chainSpentUsd('budgeted')).toBeCloseTo(0.25);
     await expect(runner.runBot({ botId: dex.id, threadId: dexDm.id, input: 'second', chain })).rejects.toThrow(/budget/);
+  });
+});
+
+/** A recording engine that holds its first run until it is cancelled, and answers every later run at once. */
+function holdFirstRun(): Recording {
+  const runs: RunContext[] = [];
+  const base = recordingEngine();
+  return {
+    runs,
+    driver: {
+      ...base.driver,
+      async *run(ctx) {
+        runs.push(ctx);
+        if (runs.length === 1) {
+          await new Promise((resolve) => ctx.signal.addEventListener('abort', resolve, { once: true }));
+          return;
+        }
+        yield { type: 'text.delta', delta: `answer to ${ctx.input}` };
+      },
+    },
+  };
+}
+
+describe('task outcomes', () => {
+  it('cancels a task whose queued work run is cancelled, and says why', async () => {
+    const recording = holdFirstRun();
+    const ctx = await openContext(recording);
+    const dex = await addBot(ctx, 'Dex');
+    const dexDm = await createDm(ctx, dex.id);
+    const busy = await ctx.services.harness.startBotRun({ botId: dex.id, threadId: dexDm.id, input: 'busy' });
+    await until(() => recording.runs.length === 1);
+
+    const created = await json<Task>(await createTask(ctx, { title: 'Queued job', assigneeBotId: dex.id, threadId: dexDm.id }));
+    expect(created.status).toBe('in_progress');
+    await until(async () => (await fetchTask(ctx, created.id)).workRunId !== undefined);
+    const { workRunId } = await fetchTask(ctx, created.id);
+    expect((await ctx.services.repos.runs.get(workRunId!))?.status).toBe('running');
+    expect(recording.runs).toHaveLength(1);
+
+    expect((await call(ctx.app, 'POST', `/api/runs/${workRunId}/cancel`)).status).toBe(200);
+
+    await until(async () => (await fetchTask(ctx, created.id)).status === 'cancelled');
+    expect((await fetchTask(ctx, created.id)).result).toBe('Run cancelled.');
+    expect(recording.runs).toHaveLength(1);
+    await ctx.services.harness.cancelRun(busy.runId);
+    await busy.settled;
+  });
+
+  it('fails a task whose work run fails, with the reason', async () => {
+    const base = recordingEngine();
+    const recording: Recording = {
+      runs: [],
+      driver: {
+        ...base.driver,
+        run() {
+          throw new Error('model down');
+        },
+      },
+    };
+    const ctx = await openContext(recording);
+    const dex = await addBot(ctx, 'Dex');
+    const dexDm = await createDm(ctx, dex.id);
+
+    const created = await json<Task>(await createTask(ctx, { title: 'Doomed', assigneeBotId: dex.id, threadId: dexDm.id }));
+
+    await until(async () => (await fetchTask(ctx, created.id)).status === 'failed');
+    expect((await fetchTask(ctx, created.id)).result).toBe('model down');
+  });
+
+  it('fails a task whose work run cannot start, before any engine turn', async () => {
+    const recording = recordingEngine();
+    const ctx = await openContext(recording, {});
+    const dex = await ctx.services.repos.bots.create({
+      name: 'Dex',
+      job: 'Dex job',
+      engine: 'mock',
+      computer: 'sandbox',
+      instructions: '',
+    });
+    const dexDm = await createDm(ctx, dex.id);
+
+    const created = await json<Task>(await createTask(ctx, { title: 'Stuck', assigneeBotId: dex.id, threadId: dexDm.id }));
+
+    await until(async () => (await fetchTask(ctx, created.id)).status === 'failed');
+    expect((await fetchTask(ctx, created.id)).result).toMatch(/sandbox computer/);
+    expect(recording.runs).toHaveLength(0);
+  });
+
+  it('fails tasks left in progress when the server restarts', async () => {
+    const { ctx, dex, capyDm } = await team();
+    const orphan = await ctx.services.repos.tasks.create({ title: 'Orphan', assigneeBotId: dex.id, threadId: capyDm.id });
+    await ctx.services.repos.tasks.update(orphan.id, { status: 'in_progress' });
+
+    await ctx.services.harness.recoverInterruptedRuns();
+
+    expect(await fetchTask(ctx, orphan.id)).toMatchObject({ status: 'failed', result: 'server restarted' });
+  });
+});
+
+describe('delegator notices', () => {
+  it('queues a notice to a delegator that is still busy, and starts it when that run ends', async () => {
+    const recording = holdFirstRun();
+    const ctx = await openContext(recording);
+    const capy = await addBot(ctx, 'Capy');
+    const capyDm = await createDm(ctx, capy.id);
+    const busy = await ctx.services.harness.startBotRun({ botId: capy.id, threadId: capyDm.id, input: 'still delegating' });
+    await until(() => recording.runs.length === 1);
+
+    const notice = await ctx.services.teamRunner.startBot({ botId: capy.id, threadId: capyDm.id, input: 'Task finished' });
+    expect((await ctx.services.repos.runs.get(notice.runId))?.status).toBe('running');
+    expect(recording.runs).toHaveLength(1);
+
+    await ctx.services.harness.cancelRun(busy.runId);
+    await busy.settled;
+    await until(() => recording.runs.length === 2);
+    expect(recording.runs[1]?.input).toBe('Task finished');
+    expect((await notice.settled).status).toBe('completed');
   });
 });

@@ -1,0 +1,8 @@
+ledger_id,date,vendor,amount,category,card
+L-101,2026-09-03,"Padaria Central",18.5,meal,card-7781
+L-102,2026-09-04,"Hotel Sol",412,lodging,card-7781
+L-103,2026-09-05,"Bistro Ribeira",74.9,meal,card-7781
+L-104,2026-09-07,"Cafe Litoral",9.8,meal,card-7781
+L-105,2026-09-06,"Vinho e Cia",45,meal,card-7781
+L-106,2026-09-08,"Parking Garage",12,transport,card-7781
+L-107,2026-09-09,"Office Depot",260,supplies,card-7781

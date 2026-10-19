@@ -1,0 +1,11 @@
+account_id,company,domain,industry,employees,region,current_plan,last_contact_days,notes
+acc-01,Northwind Logistics,northwind-fixture.example,logistics,320,US,team,12,asked about CI integration
+acc-02,Tidewater Fintech,tidewater-fixture.example,fintech,85,BR,free,40,no reply to last email
+acc-03,Lumen Health,lumen-fixture.example,healthcare,1400,US,enterprise,3,renewal in 60 days
+acc-04,Quarry Labs,quarry-fixture.example,developer tools,42,DE,free,18,mentioned changelog pain on a forum
+acc-05,Solar Ledger,solar-fixture.example,fintech,210,PT,team,7,raised a seed round in September
+acc-06,Harbor Retail,harbor-fixture.example,retail,640,UK,team,25,hiring two platform engineers
+acc-07,Cobalt Robotics,cobalt-fixture.example,manufacturing,90,US,free,60,no CI pipeline mentioned
+acc-08,Mesa Analytics,mesa-fixture.example,developer tools,160,BR,team,5,ships a public changelog every week
+acc-09,Orchid Bank,orchid-fixture.example,fintech,2600,PT,enterprise,90,procurement freeze until Q1
+acc-10,Glacier Notes,glacier-fixture.example,productivity,15,US,free,2,"solo founder, very active on social"

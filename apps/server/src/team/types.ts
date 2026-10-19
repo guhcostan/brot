@@ -25,12 +25,21 @@ export interface BotRunOutcome {
   error?: string;
 }
 
+export interface StartedRun {
+  runId: string;
+  /** Settles once the run ends. Never rejects. */
+  settled: Promise<BotRunOutcome>;
+}
+
 /** What the team tools need from the harness. Implemented by the harness, consumed by `team/`. */
 export interface TeamRunner {
   /** Starts a run for `botId` and resolves when it settles. Approvals inside it still wait for a human. */
   runBot(req: BotRunRequest): Promise<BotRunOutcome>;
-  /** Starts a run without waiting (delegated tasks). */
-  startBot(req: BotRunRequest): Promise<{ runId: string }>;
+  /**
+   * Starts a run without waiting for it (delegated tasks). The run waits its turn when the bot is busy in that
+   * thread. `settled` reports how the run ends, so a failure to start the run can be reported.
+   */
+  startBot(req: BotRunRequest): Promise<StartedRun>;
   /** The chain the given run belongs to, if any. */
   chainOf(runId: string): ChainRef | undefined;
 }

@@ -1,0 +1,5 @@
+RECEIPT R-05
+Vendor: Vinho e Cia
+Date: 2026-09-06
+Items: Bottle of red wine for the client dinner
+Total: 45.00 USD

@@ -2,7 +2,7 @@ import { UpdateMyTaskInput, type Task } from '@brot/protocol';
 import type { ApprovalScope } from '../broker';
 import { inputSchemaOf, invalidArguments } from '../mcp/helpers';
 import type { BrotTool, PreparedCall, ToolResult } from '../mcp/types';
-import { chainBudgetSpent, inheritedAskHops, isTerminal, postBotMessage, type TeamDeps } from './context';
+import { chainBudgetSpent, errorMessage, inheritedAskHops, isTerminal, postBotMessage, type TeamDeps } from './context';
 import type { ChainRef } from './types';
 
 /** The assignee reports on its own task. Finishing it posts the result back and tells the delegator. */
@@ -95,16 +95,40 @@ async function notifyDelegator(deps: TeamDeps, scope: ApprovalScope, task: Task)
     askHops: inheritedAskHops(deps.runner, scope.runId, task.chainId),
   };
   try {
-    await deps.runner.startBot({
+    const started = await deps.runner.startBot({
       botId: delegator.id,
       threadId: task.threadId,
       input: `Task ${task.id} "${task.title}", which you delegated to ${assignee}, is ${task.status}.\n\n${outcome}\n\nContinue your work from this result.`,
       fromBotId: scope.botId,
       chain,
     });
+    void started.settled
+      .then((result) =>
+        result.status === 'completed'
+          ? undefined
+          : reportUndelivered(deps, task, delegator.name, result.error ?? 'its run was cancelled'),
+      )
+      .catch((error: unknown) => console.error(`team: could not report on the notice for task ${task.id}`, error));
     return delegator.name;
   } catch (error) {
-    console.error(`team: could not notify ${delegator.name} about task ${task.id}`, error);
+    await reportUndelivered(deps, task, delegator.name, errorMessage(error));
     return undefined;
+  }
+}
+
+/**
+ * Records in the task's thread that the delegator did not continue from a finished task, so the gap is visible
+ * where the task was requested.
+ */
+async function reportUndelivered(deps: TeamDeps, task: Task, delegatorName: string, reason: string): Promise<void> {
+  try {
+    const message = await deps.repos.messages.create({
+      threadId: task.threadId,
+      role: 'system',
+      content: `${delegatorName} could not continue from task "${task.title}" (${task.status}): ${reason}`,
+    });
+    await deps.bus.publish({ type: 'message.completed', threadId: task.threadId, message });
+  } catch (error) {
+    console.error(`team: could not record that ${delegatorName} was not notified about task ${task.id}`, error);
   }
 }

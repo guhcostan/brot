@@ -1,0 +1,5 @@
+RECEIPT R-03
+Vendor: Bistro Ribeira
+Date: 2026-09-05
+Items: Dinner for two
+Total: 74.90 USD

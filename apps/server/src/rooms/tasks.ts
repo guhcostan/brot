@@ -9,6 +9,7 @@ import {
 } from '@brot/protocol';
 import type { EventBus } from '../bus';
 import type { Harness } from '../harness';
+import type { BotRunOutcome } from '../team/types';
 import { RuleViolation } from './errors';
 
 export interface TaskDetail extends Task {
@@ -31,6 +32,13 @@ const ENDED: ReadonlyArray<Task['status']> = ['done', 'failed', 'cancelled'];
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** How a task ends when its work run does. A failed or cancelled run ends the task with the reason. */
+function endOf(outcome: BotRunOutcome): UpdateTask {
+  if (outcome.status === 'completed') return { status: 'done', result: outcome.text || undefined };
+  if (outcome.status === 'cancelled') return { status: 'cancelled', result: outcome.error ?? 'Run cancelled.' };
+  return { status: 'failed', result: outcome.error ?? 'Run failed.' };
 }
 
 /** The task board. Starting a task runs its assignee in that bot's most recent DM, or in a new one. */
@@ -108,11 +116,7 @@ export function createTaskService(deps: { repos: Repos; bus: EventBus; harness: 
       void started.settled.then(async (outcome) => {
         const current = await repos.tasks.get(task.id);
         if (!current || (current.status !== 'open' && current.status !== 'in_progress')) return;
-        const finished =
-          outcome.status === 'completed'
-            ? { status: 'done' as const, result: outcome.text || undefined }
-            : { status: 'failed' as const, result: outcome.error ?? 'Run cancelled.' };
-        await patch(task.id, finished);
+        await patch(task.id, endOf(outcome));
       }).catch((error: unknown) => {
         console.error(`task ${task.id} could not be finished`, error);
       });

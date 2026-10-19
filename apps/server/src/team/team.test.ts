@@ -22,6 +22,8 @@ interface FakeRunner extends TeamRunner {
   readonly chains: Map<string, ChainRef>;
   onRun: (req: BotRunRequest) => Promise<BotRunOutcome>;
   failStart?: Error;
+  /** How the run started by `startBot` ends. Defaults to a completed run. */
+  startOutcome?: Omit<BotRunOutcome, 'runId'>;
 }
 
 function createFakeRunner(spentUsd?: (chainId: string) => number): FakeRunner {
@@ -40,7 +42,9 @@ function createFakeRunner(spentUsd?: (chainId: string) => number): FakeRunner {
     async startBot(req) {
       starts.push(req);
       if (runner.failStart) throw runner.failStart;
-      return { runId: `started-${starts.length}` };
+      const runId = `started-${starts.length}`;
+      const outcome = { runId, status: 'completed' as const, text: 'Ok', ...runner.startOutcome };
+      return { runId, settled: Promise.resolve(outcome) };
     },
     chainOf(runId) {
       return chains.get(runId);
@@ -428,6 +432,16 @@ describe('delegate_task', () => {
   });
 });
 
+/** Resolves with the first value the read returns, polling until one exists. */
+async function eventually<T>(read: () => Promise<T | undefined>): Promise<T> {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    const value = await read();
+    if (value !== undefined) return value;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error('timed out waiting for condition');
+}
+
 describe('update_my_task', () => {
   async function delegatedTask() {
     const f = await setup();
@@ -470,6 +484,31 @@ describe('update_my_task', () => {
     expect(f.runner.starts).toHaveLength(1);
 
     expect(f.events.map((event) => event.type)).toEqual(['task.updated', 'message.completed']);
+  });
+
+  it('records in the origin thread when the delegator cannot be started', async () => {
+    const { f, adaThread, task, boScope } = await delegatedTask();
+    f.runner.failStart = new Error('engine offline');
+
+    const result = await invoke(f.tool('update_my_task'), boScope, { taskId: task.id, status: 'done', result: 'Two paragraphs ready' });
+
+    expect(result).toEqual({ ok: true, output: `Task ${task.id} is done.` });
+    expect((await f.repos.messages.listByThread(adaThread.id)).at(-1)).toMatchObject({
+      role: 'system',
+      content: 'Ada could not continue from task "Draft copy" (done): engine offline',
+    });
+  });
+
+  it('records in the origin thread when the delegator run ends without continuing', async () => {
+    const { f, adaThread, task, boScope } = await delegatedTask();
+    f.runner.startOutcome = { status: 'failed', text: '', error: 'model down' };
+
+    await invoke(f.tool('update_my_task'), boScope, { taskId: task.id, status: 'done', result: 'Two paragraphs ready' });
+
+    const notice = await eventually(async () =>
+      (await f.repos.messages.listByThread(adaThread.id)).find((message) => message.role === 'system'),
+    );
+    expect(notice.content).toBe('Ada could not continue from task "Draft copy" (done): model down');
   });
 
   it('posts a failure without notifying when the delegator is over budget', async () => {

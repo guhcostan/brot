@@ -1,0 +1,113 @@
+{
+  "asOf": "2026-10-19",
+  "invoices": [
+    {
+      "id": "inv-1001",
+      "customer": "Northwind Logistics",
+      "amount": 1200,
+      "currency": "USD",
+      "status": "open",
+      "daysOverdue": 0,
+      "contactEmail": "ap@northwind-fixture.example"
+    },
+    {
+      "id": "inv-1002",
+      "customer": "Tidewater Fintech",
+      "amount": 480,
+      "currency": "USD",
+      "status": "overdue",
+      "daysOverdue": 14,
+      "contactEmail": "finance@tidewater-fixture.example"
+    },
+    {
+      "id": "inv-1003",
+      "customer": "Lumen Health",
+      "amount": 9800,
+      "currency": "USD",
+      "status": "overdue",
+      "daysOverdue": 33,
+      "contactEmail": "billing@lumen-fixture.example"
+    },
+    {
+      "id": "inv-1004",
+      "customer": "Quarry Labs",
+      "amount": 96,
+      "currency": "USD",
+      "status": "paid",
+      "daysOverdue": 0,
+      "contactEmail": "ops@quarry-fixture.example"
+    },
+    {
+      "id": "inv-1005",
+      "customer": "Solar Ledger",
+      "amount": 2400,
+      "currency": "USD",
+      "status": "overdue",
+      "daysOverdue": 6,
+      "contactEmail": "accounts@solar-fixture.example"
+    },
+    {
+      "id": "inv-1006",
+      "customer": "Harbor Retail",
+      "amount": 3600,
+      "currency": "USD",
+      "status": "open",
+      "daysOverdue": 0,
+      "contactEmail": "ap@harbor-fixture.example"
+    },
+    {
+      "id": "inv-1007",
+      "customer": "Cobalt Robotics",
+      "amount": 240,
+      "currency": "USD",
+      "status": "overdue",
+      "daysOverdue": 61,
+      "contactEmail": "bills@cobalt-fixture.example"
+    },
+    {
+      "id": "inv-1008",
+      "customer": "Mesa Analytics",
+      "amount": 1500,
+      "currency": "USD",
+      "status": "paid",
+      "daysOverdue": 0,
+      "contactEmail": "finance@mesa-fixture.example"
+    },
+    {
+      "id": "inv-1009",
+      "customer": "Orchid Bank",
+      "amount": 15000,
+      "currency": "USD",
+      "status": "overdue",
+      "daysOverdue": 3,
+      "contactEmail": "ap@orchid-fixture.example"
+    },
+    {
+      "id": "inv-1010",
+      "customer": "Glacier Notes",
+      "amount": 180,
+      "currency": "USD",
+      "status": "paid",
+      "daysOverdue": 0,
+      "contactEmail": "hello@glacier-fixture.example"
+    },
+    {
+      "id": "inv-1011",
+      "customer": "Quarry Labs",
+      "amount": 720,
+      "currency": "USD",
+      "status": "overdue",
+      "daysOverdue": 9,
+      "contactEmail": "ops@quarry-fixture.example"
+    },
+    {
+      "id": "inv-1012",
+      "customer": "Mesa Analytics",
+      "amount": 600,
+      "currency": "USD",
+      "status": "open",
+      "daysOverdue": 0,
+      "contactEmail": "finance@mesa-fixture.example"
+    }
+  ]
+}

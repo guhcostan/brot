@@ -1,0 +1,53 @@
+{
+  "date": "2026-10-19",
+  "items": [
+    {
+      "id": "ev-201",
+      "kind": "pricing_change",
+      "source": "competitor pricing page",
+      "summary": "Competitor moved its Team plan from 19 to 24 USD per seat."
+    },
+    {
+      "id": "ev-202",
+      "kind": "customer",
+      "source": "support inbox",
+      "summary": "Lumen Health asked for SSO before renewal."
+    },
+    {
+      "id": "ev-203",
+      "kind": "incident",
+      "source": "status page",
+      "summary": "Yesterday, API error rates were elevated for 40 minutes."
+    },
+    {
+      "id": "ev-204",
+      "kind": "hiring",
+      "source": "applicant tracker",
+      "summary": "Two platform engineer candidates reached the final round."
+    },
+    {
+      "id": "ev-205",
+      "kind": "decision",
+      "source": "founder email",
+      "summary": "Founder asks whether to extend the free tier from 14 to 30 days. Needs a decision."
+    },
+    {
+      "id": "ev-206",
+      "kind": "finance",
+      "source": "billing export",
+      "summary": "Three invoices are more than 30 days overdue, total 17,400 USD."
+    },
+    {
+      "id": "ev-207",
+      "kind": "decision",
+      "source": "product thread",
+      "summary": "Team asks whether to ship CSV import without the preview step. Needs a decision."
+    },
+    {
+      "id": "ev-208",
+      "kind": "release",
+      "source": "changelog",
+      "summary": "Version 2.3.0 shipped with bulk CSV import."
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+RECEIPT R-01
+Vendor: Padaria Central
+Date: 2026-09-03
+Items: Coffee and pastry
+Total: 18.50 USD

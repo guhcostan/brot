@@ -1,0 +1,5 @@
+RECEIPT R-02
+Vendor: Hotel Sol
+Date: 2026-09-04
+Items: Two nights, standard room
+Total: 412.00 USD

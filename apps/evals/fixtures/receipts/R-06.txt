@@ -1,0 +1,5 @@
+RECEIPT R-06
+Vendor: Taxi Rapido
+Date: 2026-09-08
+Items: Airport transfer, route Airport to Hotel Sol
+Total: 32.10 USD

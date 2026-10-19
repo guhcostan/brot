@@ -74,6 +74,16 @@ importers:
         specifier: 0.28.2
         version: 0.28.2
 
+  apps/evals:
+    dependencies:
+      '@brot/protocol':
+        specifier: workspace:*
+        version: link:../../packages/protocol
+    devDependencies:
+      '@types/node':
+        specifier: ^24.19.2
+        version: 24.19.2
+
   apps/mobile:
     dependencies:
       '@brot/protocol':

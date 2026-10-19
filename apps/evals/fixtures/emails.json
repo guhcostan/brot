@@ -1,0 +1,212 @@
+[
+  {
+    "id": "e01",
+    "from": "billing@cloudhost.example",
+    "subject": "Payment failed for workspace prod-eu",
+    "received": "2026-10-12T08:00:00Z",
+    "body": "Your card ending 4411 was declined for the prod-eu workspace. Suspension happens in 24 hours unless the payment method is updated."
+  },
+  {
+    "id": "e02",
+    "from": "security-alerts@bank.example",
+    "subject": "New sign-in from an unknown device",
+    "received": "2026-10-13T09:07:00Z",
+    "body": "We noticed a sign-in to your account from a Linux device in Lisbon. If this was not you, lock the account from the app now."
+  },
+  {
+    "id": "e03",
+    "from": "maria@acme-fixture.example",
+    "subject": "Can we move Thursday's review to 3pm?",
+    "received": "2026-10-14T10:14:00Z",
+    "body": "Hi, the client moved their call. Could we push our review to 3pm on Thursday? Let me know which works."
+  },
+  {
+    "id": "e04",
+    "from": "newsletter@devweekly.example",
+    "subject": "This week in JavaScript: 12 links",
+    "received": "2026-10-15T11:21:00Z",
+    "body": "Our weekly roundup of the best articles, tools and talks. Read it in your browser or unsubscribe at any time."
+  },
+  {
+    "id": "e05",
+    "from": "ops@status.example",
+    "subject": "Resolved: elevated error rates on the API (incident 4411)",
+    "received": "2026-10-16T12:28:00Z",
+    "body": "The incident is resolved. Error rates returned to baseline at 14:20 UTC. A postmortem will follow next week."
+  },
+  {
+    "id": "e06",
+    "from": "recruiter@talentco.example",
+    "subject": "Quick question about your availability",
+    "received": "2026-10-17T13:35:00Z",
+    "body": "Hi, I have a role that might suit you. Are you open to a short call in the next few weeks?"
+  },
+  {
+    "id": "e07",
+    "from": "legal@partner.example",
+    "subject": "Signature needed by end of day: MSA amendment",
+    "received": "2026-10-18T14:42:00Z",
+    "body": "Attached is the MSA amendment for the partner program. Please sign by end of day or the pilot slips a month."
+  },
+  {
+    "id": "e08",
+    "from": "jonas@northwind-fixture.example",
+    "subject": "Draft feedback on the pricing page?",
+    "received": "2026-10-12T15:49:00Z",
+    "body": "Could you look at the draft pricing page and tell me which tier names are confusing? No rush this week."
+  },
+  {
+    "id": "e09",
+    "from": "promo@shoes-shop.example",
+    "subject": "50% off everything this weekend only",
+    "received": "2026-10-13T16:56:00Z",
+    "body": "Our biggest sale of the year. Use code WEEKEND50 at checkout. Offer ends Sunday midnight."
+  },
+  {
+    "id": "e10",
+    "from": "calendar@calendar.example",
+    "subject": "Invitation: Sprint planning, Monday 10:00",
+    "received": "2026-10-14T17:03:00Z",
+    "body": "You have been invited to Sprint planning on Monday at 10:00 (Lisbon). Accept or decline in your calendar."
+  },
+  {
+    "id": "e11",
+    "from": "support@vendor.example",
+    "subject": "Your ticket #88213 was closed",
+    "received": "2026-10-15T08:10:00Z",
+    "body": "Ticket 88213 was closed because no reply was received within 7 days. Reopen it if the issue continues."
+  },
+  {
+    "id": "e12",
+    "from": "ana@client.example",
+    "subject": "Where are we on the renewal?",
+    "received": "2026-10-16T09:17:00Z",
+    "body": "We need an answer on the renewal terms before Friday so procurement can close the quarter. Can you confirm the price?"
+  },
+  {
+    "id": "e13",
+    "from": "notifications@github.example",
+    "subject": "[brot] Build failed on main",
+    "received": "2026-10-17T10:24:00Z",
+    "body": "The workflow \"ci\" failed on main at commit 3e618f2. Two jobs did not finish. Open the run for logs."
+  },
+  {
+    "id": "e14",
+    "from": "hr@company.example",
+    "subject": "Reminder: submit your timesheet",
+    "received": "2026-10-18T11:31:00Z",
+    "body": "Timesheets for September are due on the 5th. Submit yours in the HR portal when you can."
+  },
+  {
+    "id": "e15",
+    "from": "digest@medium.example",
+    "subject": "Top stories picked for you",
+    "received": "2026-10-12T12:38:00Z",
+    "body": "Five stories about remote work, databases and the future of the browser, picked for you this week."
+  },
+  {
+    "id": "e16",
+    "from": "cfo@brot-fixture.example",
+    "subject": "Board deck numbers by 9am tomorrow",
+    "received": "2026-10-13T13:45:00Z",
+    "body": "I need the final ARR and burn numbers for the board deck by 9am tomorrow. Send the sheet to me directly."
+  },
+  {
+    "id": "e17",
+    "from": "dan@company.example",
+    "subject": "Lunch?",
+    "received": "2026-10-14T14:52:00Z",
+    "body": "Are you free for lunch on Wednesday? Thinking the new place near the office."
+  },
+  {
+    "id": "e18",
+    "from": "billing@saas.example",
+    "subject": "Your October invoice is ready",
+    "received": "2026-10-15T15:59:00Z",
+    "body": "The October invoice for your subscription is available in the billing portal. No action needed unless you want a copy sent."
+  },
+  {
+    "id": "e19",
+    "from": "winner@lottery.example",
+    "subject": "You have won a prize, claim it now",
+    "received": "2026-10-16T16:06:00Z",
+    "body": "Congratulations! Your email was selected. Send your bank details to claim the prize within 48 hours."
+  },
+  {
+    "id": "e20",
+    "from": "oncall@company.example",
+    "subject": "PagerDuty: database CPU above 95 percent for 20 minutes",
+    "received": "2026-10-17T17:13:00Z",
+    "body": "The primary database has been above 95 percent CPU for 20 minutes. The on-call rotation has been paged."
+  },
+  {
+    "id": "e21",
+    "from": "team@company.example",
+    "subject": "Retro notes from Friday",
+    "received": "2026-10-18T08:20:00Z",
+    "body": "Notes from Friday retro are in the shared doc. Add anything I missed before Monday."
+  },
+  {
+    "id": "e22",
+    "from": "lina@client.example",
+    "subject": "Contract redlines attached, please review",
+    "received": "2026-10-12T09:27:00Z",
+    "body": "Our legal team sent redlines on sections 4 and 9. Please review and reply with the changes you accept."
+  },
+  {
+    "id": "e23",
+    "from": "partners@cloud.example",
+    "subject": "Webinar replay: scaling your first 1000 customers",
+    "received": "2026-10-13T10:34:00Z",
+    "body": "The replay of last week webinar is now available. Watch it at your pace."
+  },
+  {
+    "id": "e24",
+    "from": "it@company.example",
+    "subject": "Your password expires in 3 days",
+    "received": "2026-10-14T11:41:00Z",
+    "body": "Your network password expires on Friday. Change it in the self-service portal to avoid being locked out."
+  },
+  {
+    "id": "e25",
+    "from": "eng-lead@company.example",
+    "subject": "PR 212 needs your review before the release",
+    "received": "2026-10-15T12:48:00Z",
+    "body": "The release branch is cut on Thursday. PR 212 still needs your review, can you take a look this week?"
+  },
+  {
+    "id": "e26",
+    "from": "news@tech.example",
+    "subject": "Breaking: new browser engine announced",
+    "received": "2026-10-16T13:55:00Z",
+    "body": "Everything you need to know about the new browser engine in one article. Plus our podcast this week."
+  },
+  {
+    "id": "e27",
+    "from": "renewals@tools.example",
+    "subject": "Your license renews in 45 days",
+    "received": "2026-10-17T14:02:00Z",
+    "body": "Your team license renews automatically in 45 days at the current price. Change the plan any time before then."
+  },
+  {
+    "id": "e28",
+    "from": "family@example.org",
+    "subject": "Call me when you can",
+    "received": "2026-10-18T15:09:00Z",
+    "body": "Nothing urgent, just wanted to hear how the move went. Call when you have a minute this weekend."
+  },
+  {
+    "id": "e29",
+    "from": "statements@bank.example",
+    "subject": "Your October statement is available",
+    "received": "2026-10-12T16:16:00Z",
+    "body": "Your monthly statement for October is available in online banking."
+  },
+  {
+    "id": "e30",
+    "from": "founder@company.example",
+    "subject": "Investor update: draft for your comments by Monday",
+    "received": "2026-10-13T17:23:00Z",
+    "body": "Attached is the draft investor update. Comments by Monday please, especially on the hiring section."
+  }
+]

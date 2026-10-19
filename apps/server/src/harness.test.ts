@@ -662,3 +662,202 @@ describe('model relay for DSH runs', () => {
     expect(engine.contexts).toEqual([]);
   });
 });
+
+/**
+ * An engine whose runs wait at a gate until the test releases them by input. The gate ignores the run's abort
+ * signal, as an engine that is still stopping does, so the test decides when each engine turn ends.
+ */
+function gatedEngine(): { engine: FakeEngine; started: string[]; release(input: string): void } {
+  const started: string[] = [];
+  const gates = new Map<string, () => void>();
+  const engine = fakeEngine(async function* (ctx) {
+    started.push(ctx.input);
+    await new Promise<void>((resolve) => gates.set(ctx.input, resolve));
+    if (ctx.signal.aborted) return;
+    yield { type: 'text.delta', delta: `answer to ${ctx.input}` };
+  });
+  return { engine, started, release: (input) => gates.get(input)?.() };
+}
+
+describe('run queue', () => {
+  it('queues a second run for the same bot in the same thread until the first ends, and keeps their order', async () => {
+    const gate = gatedEngine();
+    const ctx = await contextWith({ engines: createEngineRegistry([gate.engine.driver]) });
+    const { threadId } = await botAndThread(ctx, { computer: 'none' });
+    const recorded = recordEvents(ctx.services.bus, threadId);
+    try {
+      const botId = (await ctx.services.repos.threads.get(threadId))!.botId;
+      const first = await ctx.services.harness.startBotRun({ botId, threadId, input: 'first' });
+      const second = await ctx.services.harness.startBotRun({ botId, threadId, input: 'second' });
+      await waitUntil(() => (gate.started.includes('first') ? true : undefined));
+
+      // The queued run is recorded as running, and announced, but its engine has not been called.
+      expect(await ctx.services.repos.runs.get(second.runId)).toMatchObject({ status: 'running' });
+      expect(recorded.list).toContainEqual(expect.objectContaining({ type: 'run.started', runId: second.runId }));
+      expect(gate.started).toEqual(['first']);
+
+      gate.release('first');
+      await waitUntil(() => (gate.started.includes('second') ? true : undefined));
+      gate.release('second');
+      const outcomes = await Promise.all([first.settled, second.settled]);
+
+      expect(outcomes.map((outcome) => outcome.status)).toEqual(['completed', 'completed']);
+      expect(gate.started).toEqual(['first', 'second']);
+      expect(gate.engine.contexts[1]?.history.map((message) => message.content)).toContain('answer to first');
+      const completed = recorded.list
+        .filter((event): event is Extract<CanonicalEvent, { type: 'run.completed' }> => event.type === 'run.completed')
+        .map((event) => event.runId);
+      expect(completed).toEqual([first.runId, second.runId]);
+    } finally {
+      recorded.stop();
+    }
+  });
+
+  it('runs one bot in two threads at the same time', async () => {
+    const gate = gatedEngine();
+    const ctx = await contextWith({ engines: createEngineRegistry([gate.engine.driver]) });
+    const { bot, threadId } = await botAndThread(ctx, { computer: 'none' });
+    const other = await ctx.services.repos.threads.create(bot.id);
+
+    const here = await ctx.services.harness.startBotRun({ botId: bot.id, threadId, input: 'here' });
+    const there = await ctx.services.harness.startBotRun({ botId: bot.id, threadId: other.id, input: 'there' });
+    await waitUntil(() => (gate.started.length === 2 ? true : undefined));
+
+    gate.release('here');
+    gate.release('there');
+    expect((await Promise.all([here.settled, there.settled])).map((outcome) => outcome.status)).toEqual([
+      'completed',
+      'completed',
+    ]);
+  });
+
+  it('runs two bots in one thread at the same time', async () => {
+    const gate = gatedEngine();
+    const ctx = await contextWith({ engines: createEngineRegistry([gate.engine.driver]) });
+    const { threadId } = await botAndThread(ctx, { computer: 'none' });
+    const other = await ctx.services.repos.bots.create({
+      name: 'Bea',
+      job: 'Testing',
+      engine: 'dsh',
+      computer: 'none',
+      model: 'fake/model-1',
+    });
+
+    const adaId = (await ctx.services.repos.threads.get(threadId))!.botId;
+    const ada = await ctx.services.harness.startBotRun({ botId: adaId, threadId, input: 'ada' });
+    const bea = await ctx.services.harness.startBotRun({ botId: other.id, threadId, input: 'bea' });
+    await waitUntil(() => (gate.started.length === 2 ? true : undefined));
+
+    gate.release('ada');
+    // Bea answers a message that its DM labels with the author, so the gate is keyed by that label.
+    gate.release('[User]: bea');
+    expect((await Promise.all([ada.settled, bea.settled])).map((outcome) => outcome.status)).toEqual(['completed', 'completed']);
+  });
+
+  it('cancels a queued run without touching the run that holds the bot', async () => {
+    const gate = gatedEngine();
+    const ctx = await contextWith({ engines: createEngineRegistry([gate.engine.driver]) });
+    const { bot, threadId } = await botAndThread(ctx, { computer: 'none' });
+    const first = await ctx.services.harness.startBotRun({ botId: bot.id, threadId, input: 'first' });
+    const second = await ctx.services.harness.startBotRun({ botId: bot.id, threadId, input: 'second' });
+    await waitUntil(() => (gate.started.includes('first') ? true : undefined));
+
+    const cancelled = await ctx.services.harness.cancelRun(second.runId);
+
+    expect(cancelled).toMatchObject({ id: second.runId, status: 'cancelled' });
+    expect((await second.settled).status).toBe('cancelled');
+    expect(gate.engine.contexts[0]?.signal.aborted).toBe(false);
+
+    gate.release('first');
+    expect((await first.settled).status).toBe('completed');
+    expect(gate.started).toEqual(['first']);
+  });
+
+  it('starts the next run only after the engine has returned from the cancelled one', async () => {
+    const gate = gatedEngine();
+    const ctx = await contextWith({ engines: createEngineRegistry([gate.engine.driver]) });
+    const { bot, threadId } = await botAndThread(ctx, { computer: 'none' });
+    const first = await ctx.services.harness.startBotRun({ botId: bot.id, threadId, input: 'first' });
+    const second = await ctx.services.harness.startBotRun({ botId: bot.id, threadId, input: 'second' });
+    await waitUntil(() => (gate.started.includes('first') ? true : undefined));
+
+    await ctx.services.harness.cancelRun(first.runId);
+    expect((await first.settled).status).toBe('cancelled');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(gate.started).toEqual(['first']);
+
+    gate.release('first');
+    await waitUntil(() => (gate.started.includes('second') ? true : undefined));
+    gate.release('second');
+    expect((await second.settled).status).toBe('completed');
+  });
+
+  it('lets the next queued run start when the run before it fails', async () => {
+    const holds = new Map<string, () => void>();
+    const engine = fakeEngine(async function* (ctx) {
+      if (ctx.input === 'boom') {
+        await new Promise<void>((resolve) => holds.set('boom', resolve));
+        throw new Error('model down');
+      }
+      yield { type: 'text.delta', delta: 'fine' };
+    });
+    const ctx = await contextWith({ engines: createEngineRegistry([engine.driver]) });
+    const { bot, threadId } = await botAndThread(ctx, { computer: 'none' });
+    const failing = await ctx.services.harness.startBotRun({ botId: bot.id, threadId, input: 'boom' });
+    const after = await ctx.services.harness.startBotRun({ botId: bot.id, threadId, input: 'after' });
+    await waitUntil(() => holds.get('boom'));
+    holds.get('boom')?.();
+
+    expect(await failing.settled).toMatchObject({ status: 'failed', error: 'model down' });
+    expect((await after.settled).status).toBe('completed');
+  });
+
+  it('refuses a run that may not wait while the bot is busy in the thread, and stores nothing for it', async () => {
+    const gate = gatedEngine();
+    const ctx = await contextWith({ engines: createEngineRegistry([gate.engine.driver]) });
+    const { bot, threadId } = await botAndThread(ctx, { computer: 'none' });
+    const first = await ctx.services.harness.startBotRun({ botId: bot.id, threadId, input: 'first' });
+    await waitUntil(() => (gate.started.includes('first') ? true : undefined));
+
+    await expect(
+      ctx.services.harness.startBotRun({ botId: bot.id, threadId, input: 'ask', queue: false }),
+    ).rejects.toThrow(/already working in this thread/);
+    expect((await ctx.services.repos.messages.listByThread(threadId)).map((message) => message.content)).not.toContain('ask');
+
+    gate.release('first');
+    await first.settled;
+  });
+
+  it('cancels a bot\'s queued and active runs together when the bot is cancelled', async () => {
+    const gate = gatedEngine();
+    const ctx = await contextWith({ engines: createEngineRegistry([gate.engine.driver]) });
+    const { bot, threadId } = await botAndThread(ctx, { computer: 'none' });
+    const first = await ctx.services.harness.startBotRun({ botId: bot.id, threadId, input: 'first' });
+    const second = await ctx.services.harness.startBotRun({ botId: bot.id, threadId, input: 'second' });
+    await waitUntil(() => (gate.started.includes('first') ? true : undefined));
+
+    await ctx.services.harness.cancelBotRuns(bot.id);
+
+    expect((await first.settled).status).toBe('cancelled');
+    expect((await second.settled).status).toBe('cancelled');
+    gate.release('first');
+    await first.settled;
+    expect(gate.started).toEqual(['first']);
+  });
+
+  it('ends queued runs at shutdown without starting them', async () => {
+    const gate = gatedEngine();
+    const ctx = await contextWith({ engines: createEngineRegistry([gate.engine.driver]) });
+    const { bot, threadId } = await botAndThread(ctx, { computer: 'none' });
+    const first = await ctx.services.harness.startBotRun({ botId: bot.id, threadId, input: 'first' });
+    const second = await ctx.services.harness.startBotRun({ botId: bot.id, threadId, input: 'second' });
+    await waitUntil(() => (gate.started.includes('first') ? true : undefined));
+
+    ctx.services.harness.shutdown();
+
+    expect((await second.settled).status).toBe('cancelled');
+    gate.release('first');
+    await first.settled;
+    expect(gate.started).toEqual(['first']);
+  });
+});
