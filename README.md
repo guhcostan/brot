@@ -19,7 +19,7 @@ Every bot has a job, a model, its own computer, and your apps. Talk to them like
 | 🍞 **Yours** | Desktop app, `docker compose up`, or Brot Cloud. Same code everywhere |
 | 🧱 **One bot, one sandbox** | Every bot gets its own isolated computer by default |
 | 🔍 **Glass-box memory** | See, edit, delete, and export everything a bot remembers |
-| 🧠 **Any brain** | Claude, Codex, ACP agents (Gemini CLI, OpenCode…), OpenAI-compatible, local models |
+| 🧠 **Any brain** | One runtime, the DeepSeek Harness, with any provider: DeepSeek, Anthropic, OpenAI, OpenRouter, local models |
 | ✋ **You hold the keys** | Payments, posts, and deletions wait for your approval. Secrets never reach the model |
 | 📱 **Pair your phone** | Scan a QR code and control bots on your laptop or in the cloud |
 | 🔬 **Teardowns** | Built-in [REA](https://github.com/morluto/rea): point a bot at an app and get an evidence-backed explanation of how it works |
@@ -50,7 +50,7 @@ docker compose -f deploy/compose.yaml up -d
 ```
  Web · Desktop · Phone · CLI
           │ HTTP + SSE
-     Brot server ── engines (claude, codex, …)
+     Brot server ── DeepSeek Harness (ACP) ── any provider
           │          permission broker → approvals
           │          scheduler → routines
           └── one sandboxed computer per bot

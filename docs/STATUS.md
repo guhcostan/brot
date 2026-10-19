@@ -17,50 +17,43 @@ Repo: https://github.com/guhcostan/brot (private).
 | Wave | Package | State | Notes |
 |---|---|---|---|
 | 0 | root workspace | ✅ pushed (`62cee69`) | pnpm 10 + Turbo, `tsconfig.base.json`, oxlint, root vitest `test.projects` |
-| 0 | `@brot/protocol` | ✅ pushed | zod 4. Entities, request bodies, `CanonicalEvent` union, `EngineDriver` contract, port constants. 27 tests |
-| 0 | `@brot/db` | ✅ pushed | Drizzle 0.45 + libSQL. `createDb(url)` is **async**. drizzle-kit migrations in `packages/db/drizzle/`. `createRepos(db)` for every entity. 27 tests |
-| 1A | `@brot/engines` | ✅ pushed | `mock`, `claude`, `codex` drivers + registry. 45 tests. Detects claude 2.1.303 and codex 0.160.1 locally |
-| 1C | `@brot/ui` + `@brot/web` | ✅ pushed | Tokens (CSS + TS, contrast tested), components, fauna avatars, three-pane chat with phone layout, approval cards, event fold. 15 tests, build OK. **Runs against an in-process mock client.** It still needs an HTTP/SSE `BrotClient` wired to the server |
-| 1B | `apps/server` | ✅ pushed | Hono REST + SSE, harness, broker, scheduler, vault, device auth, pairing, webhooks. 50 tests. Boots and answers `/api/health` |
-| — | docs | ✅ pushed | README, AGENTS, DESIGN (BR + bot, Brazilian fauna), SECURITY, CONTRIBUTING, `docs/*` |
+| 0 | `@brot/protocol` | ✅ pushed | zod 4. Entities, request bodies, `CanonicalEvent` union, `EngineDriver` contract, port constants |
+| 0 | `@brot/db` | ✅ pushed | Drizzle 0.45 + libSQL. `createDb(url)` is **async**. `createRepos(db)` for every entity |
+| 1A | `@brot/engines` | ✅ pushed | `mock`, `claude`, `codex` drivers. **Being replaced by a single `dsh` driver** (see In progress) |
+| 1B | `apps/server` | ✅ pushed | Hono REST + SSE, harness, broker, scheduler, vault, device auth, pairing, webhooks |
+| 2 | redesign `@brot/ui` + `apps/web` | ✅ pushed | Opus worker. Grayscale tokens, single `--attention` red, Inter + JetBrains Mono, `BotAvatar` (7 shapes, 9 colors, animated eyes per mood, blink scheduler, reduced-motion), `bot.avatar = "shape:color"` |
+| 2 | web HTTP/SSE client | ✅ pushed | `createClient()` → HTTP client by default, mock with `VITE_BROT_MOCK=1`. Vite proxies `/api` to 8799 |
+| 2 | `apps/cli` + `apps/relay` | ✅ pushed | `brot serve | doctor | run` with `--json`. Blind WebSocket relay (2 peers/channel, 1 MiB frames, idle timeout, no logging) |
+| 2 | integration | ✅ pushed | `apps/server/src/e2e.test.ts` (approve + deny over real HTTP/SSE), `Dockerfile`, `deploy/compose.yaml`, `.github/workflows/ci.yml`. Docker build not run (daemon down) |
 
-## In progress
+## In progress (wave 3)
 
-| Wave | Package | Owner | Notes |
-|---|---|---|---|
-_Nothing running._
+| Task | Owner | Paths |
+|---|---|---|
+| DSH engine over ACP; delete `claude`/`codex` drivers | Haiku | `packages/engines` |
+| Electron shell | Haiku | `apps/desktop` |
+| Expo remote-control app | Opus | `apps/mobile` |
+| Astro landing site (en/pt-BR/es) | Opus | `apps/site` |
+| pt-BR + es locales for web | Haiku | `apps/web/locales`, `apps/web/src/i18n.ts` |
 
-## Next: redesign (user request, top priority)
+## Decision: DeepSeek Harness is the only runtime (2026-10-19)
 
-The user finds the current UI too childish and too colorful. They want it **minimal and neutral like Grok Bot and MausBot**:
-- Grayscale chrome (white/near-black, grays), black primary buttons, one attention color (red) for approvals and errors only. Inter + JetBrains Mono, no serif.
-- **Bot avatars as solid flat geometric shapes with two simple white eye strokes**: circle, squircle, tilted rounded square, cloud, rounded triangle, blob, small drop. Flat saturated colors (black, teal, violet, blue, orange, amber, pink, brown, gray) used only on avatars. Expressions come from the eyes only.
-- No animal illustrations. The Brazilian identity stays in the bot names and personalities.
+The user chose DSH (`@deepseek-ai/dsh`, MIT) as the single agent runtime, driven over ACP. Providers are configured inside DSH (DeepSeek, Anthropic API, OpenAI, OpenRouter, local, and DSH's native sign-ins such as ChatGPT/Codex OAuth). Brot must not route Claude Free/Pro/Max OAuth outside Claude Code: Anthropic's terms forbid it. DSH is a developer preview, so pin its version and keep it behind `EngineDriver`.
 
-Steps: rewrite `DESIGN.md` §2–§7 accordingly (the current file still describes the old warm palette and fauna), then have a worker restyle `packages/ui` and `apps/web`.
+## Next
 
-## Next waves (not started)
-
-These can run in parallel, one worker each, with owned paths in brackets:
-
-- **1C follow-up** [`apps/web`]: implement an HTTP + SSE `BrotClient` against the server (same interface as `apps/web/src/data/client.ts`), keep the mock for tests, and add the pt-BR and es locales.
-- **1D CLI + relay** [`apps/cli`, `apps/relay`]: `brot serve | doctor | run <botId> <message>`, with a `--json` flag. A relay that blindly forwards WebSocket frames between a paired phone and a server, with no plaintext access.
-- **1E desktop + mobile** [`apps/desktop`, `apps/mobile`]: an Electron shell that embeds `startServer()` and loads the web build. An Expo app with QR pairing (`/api/pairing/*`), an inbox, chat, approvals, and push placeholders. Verify by typecheck and build only.
-- **1F landing site** [`apps/site`]: an Astro marketing page following DESIGN.md §10. Hero with Capy, the fauna team, how it works, self-host vs. Brot Cloud, and Download / Start on Cloud CTAs. English with a language switcher.
-- **2 integration**: an end-to-end test that boots the server with the mock engine, creates a bot, posts a message, approves a tool call, and checks the events. `deploy/compose.yaml` + `Dockerfile`. CI workflow in `.github/workflows/ci.yml`.
+- Wire contract changes the DSH worker reports (likely a persisted engine session id per thread, plan/usage events).
+- Server gaps: `GET /api/threads/:id/events` for exact history; SSE `Last-Event-ID` replay; make `trustLoopback` configurable (a same-host reverse proxy currently skips auth); first-device pairing through Docker's published port; `run.cancelled` event; webhook HMAC; `runs.listByStatus`.
+- Relay: the server must mint channel ids with ≥128 bits of randomness; server-side relay client not built. CLI needs a `--token` flag for remote servers.
+- Docker: digest-pin `node:24-slim`, drop devDependencies from the runtime image, run `docker build` once the daemon is up.
+- `useChat`: buffer live events until `history-loaded` so early deltas aren't lost.
+- Web language switcher once locales land.
 
 ## Known decisions and gaps
 
 - **Protocol vs. ARCHITECTURE.md**: the event union has no `computer.frame` or `handoff` yet. `EngineDriver` uses a single `run(ctx)` with `ctx.requestTool()` instead of `start/respond/cancel`. Add those events when computers and rooms are built.
-- **Engines**:
-  - `bot.model` is passed as `--model` (claude) or `-m` (codex).
-  - Claude's internal tool use isn't surfaced as Brot tool calls yet. Only text and usage are mapped.
-  - `run()` throws on failure, and the harness must turn that into `run.failed`.
-  - `registry.register()` throws on a duplicate id.
-- **Risks to fix**:
-  - `codex exec` fails outside a git repo. Run it in a git working dir, or add `--skip-git-repo-check` deliberately.
-  - The prompt is passed as a single argv entry, and Linux caps that at about 128 KiB. Move it to stdin for long histories.
+- **Engines**: `run()` throws on failure, and the harness turns that into `run.failed`. `registry.register()` throws on a duplicate id.
 - **Server decisions**: no `run.cancelled` event yet (cancel publishes `run.failed`). The JSON content-type and loopback `Host` guards block CSRF and DNS rebinding. Pairing `host` defaults to 127.0.0.1 (set `BROT_HOST` to the LAN IP for phones), and the 6-digit code isn't checked. No webhook HMAC yet. `packages/db` needs `runs.listByStatus`.
-- **Design contrast** (old palette): `--live`/`--danger` on white (about 4.4:1) and `--sun`/`--warn` on paper (about 3.2:1) fail AA as text. The UI uses them only for borders, dots, and icons. DESIGN.md needs text-safe variants.
+- **Design**: light `--ink-3` is `#6F6F6F` (not `#737373`) so placeholders on `--surface-2` pass AA. Safari animates the eye-path morph instantly instead of tweening.
 - **Environment**: Docker is installed but the daemon wasn't running, so the sandbox image (`images/computer`) hasn't been built or tested.
 - **Out of scope for v1**: Brot Cloud (Firecracker, Stripe), computers/sandboxes, Composio, REA, social publishing. See `docs/ROADMAP.md`.

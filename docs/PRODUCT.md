@@ -18,7 +18,7 @@ Bots with a job, a model, a computer, and your apps. They work in a chat you alr
 
 | Persona | Need | Hook |
 |---|---|---|
-| **Solo founder / indie hacker** | Sales follow-ups, support triage, SEO, bookkeeping | "A team for $0 + your Claude sub" |
+| **Solo founder / indie hacker** | Sales follow-ups, support triage, SEO, bookkeeping | "A team for $0 + your own model keys" |
 | **Small agency / SMB (2–20)** | Shared bots, shared apps, audit trail | Team workspace on Brot Cloud |
 | **Developer / product engineer** | Bug fixing, PR review, competitor teardowns | REA teardown → engineer bot builds it |
 | **Privacy-conscious / regulated** | Data can't leave infra | Self-host via Docker/Helm, local models |
@@ -28,7 +28,7 @@ Bots with a job, a model, a computer, and your apps. They work in a chat you alr
 
 - **Workspace**: the tenant. It holds members, bots, apps, secrets, and billing.
 - **Bot**: `{ persona, job, engine+model, computer, apps, skills, memory, policies }`.
-- **Engine**: the agent runtime (Claude Agent SDK/CLI, Codex CLI, Grok CLI, Gemini CLI, OpenCode, any ACP agent, any OpenAI-compatible endpoint).
+- **Engine**: the agent runtime. Brot uses the DeepSeek Harness (DSH) for every bot; the bot picks a provider and model inside it.
 - **Computer**: where a bot acts. Options are `host` (your machine), `sandbox` (local Docker/VM), and `cloud` (Brot Cloud microVM).
 - **Thread**: a conversation (DM with a bot, or a **Room** with several bots and humans).
 - **Run**: one unit of autonomous work inside a thread. It has steps, tool calls, cost, and an outcome.
@@ -60,10 +60,10 @@ Priority: **P0** = MVP (first public release), **P1** = v1 (Cloud GA), **P2** = 
 ### B. Engines & models
 | # | Feature | P |
 |---|---|---|
-| B1 | Driver: **Claude** (Agent SDK + CLI login) | P0 |
-| B2 | Driver: **Codex CLI** | P0 |
-| B3 | Driver: **ACP** generic (Gemini CLI, OpenCode, Grok CLI, Kimi, Qwen…) | P1 |
-| B4 | Driver: OpenAI-compatible endpoint (OpenRouter, vLLM, Ollama, LM Studio) | P1 |
+| B1 | One runtime: **DeepSeek Harness (DSH)** over ACP. Brot drives DSH sessions and routes its permission prompts to the broker | P0 |
+| B2 | Providers through DSH: DeepSeek, Anthropic API, OpenAI, OpenRouter, OpenAI-compatible and local endpoints, plus the sign-ins DSH supports natively (e.g. ChatGPT/Codex OAuth) | P0 |
+| B3 | Provider setup UI (keys go to the vault, DSH receives `secret://` references) | P1 |
+| B4 | Never route a subscription whose terms forbid third-party use (Claude Free/Pro/Max OAuth) | P0 |
 | B5 | Per-bot model, temperature, budget caps (tokens/$ per run/day) | P0 caps, P1 rest |
 | B6 | Fallback chain when a provider hits rate or usage limits (fixes the Grok Bot swarm stall) | P1 |
 | B7 | Cost and usage meter per bot, run, and workspace | P0 |
@@ -172,6 +172,6 @@ See [REA-INTEGRATION.md](./REA-INTEGRATION.md).
 
 ## MVP definition (P0 slice)
 
-"A solo founder installs Brot (desktop or `docker compose up`), creates a *Support Triage* bot on Claude, connects Gmail through Composio, watches it work in a sandboxed computer, approves a reply, saves the flow as a skill, and schedules it every morning."
+"A solo founder installs Brot (desktop or `docker compose up`), creates a *Support Triage* bot on DeepSeek V4 through DSH, connects Gmail through Composio, watches it work in a sandboxed computer, approves a reply, saves the flow as a skill, and schedules it every morning."
 
 Success metrics: time to first useful run under 3 min, D7 retention of 35% or more, and an approval rejection rate under 15% (a proxy for trust).

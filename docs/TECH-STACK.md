@@ -22,8 +22,8 @@ Each choice records **why**, so we can revisit it deliberately.
 | **pg-boss** | Jobs and cron on Postgres, so no Redis to operate |
 | **croner** | In-process cron for desktop mode |
 | **Better Auth** | Self-hostable auth (email, OAuth, passkeys, orgs). No vendor lock-in |
-| **@anthropic-ai/claude-agent-sdk** | First-class Claude engine |
-| **ACP (Agent Client Protocol)** | One generic driver for Gemini CLI, OpenCode, Grok CLI, and others |
+| **DeepSeek Harness (`@deepseek-ai/dsh`)** | The only agent runtime. MIT, plugin-based, multi-provider through pi-ai, with sandbox, browser-use and computer-use plugins. Run as a pinned subprocess; it is in developer preview, so breaking changes stay behind our `EngineDriver` |
+| **ACP (Agent Client Protocol)** | How Brot drives DSH: sessions, streaming updates, cancel, and `session/request_permission` routed to the broker |
 | **@modelcontextprotocol/sdk** | MCP client hub (Composio, REA, user servers) and Brot's own MCP server |
 | **Composio SDK** | 500+ app connectors with managed OAuth on day one |
 | **OpenTelemetry** | Traces for runs and tool calls. Export anywhere |

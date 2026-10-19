@@ -23,7 +23,7 @@ The **server is the product**. Desktop and Cloud are packaging. A self-hoster ru
  │ apps/server  (Hono, Node 24)                                   │
  │  ├─ api/          REST + SSE, auth (Better Auth), zod contracts │
  │  ├─ harness/      run loop, event bus, thread log, cost meter   │
- │  ├─ engines/      drivers: claude · codex · acp · openai-compat │
+ │  ├─ engines/      drivers: dsh (ACP) · mock (tests)          │
  │  ├─ broker/       permission broker → approvals, policies       │
  │  ├─ computers/    host(Cua) · docker · firecracker · remote     │
  │  ├─ tools/        MCP client hub (Composio, user MCP, REA)      │
@@ -41,18 +41,18 @@ The **server is the product**. Desktop and Cloud are packaging. A self-hoster ru
 ```
 
 ### Canonical event protocol (`packages/protocol`)
-Every engine's native stream (Claude SDK messages, Codex JSONL, ACP notifications) is normalized into **one versioned event union**, validated with zod:
+The DSH runtime's ACP notifications is normalized into **one versioned event union**, validated with zod:
 
 `run.started · message.delta · message.completed · tool.call · tool.result · approval.requested · approval.resolved · computer.frame · memory.written · handoff · cost.updated · run.completed · run.failed`
 
 - The log is append-only per thread (an `events` table, also exportable as NDJSON).
 - The UI state is a pure fold over events, so you can replay, time-travel debug, and share runs.
-- Adding an engine means one driver file implementing `EngineDriver` plus a one-line registration.
+- DSH is the single runtime; providers are configured inside it. `EngineDriver` keeps the runtime replaceable.
 
 ### Engine driver interface (sketch)
 ```ts
 interface EngineDriver {
-  id: string;                         // "claude", "codex", "acp:gemini"
+  id: string;                         // "dsh", "mock"
   detect(): Promise<EngineAvailability>; // installed? logged in? why not?
   models(): Promise<ModelInfo[]>;
   start(run: RunContext): AsyncIterable<CanonicalEvent>;
