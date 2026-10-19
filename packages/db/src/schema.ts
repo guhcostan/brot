@@ -1,0 +1,209 @@
+import {
+  index,
+  integer,
+  real,
+  sqliteTable,
+  text,
+  uniqueIndex,
+} from 'drizzle-orm/sqlite-core';
+import type {
+  ApprovalDecision,
+  ApprovalKind,
+  ApprovalStatus,
+  CanonicalEventType,
+  ComputerKind,
+  DeviceRole,
+  MemoryKind,
+  MessageRole,
+  PolicyEffect,
+  RoutineTrigger,
+  RunStatus,
+} from '@brot/protocol';
+
+type JsonObject = Record<string, unknown>;
+
+export const bots = sqliteTable('bots', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  job: text('job').notNull(),
+  instructions: text('instructions').notNull(),
+  avatar: text('avatar'),
+  engine: text('engine').notNull(),
+  model: text('model'),
+  computer: text('computer').$type<ComputerKind>().notNull(),
+  pinned: integer('pinned', { mode: 'boolean' }).notNull().default(false),
+  archived: integer('archived', { mode: 'boolean' }).notNull().default(false),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+});
+
+export const threads = sqliteTable(
+  'threads',
+  {
+    id: text('id').primaryKey(),
+    botId: text('bot_id')
+      .notNull()
+      .references(() => bots.id, { onDelete: 'cascade' }),
+    title: text('title').notNull(),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (t) => [index('threads_bot_idx').on(t.botId)],
+);
+
+export const messages = sqliteTable(
+  'messages',
+  {
+    id: text('id').primaryKey(),
+    threadId: text('thread_id')
+      .notNull()
+      .references(() => threads.id, { onDelete: 'cascade' }),
+    role: text('role').$type<MessageRole>().notNull(),
+    content: text('content').notNull(),
+    createdAt: text('created_at').notNull(),
+  },
+  (t) => [index('messages_thread_idx').on(t.threadId)],
+);
+
+export const runs = sqliteTable(
+  'runs',
+  {
+    id: text('id').primaryKey(),
+    threadId: text('thread_id')
+      .notNull()
+      .references(() => threads.id, { onDelete: 'cascade' }),
+    botId: text('bot_id')
+      .notNull()
+      .references(() => bots.id, { onDelete: 'cascade' }),
+    status: text('status').$type<RunStatus>().notNull(),
+    engine: text('engine').notNull(),
+    model: text('model'),
+    startedAt: text('started_at').notNull(),
+    endedAt: text('ended_at'),
+    tokensIn: integer('tokens_in').notNull().default(0),
+    tokensOut: integer('tokens_out').notNull().default(0),
+    costUsd: real('cost_usd').notNull().default(0),
+    error: text('error'),
+  },
+  (t) => [index('runs_thread_idx').on(t.threadId)],
+);
+
+export const approvals = sqliteTable(
+  'approvals',
+  {
+    id: text('id').primaryKey(),
+    runId: text('run_id')
+      .notNull()
+      .references(() => runs.id, { onDelete: 'cascade' }),
+    threadId: text('thread_id')
+      .notNull()
+      .references(() => threads.id, { onDelete: 'cascade' }),
+    botId: text('bot_id')
+      .notNull()
+      .references(() => bots.id, { onDelete: 'cascade' }),
+    kind: text('kind').$type<ApprovalKind>().notNull(),
+    tool: text('tool').notNull(),
+    summary: text('summary').notNull(),
+    args: text('args', { mode: 'json' }).$type<JsonObject>().notNull(),
+    status: text('status').$type<ApprovalStatus>().notNull(),
+    decision: text('decision').$type<ApprovalDecision>(),
+    reply: text('reply'),
+    createdAt: text('created_at').notNull(),
+    resolvedAt: text('resolved_at'),
+  },
+  (t) => [index('approvals_status_idx').on(t.status)],
+);
+
+export const policies = sqliteTable(
+  'policies',
+  {
+    id: text('id').primaryKey(),
+    botId: text('bot_id')
+      .notNull()
+      .references(() => bots.id, { onDelete: 'cascade' }),
+    tool: text('tool').notNull(),
+    argPattern: text('arg_pattern'),
+    effect: text('effect').$type<PolicyEffect>().notNull(),
+    createdAt: text('created_at').notNull(),
+  },
+  (t) => [index('policies_bot_idx').on(t.botId)],
+);
+
+export const memories = sqliteTable(
+  'memories',
+  {
+    id: text('id').primaryKey(),
+    botId: text('bot_id')
+      .notNull()
+      .references(() => bots.id, { onDelete: 'cascade' }),
+    kind: text('kind').$type<MemoryKind>().notNull(),
+    content: text('content').notNull(),
+    sourceRunId: text('source_run_id').references(() => runs.id, { onDelete: 'set null' }),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (t) => [index('memories_bot_idx').on(t.botId)],
+);
+
+export const skills = sqliteTable(
+  'skills',
+  {
+    id: text('id').primaryKey(),
+    botId: text('bot_id').references(() => bots.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    description: text('description').notNull(),
+    body: text('body').notNull(),
+    version: integer('version').notNull().default(1),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (t) => [index('skills_bot_idx').on(t.botId)],
+);
+
+export const routines = sqliteTable(
+  'routines',
+  {
+    id: text('id').primaryKey(),
+    botId: text('bot_id')
+      .notNull()
+      .references(() => bots.id, { onDelete: 'cascade' }),
+    name: text('name').notNull(),
+    instruction: text('instruction').notNull(),
+    trigger: text('trigger', { mode: 'json' }).$type<RoutineTrigger>().notNull(),
+    enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+    lastRunAt: text('last_run_at'),
+    nextRunAt: text('next_run_at'),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (t) => [index('routines_bot_idx').on(t.botId)],
+);
+
+export const devices = sqliteTable(
+  'devices',
+  {
+    id: text('id').primaryKey(),
+    name: text('name').notNull(),
+    role: text('role').$type<DeviceRole>().notNull(),
+    publicKey: text('public_key').notNull(),
+    tokenHash: text('token_hash').notNull(),
+    createdAt: text('created_at').notNull(),
+    lastSeenAt: text('last_seen_at'),
+  },
+  (t) => [uniqueIndex('devices_token_hash_uq').on(t.tokenHash)],
+);
+
+export const events = sqliteTable(
+  'events',
+  {
+    id: text('id').primaryKey(),
+    threadId: text('thread_id')
+      .notNull()
+      .references(() => threads.id, { onDelete: 'cascade' }),
+    runId: text('run_id').references(() => runs.id, { onDelete: 'set null' }),
+    type: text('type').$type<CanonicalEventType>().notNull(),
+    payload: text('payload', { mode: 'json' }).$type<JsonObject>().notNull(),
+    at: text('at').notNull(),
+  },
+  (t) => [index('events_thread_at_idx').on(t.threadId, t.at)],
+);

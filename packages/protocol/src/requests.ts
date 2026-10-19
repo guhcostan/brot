@@ -1,0 +1,126 @@
+import { z } from 'zod';
+import {
+  ApprovalDecision,
+  ComputerKind,
+  DeviceRole,
+  IsoDateTime,
+  MemoryKind,
+  PolicyEffect,
+  RoutineTrigger,
+} from './entities';
+
+export const CreateBot = z.object({
+  name: z.string().min(1),
+  job: z.string().min(1),
+  instructions: z.string().default(''),
+  engine: z.string().min(1).default('mock'),
+  model: z.string().min(1).optional(),
+  computer: ComputerKind.default('none'),
+  avatar: z.string().optional(),
+});
+export type CreateBot = z.infer<typeof CreateBot>;
+export type CreateBotInput = z.input<typeof CreateBot>;
+
+export const UpdateBot = z.object({
+  name: z.string().min(1).optional(),
+  job: z.string().min(1).optional(),
+  instructions: z.string().optional(),
+  avatar: z.string().optional(),
+  engine: z.string().min(1).optional(),
+  model: z.string().min(1).optional(),
+  computer: ComputerKind.optional(),
+  pinned: z.boolean().optional(),
+  archived: z.boolean().optional(),
+});
+export type UpdateBot = z.infer<typeof UpdateBot>;
+
+export const CreateThread = z.object({
+  title: z.string().min(1).optional(),
+});
+export type CreateThread = z.infer<typeof CreateThread>;
+
+export const PostMessage = z.object({
+  content: z.string().min(1),
+});
+export type PostMessage = z.infer<typeof PostMessage>;
+
+export const ResolveApproval = z.object({
+  decision: ApprovalDecision,
+  reply: z.string().optional(),
+});
+export type ResolveApproval = z.infer<typeof ResolveApproval>;
+
+export const CreateMemory = z.object({
+  kind: MemoryKind,
+  content: z.string(),
+});
+export type CreateMemory = z.infer<typeof CreateMemory>;
+
+export const UpdateMemory = z.object({
+  content: z.string().optional(),
+  kind: MemoryKind.optional(),
+});
+export type UpdateMemory = z.infer<typeof UpdateMemory>;
+
+export const CreateSkill = z.object({
+  name: z.string().min(1),
+  description: z.string(),
+  body: z.string(),
+  botId: z.string().optional(),
+});
+export type CreateSkill = z.infer<typeof CreateSkill>;
+
+export const UpdateSkill = z.object({
+  name: z.string().min(1).optional(),
+  description: z.string().optional(),
+  body: z.string().optional(),
+  botId: z.string().optional(),
+});
+export type UpdateSkill = z.infer<typeof UpdateSkill>;
+
+export const CreateRoutine = z.object({
+  botId: z.string(),
+  name: z.string().min(1),
+  instruction: z.string(),
+  trigger: RoutineTrigger,
+  enabled: z.boolean().default(true),
+});
+export type CreateRoutine = z.infer<typeof CreateRoutine>;
+export type CreateRoutineInput = z.input<typeof CreateRoutine>;
+
+export const UpdateRoutine = z.object({
+  name: z.string().min(1).optional(),
+  instruction: z.string().optional(),
+  trigger: RoutineTrigger.optional(),
+  enabled: z.boolean().optional(),
+});
+export type UpdateRoutine = z.infer<typeof UpdateRoutine>;
+
+export const CreatePolicy = z.object({
+  tool: z.string().min(1),
+  argPattern: z.string().optional(),
+  effect: PolicyEffect,
+});
+export type CreatePolicy = z.infer<typeof CreatePolicy>;
+
+export const PairingStartResponse = z.object({
+  token: z.string(),
+  code: z.string(),
+  expiresAt: IsoDateTime,
+  qrPayload: z.string(),
+});
+export type PairingStartResponse = z.infer<typeof PairingStartResponse>;
+
+export const PairingComplete = z.object({
+  token: z.string().min(1),
+  deviceName: z.string().min(1),
+  publicKey: z.string().min(1),
+  role: DeviceRole.default('full'),
+});
+export type PairingComplete = z.infer<typeof PairingComplete>;
+
+export const PairingCompleteResponse = z.object({
+  deviceId: z.string(),
+  deviceToken: z.string(),
+});
+export type PairingCompleteResponse = z.infer<typeof PairingCompleteResponse>;

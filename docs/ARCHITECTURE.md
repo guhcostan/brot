@@ -1,0 +1,137 @@
+# Architecture
+
+## One codebase, three deployment shapes
+
+```
+            ┌──────────────── same Brot server ("oven") ────────────────┐
+ Desktop    │ Electron shell → embedded server → SQLite  → sandbox: Docker│
+ Self-host  │ docker compose  → server (+ workers)       → Postgres → Docker/VM │
+ Brot Cloud │ k8s/Nomad → server pods + control plane    → Postgres → Firecracker microVMs │
+            └──────────────────────────────────────────────────────────┘
+```
+
+The **server is the product**. Desktop and Cloud are packaging. A self-hoster runs exactly the code that Brot Cloud runs, with `BROT_MODE=selfhost|desktop|cloud` toggling only infra adapters (computers, storage, billing).
+
+## Process model
+
+```
+ ┌───────────── clients ─────────────┐
+ │ Web/PWA · Desktop · Mobile · CLI  │
+ └──────┬──────────────▲─────────────┘
+        │ typed HTTP   │ SSE (canonical events)
+ ┌──────▼──────────────┴──────────────────────────────────────────┐
+ │ apps/server  (Hono, Node 24)                                   │
+ │  ├─ api/          REST + SSE, auth (Better Auth), zod contracts │
+ │  ├─ harness/      run loop, event bus, thread log, cost meter   │
+ │  ├─ engines/      drivers: claude · codex · acp · openai-compat │
+ │  ├─ broker/       permission broker → approvals, policies       │
+ │  ├─ computers/    host(Cua) · docker · firecracker · remote     │
+ │  ├─ tools/        MCP client hub (Composio, user MCP, REA)      │
+ │  ├─ memory/       facts, summaries, embeddings (sqlite-vec/pgvector) │
+ │  ├─ scheduler/    routines, triggers (croner local / pg-boss)   │
+ │  ├─ hooks/        webhook receiver (separate port, secret URLs) │
+ │  └─ vault/        secrets (keychain / sealed box), short-lived refs │
+ └───────┬───────────────────────────┬────────────────────────────┘
+         │ Drizzle                    │ gRPC/WebSocket control
+   SQLite | Postgres           brot-computer (per bot)
+                               ├─ computerd (agent-side daemon)
+                               ├─ Xvfb + XFCE + Chromium + Playwright
+                               ├─ KasmVNC/noVNC (→ WebRTC later)
+                               └─ toolchain: node, python, git, REA, Ghidra*
+```
+
+### Canonical event protocol (`packages/protocol`)
+Every engine's native stream (Claude SDK messages, Codex JSONL, ACP notifications) is normalized into **one versioned event union**, validated with zod:
+
+`run.started · message.delta · message.completed · tool.call · tool.result · approval.requested · approval.resolved · computer.frame · memory.written · handoff · cost.updated · run.completed · run.failed`
+
+- The log is append-only per thread (an `events` table, also exportable as NDJSON).
+- The UI state is a pure fold over events, so you can replay, time-travel debug, and share runs.
+- Adding an engine means one driver file implementing `EngineDriver` plus a one-line registration.
+
+### Engine driver interface (sketch)
+```ts
+interface EngineDriver {
+  id: string;                         // "claude", "codex", "acp:gemini"
+  detect(): Promise<EngineAvailability>; // installed? logged in? why not?
+  models(): Promise<ModelInfo[]>;
+  start(run: RunContext): AsyncIterable<CanonicalEvent>;
+  respond(runId: string, input: ApprovalAnswer | UserMessage): Promise<void>;
+  cancel(runId: string): Promise<void>;
+}
+```
+
+### Permission broker
+- Every tool call passes through `broker.decide(call, botPolicy)`, which returns `allow | deny | ask`.
+- `ask` emits `approval.requested` and **suspends** the run (state persisted, so it survives restarts).
+- "Allow always" writes a policy row (`bot, tool, argPattern, scope, expiresAt`).
+- Secrets: the bot asks for `secret://gmail-app-password`. The broker injects it into the computer's environment or keystroke stream and never into model context.
+
+### Computers
+| Provider | Mode | Isolation | Notes |
+|---|---|---|---|
+| `host` | desktop | none (opt-in) | Cua driver. macOS + X11 Linux |
+| `docker` | desktop, self-host | container (gVisor optional) | default; image `ghcr.io/brot/computer` |
+| `firecracker` | cloud, self-host advanced | microVM | per-bot persistent volume, suspend on idle |
+| `remote` | any | provider's | adapter for E2B/Boat/Daytona if a user prefers |
+
+**Default is one computer per bot.** Rooms can mount a shared folder explicitly.
+
+### Scheduling
+- Desktop: `croner` in-process with persisted next-run times. Missed runs resume on wake (with policy: run-once or skip).
+- Server/Cloud: **pg-boss** (Postgres-native jobs), with no Redis required.
+- Triggers: cron, webhook (`/h/<secret>`), app events (Composio long-poll or GitHub/Stripe webhooks), file watch.
+
+### Data
+- **Drizzle ORM** with two dialects: SQLite (libSQL) for desktop and small self-host, Postgres 16+ for team self-host and Cloud.
+- Vectors: `sqlite-vec` and `pgvector`.
+- Blobs (attachments, screenshots, recordings): local FS or S3-compatible (MinIO / R2).
+- Tenancy: every row carries `workspace_id`. Postgres RLS is enabled in Cloud.
+
+## Repository layout (pnpm + Turborepo)
+
+```
+brot/
+├─ apps/
+│  ├─ server/        # the oven: API, harness, broker, scheduler
+│  ├─ web/           # React 19 + Vite + TanStack Router/Query (PWA)
+│  ├─ desktop/       # Electron shell, embeds server, auto-update
+│  ├─ mobile/        # Expo app, paired remote control (see REMOTE-CONTROL.md)
+│  ├─ relay/         # E2E blind relay for phone ↔ desktop/self-host
+│  ├─ cli/           # `brot` CLI (serve, run, team, doctor)
+│  ├─ site/          # Astro marketing site + Team Gallery
+│  └─ docs/          # Astro Starlight docs (docs.brot.dev)
+├─ packages/
+│  ├─ protocol/      # canonical events + API contracts (zod)
+│  ├─ engines/       # engine drivers
+│  ├─ computers/     # computer providers + computerd client
+│  ├─ tools/         # MCP hub, Composio, REA adapter
+│  ├─ db/            # Drizzle schema, migrations (sqlite + pg)
+│  ├─ ui/            # design system (tokens, components) — see DESIGN.md
+│  ├─ mascot/        # "Brötchen" SVG/Rive states
+│  ├─ skills/        # SKILL.md parser, validator, built-in skills
+│  └─ config/        # tsconfig, oxlint, vitest presets
+├─ images/
+│  └─ computer/      # Dockerfile for brot-computer (+ computerd in Go)
+├─ cloud/            # control plane: provisioning, billing, metering (BROT_MODE=cloud)
+├─ deploy/           # docker-compose, helm chart, one-click templates
+├─ teams/            # built-in role templates (Markdown)
+├─ evals/            # task suites + harness for published success rates
+└─ docs/             # product/eng docs (this folder)
+```
+
+## Brot Cloud specifics
+
+- **Control plane** (`cloud/`): signup, workspace provisioning, Stripe, usage metering (compute-minutes, credits), region routing.
+- **Data plane**: server pods per region on shared Postgres with RLS. Larger tenants get dedicated pods.
+- **Computers**: Firecracker microVMs on bare metal (Hetzner/OVH/Latitude) with a Nomad or custom scheduler. They **suspend after N minutes idle** and resume in under a second from a snapshot. This is the main lever on margins.
+- Stage-0 shortcut: start on **Fly Machines** (Firecracker under the hood) before owning metal.
+- **Relay** for self-hosters (P2): an outbound tunnel so self-hosted servers get webhooks and mobile push without exposing ports. It's a paid add-on.
+
+## Security baseline
+- Server binds to `127.0.0.1` by default in desktop mode. Remote access requires auth plus pairing.
+- Webhooks run on a separate listener with unguessable secret paths and HMAC verification.
+- Computers have no access to the server's database or vault. They talk to the server only via `computerd` with a per-computer token.
+- Egress policy per bot (allowlist mode for regulated users).
+- Supply chain: pinned images by digest, SBOM, signed releases (Sigstore), and Renovate.
+- Threat model and disclosure live in `SECURITY.md`.
