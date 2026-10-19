@@ -37,7 +37,7 @@ export function ToolCallCard({
       <summary aria-label={`${tool}, ${STATUS_LABELS[status]}${summary ? `: ${summary}` : ''}`}>
         <span className="brot-tool__name">{tool}</span>
         <span className="brot-tool__summary">{summary}</span>
-        <Badge tone={status === 'error' ? 'live' : undefined}>{STATUS_LABELS[status]}</Badge>
+        <Badge tone={status === 'error' ? 'attention' : undefined}>{STATUS_LABELS[status]}</Badge>
       </summary>
       <div className="brot-tool__body">
         {hasArgs ? <pre className="brot-code">{JSON.stringify(args, null, 2)}</pre> : null}

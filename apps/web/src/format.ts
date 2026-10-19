@@ -1,4 +1,4 @@
-import { isFaunaKind, type FaunaKind } from '@brot/ui';
+import { parseAvatar, type AvatarSpec } from '@brot/ui';
 import type { Bot } from '@brot/protocol';
 
 const timeFormat = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' });
@@ -17,9 +17,9 @@ export function formatCount(value: number): string {
   return countFormat.format(value);
 }
 
-/** The fauna animal for a bot. Falls back to Capy when the avatar is missing or unknown. */
-export function faunaOf(bot: Pick<Bot, 'avatar'>): FaunaKind {
-  return isFaunaKind(bot.avatar) ? bot.avatar : 'capybara';
+/** The avatar shape and color for a bot. Unknown values fall back to a stable pick from the bot id. */
+export function avatarOf(bot: Pick<Bot, 'avatar' | 'id'>): AvatarSpec {
+  return parseAvatar(bot.avatar, bot.id);
 }
 
 /** A one-line gloss for a tool call: the first string argument, if any. */

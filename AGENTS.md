@@ -34,7 +34,7 @@ A change is done only when `pnpm typecheck && pnpm lint && pnpm test` pass for t
 |---|---|
 | `packages/protocol` | Canonical events, API contracts, `EngineDriver` interface (zod). **The contract every other package depends on** |
 | `packages/db` | Drizzle schema + migrations (SQLite/libSQL; Postgres later) |
-| `packages/engines` | Engine drivers: `mock`, `claude`, `codex` |
+| `packages/engines` | Engine drivers: `dsh` (DeepSeek Harness over ACP, the only runtime) and `mock` for tests |
 | `packages/ui` | Design tokens + React components (follows DESIGN.md) |
 | `apps/server` | Hono API, SSE, harness, permission broker, scheduler, vault, pairing |
 | `apps/web` | React 19 + Vite chat UI |
@@ -49,7 +49,7 @@ A change is done only when `pnpm typecheck && pnpm lint && pnpm test` pass for t
 Implementation work in this repo is **orchestrated, not done by one agent**:
 
 1. **The orchestrator delegates and integrates.** The main agent plans, splits the work, writes the specs, reviews results, and runs the final verification. It does not write the feature code itself.
-2. **Workers are Claude Haiku 5.5 subagents** (`model: "haiku"`). They're cheap and fast, so independent tasks run in parallel. Escalate to a larger model only for a task Haiku failed twice.
+2. **Workers are Claude Haiku 5.5 subagents** (`model: "haiku"`). They're cheap and fast, so independent tasks run in parallel. Escalate to a larger model only for a task Haiku failed twice. **Exception: interface work** (`packages/ui`, `apps/web` components and styles, `apps/mobile` screens, `apps/site`, any visual design) goes to Claude Opus 5.5 workers (`model: "opus"`), which produce better UI.
 3. **Split by owned paths.** Every worker gets an explicit list of directories it owns and may edit. It never edits outside them. Root files (`package.json`, `pnpm-workspace.yaml`, `turbo.json`, `tsconfig.base.json`, `AGENTS.md`, `docs/`) belong to the orchestrator unless a task assigns them.
 4. **Contracts first.** Shared contracts (`packages/protocol`, `packages/db`) land in their own wave before dependents fan out. A worker that needs a contract change reports it rather than editing another package.
 5. **Workers verify their own slice** (typecheck, lint, tests in their package) and report: files changed, commands run with results, and anything unfinished. They never claim something works without running it.

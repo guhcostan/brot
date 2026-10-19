@@ -28,14 +28,14 @@ function bot(
 
 /** One bot per fauna animal in DESIGN.md section 2. The avatar field holds the FaunaKind. */
 export const DEMO_BOTS: Bot[] = [
-  bot('bot_capy', 'Capy', 'Chief of Staff', 'capybara', 'sandbox', true),
-  bot('bot_onca', 'Onça', 'Bug Fixer', 'jaguar', 'sandbox', false),
-  bot('bot_tuca', 'Tuca', 'Sales follow-up', 'toucan', 'none', true),
-  bot('bot_ara', 'Ara', 'Social and content', 'macaw', 'none', false),
-  bot('bot_tamu', 'Tamu', 'Researcher', 'anteater', 'sandbox', false),
-  bot('bot_boto', 'Boto', 'Web navigator', 'boto', 'sandbox', false),
-  bot('bot_sol', 'Sol', 'Scheduled routines', 'sloth', 'none', false),
-  bot('bot_mico', 'Mico', 'Quick tasks and triage', 'marmoset', 'none', false),
+  bot('bot_capy', 'Capy', 'Chief of Staff', 'squircle:black', 'sandbox', true),
+  bot('bot_onca', 'Onça', 'Bug Fixer', 'tilted:orange', 'sandbox', false),
+  bot('bot_tuca', 'Tuca', 'Sales follow-up', 'circle:amber', 'none', true),
+  bot('bot_ara', 'Ara', 'Social and content', 'blob:pink', 'none', false),
+  bot('bot_tamu', 'Tamu', 'Researcher', 'cloud:teal', 'sandbox', false),
+  bot('bot_boto', 'Boto', 'Web navigator', 'drop:blue', 'sandbox', false),
+  bot('bot_sol', 'Sol', 'Scheduled routines', 'triangle:violet', 'none', false),
+  bot('bot_mico', 'Mico', 'Quick tasks and triage', 'circle:brown', 'none', false),
 ];
 
 const capyThread = 'thread_bot_capy';

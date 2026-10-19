@@ -1,0 +1,16 @@
+# Installed and built output is produced inside the image, never copied from the host.
+**/node_modules
+**/dist
+**/.turbo
+**/coverage
+
+# Git metadata and local secrets stay out of the build context.
+.git
+**/.env
+**/.env.*
+
+# Local databases, data directories and OS files.
+**/*.db
+**/*.db-*
+**/.brot*
+**/.DS_Store

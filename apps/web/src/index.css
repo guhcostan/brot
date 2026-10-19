@@ -1,33 +1,52 @@
 @import "tailwindcss";
 @import "@brot/ui/styles.css";
 
-/* Tailwind maps onto the @brot/ui tokens; no colors or fonts are defined here. */
+/* Tailwind maps onto the @brot/ui tokens only: its default palette and type scale are removed. */
+@theme {
+  --color-*: initial;
+  --text-*: initial;
+}
+
 @theme inline {
-  --color-paper: var(--paper);
+  --color-bg: var(--bg);
   --color-surface: var(--surface);
   --color-surface-2: var(--surface-2);
   --color-line: var(--line);
   --color-ink: var(--ink);
   --color-ink-2: var(--ink-2);
-  --color-brand: var(--brand);
-  --color-brand-ink: var(--brand-ink);
-  --color-sun: var(--sun);
-  --color-live: var(--live);
-  --color-river: var(--river);
-  --color-danger: var(--danger);
-  --color-warn: var(--warn);
-  --color-ok: var(--ok);
-  --color-info: var(--info);
+  --color-ink-3: var(--ink-3);
+  --color-primary: var(--primary);
+  --color-primary-ink: var(--primary-ink);
+  --color-focus: var(--focus);
+  --color-attention: var(--attention);
+  --color-attention-text: var(--attention-text);
+  --color-attention-soft: var(--attention-soft);
   --font-sans: var(--font-ui);
-  --font-serif: var(--font-display);
+  --font-mono: var(--font-code);
+  --text-xs: var(--fs-xs);
+  --text-sm: var(--fs-sm);
+  --text-base: var(--fs-base);
+  --text-md: var(--fs-md);
+  --text-lg: var(--fs-lg);
+  --text-xl: var(--fs-xl);
+  --text-2xl: var(--fs-2xl);
+  --text-3xl: var(--fs-3xl);
   --radius-sm: var(--r-sm);
   --radius-md: var(--r-md);
   --radius-lg: var(--r-lg);
   --radius-xl: var(--r-xl);
+  --shadow-float: var(--shadow-float);
 }
 
 html,
 body,
 #root {
   height: 100%;
+}
+
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
 }

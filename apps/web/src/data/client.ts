@@ -8,8 +8,8 @@ export interface BotEvent {
 /**
  * What the web app needs from the Brot server. Posting returns before the run finishes; the run
  * arrives as canonical events through onEvent, the same way the server's SSE stream delivers them.
- * The in-process mock implements this interface; an HTTP/SSE client will implement it once the
- * server routes exist.
+ * Two implementations exist: the in-process mock (mockClient.ts) and the HTTP/SSE client
+ * (httpClient.ts), which maps each bot to its primary thread on the server.
  */
 export interface BrotClient {
   listBots(): Promise<Bot[]>;

@@ -1,9 +1,9 @@
 import { useMemo, useState, type ReactElement } from 'react';
-import { EmptyState, cx, type BotStatus } from '@brot/ui';
+import { BrandMark, EmptyState, cx, type BotStatus } from '@brot/ui';
 import { ContextPanel } from './components/ContextPanel';
 import { Sidebar } from './components/Sidebar';
 import { ThreadView } from './components/ThreadView';
-import { createMockClient } from './data/mockClient';
+import { createClient } from './data';
 import { t } from './i18n';
 import { botStatus, emptyThread } from './state/thread';
 import { useChat } from './state/useChat';
@@ -15,7 +15,7 @@ type Pane = 'bots' | 'thread' | 'context';
  * context panel is an overlay.
  */
 export function App(): ReactElement {
-  const client = useMemo(() => createMockClient(), []);
+  const client = useMemo(() => createClient(), []);
   const { state, select, send, decide } = useChat(client);
   const [pane, setPane] = useState<Pane>('thread');
 
@@ -24,7 +24,7 @@ export function App(): ReactElement {
   const statusOf = (botId: string): BotStatus => botStatus(threadOf(botId));
 
   return (
-    <div className="grid h-dvh grid-cols-1 overflow-hidden bg-paper md:grid-cols-[272px_minmax(0,1fr)] xl:grid-cols-[272px_minmax(0,1fr)_320px]">
+    <div className="grid h-dvh grid-cols-1 overflow-hidden bg-bg text-ink md:grid-cols-[264px_minmax(0,1fr)] xl:grid-cols-[264px_minmax(0,1fr)_320px]">
       <Sidebar
         bots={state.bots}
         statusOf={statusOf}
@@ -50,11 +50,7 @@ export function App(): ReactElement {
           />
         ) : (
           <div className="flex flex-1 items-center justify-center">
-            {state.error ? (
-              <EmptyState title={state.error} />
-            ) : (
-              <EmptyState title={t('app.tagline')} />
-            )}
+            <EmptyState icon={<BrandMark size="lg" />} title={state.error ?? t('app.tagline')} />
           </div>
         )}
       </main>

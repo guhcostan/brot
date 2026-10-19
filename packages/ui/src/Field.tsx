@@ -41,7 +41,7 @@ export function Input({ label, hint, error, hideLabel, id, className, ...rest }:
         </span>
       ) : null}
       {error ? (
-        <span id={errorId} className="brot-field__hint">
+        <span id={errorId} className="brot-field__hint" data-error="true">
           {error}
         </span>
       ) : null}
@@ -79,7 +79,7 @@ export function Textarea({
         </span>
       ) : null}
       {error ? (
-        <span id={errorId} className="brot-field__hint">
+        <span id={errorId} className="brot-field__hint" data-error="true">
           {error}
         </span>
       ) : null}

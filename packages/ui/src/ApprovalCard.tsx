@@ -32,7 +32,7 @@ export interface ApprovalCardProps {
 }
 
 /**
- * An inline approval request. --live marks it as needing the human now.
+ * An inline approval request. --attention marks it as needing the human now.
  * Decisions go through onDecide; the card keeps no approval state of its own.
  */
 export function ApprovalCard({ approval, onDecide, busy = false, className }: ApprovalCardProps): ReactElement {
@@ -48,12 +48,13 @@ export function ApprovalCard({ approval, onDecide, busy = false, className }: Ap
   return (
     <section
       className={cx('brot-approval', className)}
+      data-status={approval.status}
       aria-label={`Approval needed: ${approval.summary}`}
     >
       <div className="brot-approval__header">
         {pending ? <StatusDot status="waiting" /> : null}
         <Badge>{APPROVAL_KIND_LABELS[approval.kind]}</Badge>
-        {!pending && approval.decision ? <Badge tone={approval.decision === 'deny' ? 'neutral' : 'brand'}>{DECISION_LABELS[approval.decision]}</Badge> : null}
+        {!pending && approval.decision ? <Badge>{DECISION_LABELS[approval.decision]}</Badge> : null}
       </div>
       <p className="brot-approval__title">{approval.summary}</p>
       <p className="brot-approval__meta">{approval.tool}</p>

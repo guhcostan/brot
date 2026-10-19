@@ -13,7 +13,7 @@
     "typecheck": "turbo run typecheck",
     "lint": "oxlint .",
     "test": "vitest run",
-    "brot": "pnpm --filter @brot/cli exec brot"
+    "brot": "pnpm --filter @brot/cli brot"
   },
   "devDependencies": {
     "@types/node": "^24.19.2",

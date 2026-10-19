@@ -1,6 +1,19 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { colorDark, colorLight, fontFamily, fontSize, lineHeight, motion, radius, shadow, space } from './tokens';
+import {
+  AVATAR_COLORS,
+  colorDark,
+  colorLight,
+  fontFamily,
+  fontSize,
+  lineHeight,
+  motion,
+  radius,
+  shadow,
+  space,
+  tracking,
+  type ColorToken,
+} from './tokens';
 
 const css = readFileSync(new URL('./tokens.css', import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
 
@@ -53,7 +66,27 @@ describe('tokens.css mirrors tokens.ts', () => {
     expectColors(darkAttr, colorDark);
   });
 
-  it('keeps radius, spacing, type, and motion values identical', () => {
+  it('keeps the old brand palette out', () => {
+    for (const name of ['brand', 'sun', 'live', 'river', 'paper']) {
+      expect(light[name], `--${name}`).toBeUndefined();
+    }
+  });
+
+  it('mirrors the avatar colors in both themes', () => {
+    for (const [name, paint] of Object.entries(AVATAR_COLORS)) {
+      expect(light[`avatar-${name}`]?.toLowerCase(), `--avatar-${name}`).toBe(paint.light.fill.toLowerCase());
+      expect(light[`avatar-${name}-eye`]?.toLowerCase(), `--avatar-${name}-eye`).toBe(paint.light.eye.toLowerCase());
+      for (const dark of [darkMedia, darkAttr]) {
+        const fill = dark[`avatar-${name}`] ?? light[`avatar-${name}`];
+        const eye = dark[`avatar-${name}-eye`] ?? light[`avatar-${name}-eye`];
+        expect(fill?.toLowerCase(), `dark --avatar-${name}`).toBe(paint.dark.fill.toLowerCase());
+        expect(eye?.toLowerCase(), `dark --avatar-${name}-eye`).toBe(paint.dark.eye.toLowerCase());
+      }
+    }
+    expect(AVATAR_COLORS.black.dark).toEqual({ fill: '#F2F2F2', eye: '#111111' });
+  });
+
+  it('keeps radius, spacing, type, shadow, and motion values identical', () => {
     for (const [key, value] of Object.entries(radius)) {
       expect(light[`r-${key}`]).toBe(`${value}px`);
     }
@@ -61,45 +94,59 @@ describe('tokens.css mirrors tokens.ts', () => {
       expect(light[`space-${key}`]).toBe(`${value}px`);
     }
     for (const [key, value] of Object.entries(fontSize)) {
-      expect(light[`text-${key}`]).toBe(`${value}px`);
+      expect(light[`fs-${key}`]).toBe(`${value}px`);
     }
-    expect(light['leading-body']).toBe(String(lineHeight.body));
-    expect(light['leading-display']).toBe(String(lineHeight.display));
-    expect(light['motion-fast']).toBe(`${motion.fast}ms`);
-    expect(light['motion-base']).toBe(`${motion.base}ms`);
-    expect(light['ease-out']).toBe(motion.easeOut);
-    expect(light['font-display']).toBe(fontFamily.display);
+    expect(light['lh-body']).toBe(String(lineHeight.body));
+    expect(light['lh-heading']).toBe(String(lineHeight.heading));
+    expect(light['tracking-heading']).toBe(tracking.heading);
+    expect(light['tracking-tight']).toBe(tracking.tight);
+    expect(light['dur-fast']).toBe(`${motion.fast}ms`);
+    expect(light['dur-base']).toBe(`${motion.base}ms`);
+    expect(light['ease']).toBe(motion.ease);
     expect(light['font-ui']).toBe(fontFamily.ui);
-    expect(light['font-mono']).toBe(fontFamily.mono);
+    expect(light['font-code']).toBe(fontFamily.code);
+    expect(light['shadow-float']).toBe(shadow.float);
   });
 
-  it('keeps shadow values identical in both themes', () => {
-    expect(light['shadow-1']).toBe(shadow.light[1]);
-    expect(light['shadow-3']).toBe(shadow.light[3]);
-    expect(darkAttr['shadow-2']).toBe(shadow.dark[2]);
-    expect(darkMedia['shadow-3']).toBe(shadow.dark[3]);
+  it('uses only Inter and JetBrains Mono, no serif', () => {
+    expect(css).not.toMatch(/[^-]serif/);
+    expect(fontFamily.ui.startsWith('"Inter Variable"')).toBe(true);
+    expect(fontFamily.code.startsWith('"JetBrains Mono Variable"')).toBe(true);
   });
 });
 
 describe('contrast (WCAG 2.x)', () => {
-  const themes = {
-    light: { vars: colorLight, bgs: ['paper', 'surface', 'surface2'] as const },
-    dark: { vars: colorDark, bgs: ['paper', 'surface', 'surface2'] as const },
-  };
+  const themes = { light: colorLight, dark: colorDark };
+  const pairs: Array<[ColorToken, ColorToken]> = [
+    ['ink', 'bg'],
+    ['ink', 'surface'],
+    ['ink', 'surface2'],
+    ['ink2', 'bg'],
+    ['ink2', 'surface'],
+    ['ink2', 'surface2'],
+    ['ink3', 'bg'],
+    ['ink3', 'surface'],
+    ['ink3', 'surface2'],
+    ['primaryInk', 'primary'],
+    ['attentionText', 'bg'],
+    ['attentionText', 'surface'],
+    ['attentionText', 'attentionSoft'],
+    ['ink', 'attentionSoft'],
+    ['ink2', 'attentionSoft'],
+  ];
 
-  for (const [name, theme] of Object.entries(themes)) {
-    it(`${name}: body text meets AA (4.5:1) on every surface`, () => {
-      for (const bg of theme.bgs) {
-        expect(contrast(theme.vars.ink, theme.vars[bg]), `ink on ${bg}`).toBeGreaterThanOrEqual(4.5);
-        expect(contrast(theme.vars.ink2, theme.vars[bg]), `ink-2 on ${bg}`).toBeGreaterThanOrEqual(4.5);
+  for (const [name, vars] of Object.entries(themes)) {
+    it(`${name}: every text pair meets AA (4.5:1)`, () => {
+      for (const [fg, bg] of pairs) {
+        expect(contrast(vars[fg], vars[bg]), `${fg} on ${bg}`).toBeGreaterThanOrEqual(4.5);
       }
-      expect(contrast(theme.vars.brand, theme.vars.paper), 'brand on paper').toBeGreaterThanOrEqual(4.5);
-      expect(contrast(theme.vars.surface, theme.vars.brand), 'primary button text').toBeGreaterThanOrEqual(4.5);
     });
 
-    it(`${name}: borders and the approval outline meet 3:1 against surfaces`, () => {
-      expect(contrast(theme.vars.ink2, theme.vars.surface), 'input border').toBeGreaterThanOrEqual(3);
-      expect(contrast(theme.vars.live, theme.vars.surface), 'approval border').toBeGreaterThanOrEqual(3);
+    it(`${name}: the attention outline and focus ring meet 3:1 against surfaces`, () => {
+      for (const bg of ['bg', 'surface', 'attentionSoft'] as const) {
+        expect(contrast(vars.attention, vars[bg]), `attention on ${bg}`).toBeGreaterThanOrEqual(3);
+      }
+      expect(contrast(vars.focus, vars.bg), 'focus on bg').toBeGreaterThanOrEqual(3);
     });
   }
 });

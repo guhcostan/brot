@@ -1,0 +1,21 @@
+# Self-hosted Brot server. Run from the repository root:
+#   docker compose -f deploy/compose.yaml up -d --build
+name: brot
+
+services:
+  server:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: brot-server:local
+    # Reaps engine child processes, since node runs as PID 1 otherwise.
+    init: true
+    restart: unless-stopped
+    ports:
+      # Loopback only. Requests from the host reach the container from a non-loopback address, so they need a device token.
+      - "127.0.0.1:8799:8799"
+    volumes:
+      - brot-data:/data
+
+volumes:
+  brot-data:
