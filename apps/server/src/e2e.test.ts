@@ -83,7 +83,7 @@ class Session {
 
   async createThread(): Promise<{ bot: Bot; thread: Thread }> {
     const bot = await expectStatus(
-      await this.call('POST', '/api/bots', { name: 'Ada', job: 'Ops', engine: 'mock' }),
+      await this.call('POST', '/api/bots', { name: 'Ada', job: 'Ops', engine: 'mock', computer: 'none' }),
       201,
       (value) => Bot.parse(value),
     );

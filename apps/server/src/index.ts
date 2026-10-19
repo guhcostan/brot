@@ -4,16 +4,22 @@ import type { Repos } from '@brot/db';
 import type { Server } from 'node:http';
 import type { Hono } from 'hono';
 import { createApp } from './app';
+import { createDockerComputerProvider, createHostComputerProvider } from './computers';
+import { createBrotMcp } from './mcp';
 import type { AppEnv, Bindings } from './auth';
 import { loadConfig, type ConfigOverrides } from './config';
-import { createServices } from './services';
+import { createServices, type ServiceExtras } from './services';
 import { createWebhookApp } from './webhooks';
 export { createApp } from './app';
-export { createServices, type Services } from './services';
+export { createServices, type ServiceExtras, type Services } from './services';
 export { createWebhookApp } from './webhooks';
 
 export interface StartOptions extends ConfigOverrides {
   engines?: EngineRegistry;
+  /** Sandbox and host computer providers. Absent: `computer: 'sandbox'` runs fail, `host` is not offered. */
+  computers?: ServiceExtras['computers'];
+  /** Builds the Brot MCP server for contained runs from the server's own services. Absent: no Brot MCP tools. */
+  mcp?: ServiceExtras['mcp'];
 }
 
 export interface ServerHandle {
@@ -26,9 +32,17 @@ export interface ServerHandle {
 
 /** Starts the API and the webhook receiver. Pass port 0 to let the OS choose a free port. */
 export async function startServer(options: StartOptions = {}): Promise<ServerHandle> {
-  const { engines: engineOverride, ...overrides } = options;
+  const { engines: engineOverride, computers, mcp, ...overrides } = options;
   const config = loadConfig(process.env, overrides);
-  const services = await createServices(config, engineOverride ?? createEngineRegistry(defaultEngines()));
+  const services = await createServices(config, engineOverride ?? createEngineRegistry(defaultEngines()), {
+    computers: computers ?? {
+      sandbox: createDockerComputerProvider({ computerImage: config.computerImage, brotPort: config.port }),
+      ...(config.mode === 'desktop'
+        ? { host: createHostComputerProvider({ brotHome: config.home, brotPort: config.port }) }
+        : {}),
+    },
+    mcp: mcp ?? createBrotMcp,
+  });
 
   await seedFirstBot(services.repos);
   const recovered = await services.harness.recoverInterruptedRuns();
@@ -38,6 +52,8 @@ export async function startServer(options: StartOptions = {}): Promise<ServerHan
   const app = createApp({ ...services, trustLoopback: true });
   const webhooks = createWebhookApp(services);
   const api = await listen((request, env) => app.fetch(request, env), config.host, config.port);
+  // Port 0 lets the OS pick; loopback MCP URLs must name the port that was bound.
+  config.port = api.port;
   let hooks: { server: ServerType; port: number };
   try {
     hooks = await listen((request, env) => webhooks.fetch(request, env), config.host, config.webhookPort);
@@ -65,6 +81,8 @@ async function seedFirstBot(repos: Repos): Promise<void> {
     name: 'Capy',
     job: 'Chief of Staff',
     engine: 'mock',
+    // The mock engine runs no tools, so the seeded bot needs no computer until a real engine is chosen.
+    computer: 'none',
     instructions: 'You are Capy, a calm and capable chief of staff.',
   });
 }

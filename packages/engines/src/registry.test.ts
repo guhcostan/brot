@@ -1,6 +1,6 @@
 import type { EngineDriver } from '@brot/protocol';
 import { describe, expect, it } from 'vitest';
-import { createEngineRegistry, defaultEngines } from './registry';
+import { createEngineRegistry, defaultEngines, modelHostsFor } from './registry';
 
 function fakeDriver(id: string): EngineDriver {
   return {
@@ -36,5 +36,11 @@ describe('engine registry', () => {
   it('defaults to the mock and dsh drivers', () => {
     const registry = createEngineRegistry(defaultEngines());
     expect(registry.list().map((d) => d.id)).toEqual(['mock', 'dsh']);
+  });
+
+  it('maps each engine to the model hosts it must reach', () => {
+    expect(modelHostsFor('dsh')).toEqual(['api.deepseek.com']);
+    expect(modelHostsFor('mock')).toEqual([]);
+    expect(modelHostsFor('unknown')).toEqual([]);
   });
 });

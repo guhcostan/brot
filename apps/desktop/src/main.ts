@@ -55,6 +55,7 @@ async function start(): Promise<void> {
       port: config.server.port,
       webhookPort: config.server.webhookPort,
       home: config.home,
+      mode: 'desktop',
     });
     if (config.web.kind === 'gateway') {
       gateway = await startWebGateway({ webRoot: config.web.root, port: config.web.port, apiPort: server.port });

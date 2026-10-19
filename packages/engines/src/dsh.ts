@@ -1,14 +1,16 @@
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { createInterface } from 'node:readline';
-import { resolve } from 'node:path';
-import { PassThrough, Readable, Writable } from 'node:stream';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { Readable, Writable } from 'node:stream';
 import {
   client,
   methods,
   ndJsonStream,
   PROTOCOL_VERSION,
   type ClientConnection,
+  type McpServer as AcpMcpServer,
   type PromptResponse,
   type RequestPermissionRequest,
   type RequestPermissionResponse,
@@ -16,9 +18,12 @@ import {
   type SessionNotification,
 } from '@agentclientprotocol/sdk';
 import type {
+  ComputerHandle,
+  ComputerProcess,
   EngineAvailability,
   EngineDriver,
   EngineEvent,
+  McpServerSpec,
   ModelInfo,
   RunContext,
   ToolDecision,
@@ -46,12 +51,44 @@ import { buildPrompt } from './prompt';
 
 const LABEL = 'DeepSeek Harness';
 const ACP_PROFILE = 'acp';
+/** The launcher a computer image installs globally. */
+const COMPUTER_LAUNCHER = 'dsh';
 const DEFAULT_MODEL = 'default';
 const DEFAULT_CANCEL_GRACE_MS = 5_000;
 const FORCE_KILL_MS = 1_000;
 const PROBE_TIMEOUT_MS = 10_000;
 const STDERR_KEEP_CHARS = 2_000;
 const STDERR_SHOWN_CHARS = 500;
+const PATCH_FILE = 'no-tools.patch.yml';
+
+/** Hosts the DeepSeek model route calls. A contained computer must reach them to run DSH at all. */
+export const DSH_MODEL_HOSTS: readonly string[] = ['api.deepseek.com'];
+
+/**
+ * Tool rows of the ACP profile in the pinned `@deepseek-ai/dsh` base bundle that run commands,
+ * touch files, reach the network or start subagents. Brot's MCP tools are the only tools left.
+ */
+export const NO_TOOL_ROWS = [
+  'tool-working-directory',
+  'tool-bash',
+  'tool-pwsh',
+  'tool-jobs',
+  'tool-fs',
+  'tool-fs-search',
+  'tool-skill',
+  'tool-workflow',
+  'tool-subagent',
+  'tool-subagent-fork',
+  'tool-subagent-control',
+  'tool-subagent-list-agents',
+  'tool-web',
+] as const;
+
+/** `--patch` overlay for `computer: 'none'`. Verified against the pinned launcher with `dsh --dump-config`. */
+export const NO_TOOLS_PATCH = NO_TOOL_ROWS.map((id) => `- id: ${id}\n  disabled: true\n`).join('');
+
+/** Telemetry is off in computers: its export would be blocked by egress and only adds noise. */
+const DEFAULT_COMPUTER_ENV: Record<string, string> = { DSH_TELEMETRY_DISABLED: '1' };
 
 /** Program and leading arguments that start the DSH launcher. The ACP profile flags are appended. */
 export interface DshCommand {
@@ -66,6 +103,11 @@ export interface DshEngineOptions {
   cwd?: string;
   /** Sets `DSH_HOME` for the server processes. Default: DSH's own home, where providers are configured. */
   dshHome?: string;
+  /**
+   * Environment for DSH inside a computer. Host variables are never passed in, so provider keys must be
+   * provisioned in the image or listed here. Default: `DSH_TELEMETRY_DISABLED=1` only.
+   */
+  computerEnv?: Record<string, string>;
   /** How long a cancelled prompt may take to settle before its server process tree is killed. Default: 5000. */
   cancelGraceMs?: number;
 }
@@ -75,12 +117,32 @@ export interface DshEngine extends EngineDriver {
   close(): Promise<void>;
 }
 
+interface ProcessExit {
+  code: number | null;
+  signal: string | null;
+  spawnError?: Error;
+}
+
+/** A DSH process behind the stdio the ACP connection needs: a local child or one started in a computer. */
+interface Launched {
+  stdin: WritableStream<Uint8Array>;
+  stdout: ReadableStream<Uint8Array>;
+  stderr: ReadableStream<Uint8Array>;
+  exit: Promise<ProcessExit>;
+  kill(signal: 'SIGTERM' | 'SIGKILL'): void;
+}
+
+/** Local runs are `computer: 'none'`: no tools beyond Brot MCP. Computer runs get the computer's tools. */
+type Placement = { kind: 'local' } | { kind: 'computer'; computer: ComputerHandle };
+
+const LOCAL: Placement = { kind: 'local' };
+
 interface ServerProcess {
-  child: ChildProcess;
+  placement: string;
+  launched: Launched;
   connection: ClientConnection;
   resumable: boolean;
   exited: boolean;
-  stderrTail(): string;
 }
 
 interface ActiveRun {
@@ -96,11 +158,13 @@ interface ActiveRun {
   onAbort: () => void;
 }
 
-/** One Brot thread: its own DSH server process while alive, and the DSH session that process hosts. */
+/** One Brot thread: its DSH server process while alive, and the DSH session that process hosts. */
 interface ThreadState {
   server: ServerProcess | undefined;
   sessionId: string | undefined;
   sessionServer: ServerProcess | undefined;
+  /** The MCP servers the open session was created or resumed with. Brot MCP tokens are per run. */
+  mcpKey: string | undefined;
   primed: boolean;
   busy: boolean;
   model: string | undefined;
@@ -143,17 +207,21 @@ export function pinnedDshCommand(): DshCommand | undefined {
 
 /**
  * Drives DeepSeek Harness through its ACP server (`dsh --profile acp`). Each Brot thread gets its
- * own server process and one DSH session, both kept in memory while the process is alive. When a
- * process dies or is stopped, the next run starts a new one and resumes the thread's session.
+ * own server process and one DSH session, both kept in memory while the process is alive. A run
+ * with a computer executes DSH inside it; a run without one executes DSH locally with every tool
+ * row disabled. When a process dies or is stopped, the next run starts a new one and resumes the
+ * thread's session by its engine session id.
  */
 export function createDshEngine(opts: DshEngineOptions = {}): DshEngine {
   const command = opts.command ?? pinnedDshCommand();
   const cwd = resolve(opts.cwd ?? process.cwd());
   const cancelGraceMs = opts.cancelGraceMs ?? DEFAULT_CANCEL_GRACE_MS;
   const env: NodeJS.ProcessEnv = opts.dshHome === undefined ? process.env : { ...process.env, DSH_HOME: opts.dshHome };
+  const computerEnv = { ...DEFAULT_COMPUTER_ENV, ...opts.computerEnv };
 
   const threads = new Map<string, ThreadState>();
   let knownModels: ModelEntry[] = [];
+  let patchDir: string | undefined;
 
   function threadFor(threadId: string): ThreadState {
     let thread = threads.get(threadId);
@@ -162,6 +230,7 @@ export function createDshEngine(opts: DshEngineOptions = {}): DshEngine {
         server: undefined,
         sessionId: undefined,
         sessionServer: undefined,
+        mcpKey: undefined,
         primed: false,
         busy: false,
         model: undefined,
@@ -236,56 +305,65 @@ export function createDshEngine(opts: DshEngineOptions = {}): DshEngine {
     }
   }
 
-  async function ensureServer(thread: ThreadState): Promise<ServerProcess> {
+  /** The no-tools overlay is written once per engine, into a private temporary directory. */
+  function noToolsPatchPath(): string {
+    if (patchDir === undefined) {
+      patchDir = mkdtempSync(join(tmpdir(), 'brot-dsh-'));
+      writeFileSync(join(patchDir, PATCH_FILE), NO_TOOLS_PATCH, { mode: 0o600 });
+    }
+    return join(patchDir, PATCH_FILE);
+  }
+
+  async function ensureServer(thread: ThreadState, placement: Placement): Promise<ServerProcess> {
+    const key = placementKey(placement);
     const current = thread.server;
-    if (current !== undefined && isLive(current)) return current;
+    if (current !== undefined && isLive(current) && current.placement === key) return current;
     if (current !== undefined) {
       thread.server = undefined;
       await stopServer(current);
     }
-    if (command === undefined) throw new Error(`${LABEL} (@deepseek-ai/dsh) is not installed`);
-    const server = await launch(command, thread);
+    const server = await launch(thread, placement);
     thread.server = server;
     return server;
   }
 
-  async function launch(cmd: DshCommand, thread: ThreadState): Promise<ServerProcess> {
-    const child = spawn(cmd.file, [...(cmd.args ?? []), '--profile', ACP_PROFILE], {
+  async function startProcess(placement: Placement): Promise<Launched> {
+    if (placement.kind === 'computer') {
+      const proc = await placement.computer.exec([COMPUTER_LAUNCHER, '--profile', ACP_PROFILE], {
+        env: computerEnv,
+      });
+      return fromComputer(proc);
+    }
+    if (command === undefined) throw new Error(`${LABEL} (@deepseek-ai/dsh) is not installed`);
+    return spawnLocal(
+      {
+        file: command.file,
+        args: [...(command.args ?? []), '--profile', ACP_PROFILE, '--patch', noToolsPatchPath()],
+      },
       env,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      detached: process.platform !== 'win32',
-    });
-    let stderr = '';
-    child.stderr.setEncoding('utf8');
-    child.stderr.on('data', (chunk: string) => {
-      stderr = (stderr + chunk).slice(-STDERR_KEEP_CHARS);
-    });
-    child.stdin.on('error', () => undefined);
-
-    const connection = attach(thread).connect(
-      ndJsonStream(Writable.toWeb(child.stdin) as WritableStream<Uint8Array>, protocolLines(child.stdout)),
     );
+  }
+
+  async function launch(thread: ThreadState, placement: Placement): Promise<ServerProcess> {
+    const launched = await startProcess(placement);
+    const tail = keepTail(launched.stderr);
+    const connection = attach(thread).connect(ndJsonStream(launched.stdin, protocolLines(launched.stdout)));
     const server: ServerProcess = {
-      child,
+      placement: placementKey(placement),
+      launched,
       connection,
       resumable: false,
       exited: false,
-      stderrTail: () => stderr.trim().slice(-STDERR_SHOWN_CHARS),
     };
-    child.once('exit', (code, signal) => {
+    void launched.exit.then((exit) => {
       server.exited = true;
       if (thread.server === server) thread.server = undefined;
-      const tail = server.stderrTail();
-      const error = new Error(`${LABEL} server ${describeExit(code, signal)}${tail ? `: ${tail}` : ''}`);
       const run = thread.active;
-      if (run?.server === server) run.mailbox.push({ kind: 'failed', error });
+      if (run?.server === server) run.mailbox.push({ kind: 'failed', error: runtimeExitError(exit, tail()) });
     });
 
-    const startupFailure = new Promise<never>((_, reject) => {
-      child.once('error', (error) => reject(new Error(`${LABEL} failed to start: ${error.message}`)));
-      child.once('exit', (code, signal) => {
-        reject(new Error(`${LABEL} server ${describeExit(code, signal)} during startup`));
-      });
+    const startupFailure = launched.exit.then((exit): never => {
+      throw startupExitError(exit);
     });
     try {
       const init = await Promise.race([
@@ -301,26 +379,51 @@ export function createDshEngine(opts: DshEngineOptions = {}): DshEngine {
       server.resumable = Boolean(init.agentCapabilities?.sessionCapabilities?.resume);
       return server;
     } catch (error) {
-      killTree(child);
+      terminate(server);
       throw error;
     }
   }
 
-  async function ensureSession(thread: ThreadState, server: ServerProcess): Promise<string> {
-    if (thread.sessionId !== undefined && thread.sessionServer === server) return thread.sessionId;
-    if (thread.sessionId !== undefined && server.resumable) {
-      const resumed = await server.connection.agent
-        .request(methods.agent.session.resume, { sessionId: thread.sessionId, cwd, mcpServers: [] })
-        .catch(() => undefined);
+  /**
+   * Returns the session id for the run. Reuses the open session when its id and MCP servers still match;
+   * otherwise closes it and resumes the wanted id (the run's engine session id, else the thread's last)
+   * with this run's MCP servers. Creates a session only when neither can be resumed.
+   */
+  async function ensureSession(
+    thread: ThreadState,
+    server: ServerProcess,
+    ctx: RunContext,
+    mcpServers: AcpMcpServer[],
+  ): Promise<string> {
+    const mcpKey = JSON.stringify(mcpServers);
+    const wanted = ctx.engineSessionId ?? thread.sessionId;
+    const open = thread.sessionId !== undefined && thread.sessionServer === server ? thread.sessionId : undefined;
+    if (open !== undefined && open === wanted && thread.mcpKey === mcpKey) return open;
+    if (open !== undefined) {
+      thread.sessionServer = undefined;
+      await server.connection.agent.request(methods.agent.session.close, { sessionId: open }).catch(() => undefined);
+    }
+
+    if (wanted !== undefined && server.resumable) {
+      const resumed = await server.connection.agent.request(methods.agent.session.resume, {
+        sessionId: wanted,
+        cwd,
+        mcpServers,
+      }).catch(() => undefined);
       if (resumed !== undefined) {
+        thread.sessionId = wanted;
         thread.sessionServer = server;
+        thread.mcpKey = mcpKey;
+        thread.primed = true;
         applyConfig(thread, resumed.configOptions);
-        return thread.sessionId;
+        return wanted;
       }
     }
-    const created = await server.connection.agent.request(methods.agent.session.new, { cwd, mcpServers: [] });
+
+    const created = await server.connection.agent.request(methods.agent.session.new, { cwd, mcpServers });
     thread.sessionId = created.sessionId;
     thread.sessionServer = server;
+    thread.mcpKey = mcpKey;
     thread.primed = false;
     thread.model = undefined;
     thread.defaultModel = undefined;
@@ -378,7 +481,7 @@ export function createDshEngine(opts: DshEngineOptions = {}): DshEngine {
       .notify(methods.agent.session.cancel, { sessionId: run.sessionId })
       .catch(() => undefined);
     run.killTimer = setTimeout(() => {
-      if (!run.settled) killTree(run.server.child);
+      if (!run.settled) terminate(run.server);
     }, cancelGraceMs);
     run.killTimer.unref();
   }
@@ -396,10 +499,13 @@ export function createDshEngine(opts: DshEngineOptions = {}): DshEngine {
     let run: ActiveRun | undefined;
     try {
       if (ctx.signal.aborted) return;
-      const server = await untilAborted(ensureServer(thread), ctx.signal);
+      const placement: Placement = ctx.computer === undefined ? LOCAL : { kind: 'computer', computer: ctx.computer };
+      const server = await untilAborted(ensureServer(thread, placement), ctx.signal);
       if (server === undefined) return;
-      const sessionId = await untilAborted(ensureSession(thread, server), ctx.signal);
+      const mcpServers = (ctx.mcpServers ?? []).map(toAcpMcpServer);
+      const sessionId = await untilAborted(ensureSession(thread, server, ctx, mcpServers), ctx.signal);
       if (sessionId === undefined) return;
+      if (sessionId !== ctx.engineSessionId) yield { type: 'engine.session', sessionId };
 
       const current = startRun(ctx, thread, server, sessionId);
       run = current;
@@ -459,8 +565,58 @@ export function createDshEngine(opts: DshEngineOptions = {}): DshEngine {
         return server !== undefined && isLive(server) ? [server] : [];
       });
       await Promise.all(running.map(stopServer));
+      if (patchDir !== undefined) {
+        rmSync(patchDir, { recursive: true, force: true });
+        patchDir = undefined;
+      }
     },
   };
+}
+
+function placementKey(placement: Placement): string {
+  return placement.kind === 'local' ? 'local' : `computer:${placement.computer.id}`;
+}
+
+function spawnLocal(cmd: { file: string; args: string[] }, env: NodeJS.ProcessEnv): Launched {
+  const child = spawn(cmd.file, cmd.args, {
+    env,
+    stdio: ['pipe', 'pipe', 'pipe'],
+    detached: process.platform !== 'win32',
+  });
+  child.stdin.on('error', () => undefined);
+  const exit = new Promise<ProcessExit>((resolveExit) => {
+    child.once('error', (spawnError) => resolveExit({ code: null, signal: null, spawnError }));
+    child.once('exit', (code, signal) => resolveExit({ code, signal }));
+  });
+  return {
+    stdin: Writable.toWeb(child.stdin) as WritableStream<Uint8Array>,
+    stdout: Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>,
+    stderr: Readable.toWeb(child.stderr) as ReadableStream<Uint8Array>,
+    exit,
+    kill: (signal) => signalTree(child, signal),
+  };
+}
+
+function fromComputer(proc: ComputerProcess): Launched {
+  return {
+    stdin: proc.stdin,
+    stdout: proc.stdout,
+    stderr: proc.stderr,
+    exit: proc.exit.then((exit) => ({ code: exit.code, signal: exit.signal })),
+    kill: (signal) => proc.kill(signal),
+  };
+}
+
+/** Brot MCP servers in ACP form: HTTP entries carry `type`, stdio entries do not. */
+function toAcpMcpServer(spec: McpServerSpec): AcpMcpServer {
+  if ('command' in spec) {
+    return { name: spec.name, command: spec.command, args: spec.args, env: pairs(spec.env) };
+  }
+  return { type: 'http', name: spec.name, url: spec.url, headers: pairs(spec.headers) };
+}
+
+function pairs(record: Record<string, string>): Array<{ name: string; value: string }> {
+  return Object.entries(record).map(([name, value]) => ({ name, value }));
 }
 
 function toolRequest(callId: string, info: ToolInfo): ToolRequest {
@@ -502,18 +658,62 @@ function runError(error: unknown): Error {
   return new Error(`${LABEL} run failed: ${message}`);
 }
 
+function startupExitError(exit: ProcessExit): Error {
+  if (exit.spawnError !== undefined) return new Error(`${LABEL} failed to start: ${exit.spawnError.message}`);
+  return new Error(`${LABEL} server ${describeExit(exit)} during startup`);
+}
+
+function runtimeExitError(exit: ProcessExit, tail: string): Error {
+  if (exit.spawnError !== undefined) return new Error(`${LABEL} failed to start: ${exit.spawnError.message}`);
+  return new Error(`${LABEL} server ${describeExit(exit)}${tail ? `: ${tail}` : ''}`);
+}
+
+function describeExit(exit: ProcessExit): string {
+  return exit.code !== null ? `exited with code ${exit.code}` : `was killed by ${exit.signal ?? 'a signal'}`;
+}
+
+/** Keeps the last characters a process wrote to stderr. Returns a reader for the kept tail. */
+function keepTail(stream: ReadableStream<Uint8Array>): () => string {
+  let tail = '';
+  const decoder = new TextDecoder();
+  stream
+    .pipeTo(
+      new WritableStream<Uint8Array>({
+        write(chunk) {
+          tail = (tail + decoder.decode(chunk, { stream: true })).slice(-STDERR_KEEP_CHARS);
+        },
+      }),
+    )
+    .catch(() => undefined);
+  return () => tail.trim().slice(-STDERR_SHOWN_CHARS);
+}
+
 /**
  * Forwards only stdout lines that parse as JSON objects. Stray output would otherwise make the
  * SDK answer with a JSON-RPC parse error on the server's stdin.
  */
-function protocolLines(stdout: Readable): ReadableStream<Uint8Array> {
-  const filtered = new PassThrough();
-  const lines = createInterface({ input: stdout, crlfDelay: Infinity });
-  lines.on('line', (line) => {
-    if (isProtocolLine(line)) filtered.write(`${line}\n`);
-  });
-  lines.on('close', () => filtered.end());
-  return Readable.toWeb(filtered) as ReadableStream<Uint8Array>;
+function protocolLines(stdout: ReadableStream<Uint8Array>): ReadableStream<Uint8Array> {
+  const decoder = new TextDecoder();
+  const encoder = new TextEncoder();
+  let pending = '';
+  return stdout.pipeThrough(
+    new TransformStream<Uint8Array, Uint8Array>({
+      transform(chunk, controller) {
+        pending += decoder.decode(chunk, { stream: true });
+        for (let newline = pending.indexOf('\n'); newline !== -1; newline = pending.indexOf('\n')) {
+          const line = pending.slice(0, newline).replace(/\r$/, '');
+          pending = pending.slice(newline + 1);
+          if (isProtocolLine(line)) controller.enqueue(encoder.encode(`${line}\n`));
+        }
+      },
+      flush(controller) {
+        pending += decoder.decode();
+        const last = pending.replace(/\r$/, '');
+        pending = '';
+        if (isProtocolLine(last)) controller.enqueue(encoder.encode(`${last}\n`));
+      },
+    }),
+  );
 }
 
 function isProtocolLine(line: string): boolean {
@@ -525,11 +725,13 @@ function isProtocolLine(line: string): boolean {
   }
 }
 
-/** Signals the whole process group, so tools the server spawned die with it. */
-function killTree(child: ChildProcess): void {
-  if (child.pid === undefined || child.exitCode !== null || child.signalCode !== null) return;
-  signalTree(child, 'SIGTERM');
-  setTimeout(() => signalTree(child, 'SIGKILL'), FORCE_KILL_MS).unref();
+/** Stops a process, then force-kills it if it is still alive after the grace period. */
+function terminate(server: ServerProcess): void {
+  if (server.exited) return;
+  server.launched.kill('SIGTERM');
+  setTimeout(() => {
+    if (!server.exited) server.launched.kill('SIGKILL');
+  }, FORCE_KILL_MS).unref();
 }
 
 function isLive(server: ServerProcess): boolean {
@@ -538,12 +740,12 @@ function isLive(server: ServerProcess): boolean {
 
 function stopServer(server: ServerProcess): Promise<void> {
   if (server.exited) return Promise.resolve();
-  return new Promise((resolveStop) => {
-    server.child.once('exit', () => resolveStop());
-    killTree(server.child);
-  });
+  const exited = server.launched.exit.then(() => undefined);
+  terminate(server);
+  return exited;
 }
 
+/** Signals the whole process group, so tools the server spawned die with it. */
 function signalTree(child: ChildProcess, signal: NodeJS.Signals): void {
   if (child.pid === undefined) return;
   try {
@@ -551,10 +753,6 @@ function signalTree(child: ChildProcess, signal: NodeJS.Signals): void {
   } catch {
     child.kill(signal);
   }
-}
-
-function describeExit(code: number | null, signal: NodeJS.Signals | null): string {
-  return code !== null ? `exited with code ${code}` : `was killed by ${signal ?? 'a signal'}`;
 }
 
 function errorText(error: unknown): string {

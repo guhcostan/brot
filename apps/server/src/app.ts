@@ -31,6 +31,7 @@ import type { EventBus } from './bus';
 import type { Harness } from './harness';
 import { PairingError, type Pairing } from './pairing';
 import { cronError, type Scheduler } from './scheduler';
+import type { BrotMcpService } from './mcp/types';
 import { SecretBody, SecretName, type Vault } from './vault';
 
 export const SERVER_VERSION = '0.1.0';
@@ -48,9 +49,11 @@ export interface AppDeps {
   vault: Vault;
   pairing: Pairing;
   engines: EngineRegistry;
-  config: { host: string; port: number };
+  config: { host: string; port: number; mode: 'desktop' | 'server' };
   /** Treat loopback callers as the local user. Tests pass false to simulate a remote caller. Defaults to true. */
   trustLoopback?: boolean;
+  /** The Brot MCP server. Its route authenticates each run's own token and is mounted outside `/api/*`. */
+  mcp?: Pick<BrotMcpService, 'route'>;
 }
 
 type Parsed<T> = { ok: true; data: T } | { ok: false; response: Response };
@@ -72,6 +75,11 @@ async function parseBody<T>(c: Context<AppEnv>, schema: z.ZodType<T>): Promise<P
   const result = schema.safeParse(raw);
   if (!result.success) return { ok: false, response: invalid(c, result.error) };
   return { ok: true, data: result.data };
+}
+
+/** `host` computers run uncontained, so only the desktop app, where the user is at the machine, offers them. */
+function hostRefused(c: Context<AppEnv>): Response {
+  return c.json({ error: 'computer "host" is only available in the desktop app', issues: [] }, 400);
 }
 
 function notFound(c: Context<AppEnv>, what: string): Response {
@@ -145,6 +153,7 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
   app.post('/api/bots', async (c) => {
     const body = await parseBody(c, CreateBot);
     if (!body.ok) return body.response;
+    if (body.data.computer === 'host' && config.mode !== 'desktop') return hostRefused(c);
     return c.json(await repos.bots.create(body.data), 201);
   });
 
@@ -156,7 +165,10 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
   app.patch('/api/bots/:id', async (c) => {
     const body = await parseBody(c, UpdateBot);
     if (!body.ok) return body.response;
+    if (body.data.computer === 'host' && config.mode !== 'desktop') return hostRefused(c);
+    const before = await repos.bots.get(c.req.param('id'));
     const bot = await repos.bots.update(c.req.param('id'), body.data);
+    if (bot && before && bot.engine !== before.engine) await harness.resetEngineSessions(bot.id);
     return bot ? c.json(bot) : notFound(c, 'Bot');
   });
 
@@ -442,6 +454,8 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
   app.delete('/api/devices/:id', async (c) =>
     (await repos.devices.remove(c.req.param('id'))) ? c.body(null, 204) : notFound(c, 'Device'),
   );
+
+  if (deps.mcp) app.route('/', deps.mcp.route);
 
   return app;
 }

@@ -125,6 +125,12 @@ async function handlePrompt(id, params) {
       process.stderr.write('fatal: boom\n');
       setTimeout(() => process.exit(3), 100);
       return undefined;
+    case 'mcp':
+      say(`mcp=${JSON.stringify(session.mcpServers)} pid=${process.pid} session=${sessionId}`);
+      return respond(id, { stopReason: 'end_turn' });
+    case 'argv':
+      say(`argv=${JSON.stringify(process.argv.slice(2))}`);
+      return respond(id, { stopReason: 'end_turn' });
     case 'error':
       return fail(id, -32603, 'model unavailable');
     case 'malformed':
@@ -148,11 +154,12 @@ async function handleRequest(message) {
       });
     case 'session/new': {
       const sessionId = randomUUID();
-      sessions.set(sessionId, { model: MODELS[0].value });
+      sessions.set(sessionId, { model: MODELS[0].value, mcpServers: params.mcpServers ?? [] });
       return respond(id, { sessionId, configOptions: configOptions(MODELS[0].value) });
     }
     case 'session/resume': {
       const session = sessions.get(params.sessionId) ?? { model: MODELS[0].value };
+      session.mcpServers = params.mcpServers ?? [];
       sessions.set(params.sessionId, session);
       return respond(id, { configOptions: configOptions(session.model) });
     }

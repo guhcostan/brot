@@ -1,4 +1,13 @@
-import type { Bot, Memory, Message, RunContext, ToolDecision, ToolRequest } from '@brot/protocol';
+import type {
+  Bot,
+  ComputerHandle,
+  McpServerSpec,
+  Memory,
+  Message,
+  RunContext,
+  ToolDecision,
+  ToolRequest,
+} from '@brot/protocol';
 
 const AT = '2026-10-19T12:00:00.000Z';
 
@@ -22,6 +31,9 @@ export interface TestContextOptions {
   memories?: Memory[];
   signal?: AbortSignal;
   decide?: (req: ToolRequest) => ToolDecision | Promise<ToolDecision>;
+  engineSessionId?: string;
+  computer?: ComputerHandle;
+  mcpServers?: McpServerSpec[];
 }
 
 export function makeContext(opts: TestContextOptions = {}): { ctx: RunContext; requests: ToolRequest[] } {
@@ -35,6 +47,9 @@ export function makeContext(opts: TestContextOptions = {}): { ctx: RunContext; r
     memories: opts.memories ?? [],
     skills: [],
     signal: opts.signal ?? new AbortController().signal,
+    engineSessionId: opts.engineSessionId,
+    computer: opts.computer,
+    mcpServers: opts.mcpServers,
     requestTool: async (req) => {
       requests.push(req);
       return opts.decide ? opts.decide(req) : { allowed: true };

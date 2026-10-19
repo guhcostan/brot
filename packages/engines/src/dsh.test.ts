@@ -1,7 +1,21 @@
+import { execFileSync, spawn } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { EngineEvent } from '@brot/protocol';
+import { Readable, Writable } from 'node:stream';
+import type { ComputerHandle, ComputerProcess, EngineEvent, McpServerSpec } from '@brot/protocol';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createDshEngine, type DshCommand, type DshEngine, type DshEngineOptions } from './dsh';
+import {
+  createDshEngine,
+  DSH_MODEL_HOSTS,
+  NO_TOOL_ROWS,
+  NO_TOOLS_PATCH,
+  pinnedDshCommand,
+  type DshCommand,
+  type DshEngine,
+  type DshEngineOptions,
+} from './dsh';
 import { collect, makeContext } from './test-utils';
 
 const FAKE_AGENT = fileURLToPath(new URL('./test-fixtures/fake-acp-agent.mjs', import.meta.url));
@@ -24,11 +38,98 @@ function textOf(events: EngineEvent[]): string {
   return events.map((event) => (event.type === 'text.delta' ? event.delta : '')).join('');
 }
 
+/** Everything a run reports except the engine session, which tests check on its own. */
+function turn(events: EngineEvent[]): EngineEvent[] {
+  return events.filter((event) => event.type !== 'engine.session');
+}
+
+function sessionOf(events: EngineEvent[]): string | undefined {
+  const event = events.find((item) => item.type === 'engine.session');
+  return event?.type === 'engine.session' ? event.sessionId : undefined;
+}
+
 function echoOf(events: EngineEvent[]): { session: string; pid: string; model: string; prompt: string } {
   const match = /session=(\S+) pid=(\d+) model=(\S+) prompt=(\w+)/.exec(textOf(events));
   if (match === null) throw new Error(`no echo in ${JSON.stringify(textOf(events))}`);
   const [, session = '', pid = '', model = '', prompt = ''] = match;
   return { session, pid, model, prompt };
+}
+
+/** Parses `mcp=<json> pid=<pid> session=<id>` from the fake agent's mcp scenario. */
+function mcpOf(events: EngineEvent[]): { servers: unknown; pid: string; session: string } {
+  const match = /mcp=(.*?) pid=(\d+) session=(\S+)/.exec(textOf(events));
+  if (match === null) throw new Error(`no mcp report in ${JSON.stringify(textOf(events))}`);
+  const [, json = 'null', pid = '', session = ''] = match;
+  return { servers: JSON.parse(json) as unknown, pid, session };
+}
+
+const HTTP_SPEC: McpServerSpec = {
+  name: 'brot',
+  url: 'http://127.0.0.1:8799/mcp',
+  headers: { authorization: 'Bearer run-token' },
+};
+const STDIO_SPEC: McpServerSpec = {
+  name: 'docs',
+  command: 'node',
+  args: ['docs.js'],
+  env: { DOCS_HOME: '/data' },
+};
+
+interface FakeComputer {
+  handle: ComputerHandle;
+  execs: Array<{ cmd: string[]; env?: Record<string, string> }>;
+  kills: string[];
+}
+
+/** A computer whose `dsh` is the fake ACP agent, started as a local process so the stdio is real. */
+function fakeComputer(): FakeComputer {
+  const execs: FakeComputer['execs'] = [];
+  const kills: string[] = [];
+  const handle: ComputerHandle = {
+    id: 'computer_test',
+    async exec(cmd, opts) {
+      execs.push({ cmd, env: opts?.env });
+      const [file, ...args] = cmd;
+      if (file !== 'dsh') throw new Error(`unexpected program ${file ?? ''}`);
+      const child = spawn(process.execPath, [FAKE_AGENT, ...args], { stdio: ['pipe', 'pipe', 'pipe'] });
+      const proc: ComputerProcess = {
+        stdin: Writable.toWeb(child.stdin) as WritableStream<Uint8Array>,
+        stdout: Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>,
+        stderr: Readable.toWeb(child.stderr) as ReadableStream<Uint8Array>,
+        exit: new Promise((resolve) => child.once('exit', (code, signal) => resolve({ code, signal }))),
+        kill(signal) {
+          kills.push(signal ?? 'SIGTERM');
+          child.kill(signal);
+        },
+      };
+      return proc;
+    },
+  };
+  return { handle, execs, kills };
+}
+
+/** Row states of a `dsh --dump-config` tree. A row is disabled when its last block says so. */
+function rowStates(dump: string): Map<string, 'enabled' | 'disabled'> {
+  const states = new Map<string, 'enabled' | 'disabled'>();
+  let id: string | undefined;
+  let disabled = false;
+  const finish = (): void => {
+    if (id !== undefined) states.set(id, disabled ? 'disabled' : 'enabled');
+    id = undefined;
+    disabled = false;
+  };
+  for (const line of dump.split('\n')) {
+    if (line.startsWith('- id: ')) {
+      finish();
+      id = line.slice('- id: '.length).trim();
+    } else if (line.startsWith('# ==')) {
+      finish();
+    } else if (line === '  disabled: true') {
+      disabled = true;
+    }
+  }
+  finish();
+  return states;
 }
 
 describe('dsh engine detection', () => {
@@ -45,6 +146,10 @@ describe('dsh engine detection', () => {
   it('runs the pinned DeepSeek Harness launcher by default', async () => {
     expect(await createDshEngine().detect()).toEqual({ available: true, version: PINNED_VERSION });
   });
+
+  it('allows only the DeepSeek API host for the default model route', () => {
+    expect(DSH_MODEL_HOSTS).toEqual(['api.deepseek.com']);
+  });
 });
 
 describe('dsh engine runs', () => {
@@ -52,7 +157,7 @@ describe('dsh engine runs', () => {
     const { ctx, requests } = makeContext({ input: 'stream alpha beta gamma' });
     const events = await collect(engineFor().run(ctx));
 
-    expect(events).toEqual([
+    expect(turn(events)).toEqual([
       { type: 'text.delta', delta: 'alpha ' },
       { type: 'text.delta', delta: 'beta ' },
       { type: 'text.delta', delta: 'gamma ' },
@@ -64,7 +169,7 @@ describe('dsh engine runs', () => {
     const { ctx } = makeContext({ input: 'usage now' });
     const events = await collect(engineFor().run(ctx));
 
-    expect(events).toEqual([
+    expect(turn(events)).toEqual([
       { type: 'text.delta', delta: 'counted' },
       { type: 'usage', tokensIn: 12, tokensOut: 34, costUsd: 0 },
     ]);
@@ -121,13 +226,14 @@ describe('dsh engine runs', () => {
     const { ctx } = makeContext({ input: 'malformed now' });
     const events = await collect(engineFor().run(ctx));
 
-    expect(events).toEqual([{ type: 'text.delta', delta: 'after malformed' }]);
+    expect(turn(events)).toEqual([{ type: 'text.delta', delta: 'after malformed' }]);
   });
 
   it('refuses a second run on a thread that is still busy', async () => {
     const engine = engineFor();
     const controller = new AbortController();
     const first = engine.run(makeContext({ input: 'hang now', signal: controller.signal }).ctx)[Symbol.asyncIterator]();
+    expect(await first.next()).toEqual({ done: false, value: { type: 'engine.session', sessionId: expect.any(String) } });
     expect(await first.next()).toEqual({ done: false, value: { type: 'text.delta', delta: 'partial ' } });
 
     const second = engine.run(makeContext({ input: 'echo again' }).ctx)[Symbol.asyncIterator]();
@@ -135,6 +241,181 @@ describe('dsh engine runs', () => {
 
     controller.abort();
     expect((await first.next()).done).toBe(true);
+  });
+});
+
+describe('dsh engine sessions', () => {
+  it('reports the engine session it creates, once, before the prompt runs', async () => {
+    const events = await collect(engineFor().run(makeContext({ input: 'echo one' }).ctx));
+
+    expect(events[0]).toEqual({ type: 'engine.session', sessionId: echoOf(events).session });
+    expect(events.filter((event) => event.type === 'engine.session')).toHaveLength(1);
+  });
+
+  it('resumes the engine session by id in a new process and sends only the new input', async () => {
+    const first = await collect(engineFor().run(makeContext({ input: 'echo one' }).ctx));
+    const sessionId = sessionOf(first);
+
+    const resumed = await collect(
+      engineFor().run(makeContext({ input: 'echo two', engineSessionId: sessionId }).ctx),
+    );
+
+    expect(sessionOf(resumed)).toBeUndefined();
+    expect(echoOf(resumed).session).toBe(sessionId);
+    expect(echoOf(resumed).prompt).toBe('input');
+    expect(echoOf(resumed).pid).not.toBe(echoOf(first).pid);
+  });
+
+  it('keeps an open session without re-emitting it when the id matches', async () => {
+    const engine = engineFor();
+    const first = await collect(engine.run(makeContext({ input: 'echo one' }).ctx));
+    const sessionId = sessionOf(first);
+
+    const second = await collect(engine.run(makeContext({ input: 'echo two', engineSessionId: sessionId }).ctx));
+
+    expect(sessionOf(second)).toBeUndefined();
+    expect(echoOf(second).pid).toBe(echoOf(first).pid);
+  });
+
+  it('re-reports the open session when the caller does not know its id', async () => {
+    const engine = engineFor();
+    const first = await collect(engine.run(makeContext({ input: 'echo one' }).ctx));
+    const second = await collect(engine.run(makeContext({ input: 'echo two' }).ctx));
+
+    expect(sessionOf(second)).toBe(sessionOf(first));
+  });
+
+  it('attaches the run MCP servers in ACP form', async () => {
+    const { ctx } = makeContext({ input: 'mcp now', mcpServers: [HTTP_SPEC, STDIO_SPEC] });
+    const events = await collect(engineFor().run(ctx));
+
+    expect(mcpOf(events).servers).toEqual([
+      {
+        type: 'http',
+        name: 'brot',
+        url: 'http://127.0.0.1:8799/mcp',
+        headers: [{ name: 'authorization', value: 'Bearer run-token' }],
+      },
+      { name: 'docs', command: 'node', args: ['docs.js'], env: [{ name: 'DOCS_HOME', value: '/data' }] },
+    ]);
+  });
+
+  it('re-attaches MCP servers on the same session when a later run brings different ones', async () => {
+    const engine = engineFor();
+    const first = await collect(engine.run(makeContext({ input: 'mcp now', mcpServers: [HTTP_SPEC] }).ctx));
+    const second = await collect(
+      engine.run(
+        makeContext({ input: 'mcp now', engineSessionId: sessionOf(first), mcpServers: [STDIO_SPEC] }).ctx,
+      ),
+    );
+
+    expect(mcpOf(second).servers).toEqual([
+      { name: 'docs', command: 'node', args: ['docs.js'], env: [{ name: 'DOCS_HOME', value: '/data' }] },
+    ]);
+    expect(mcpOf(second).session).toBe(mcpOf(first).session);
+    expect(mcpOf(second).pid).toBe(mcpOf(first).pid);
+    expect(sessionOf(second)).toBeUndefined();
+  });
+});
+
+describe('dsh engine computers', () => {
+  it('starts DSH inside the computer with exec and never spawns it locally', async () => {
+    const computer = fakeComputer();
+    const engine = engineFor({ command: { file: '/nonexistent/dsh' } });
+    const events = await collect(engine.run(makeContext({ input: 'echo inside', computer: computer.handle }).ctx));
+
+    expect(computer.execs).toEqual([{ cmd: ['dsh', '--profile', 'acp'], env: { DSH_TELEMETRY_DISABLED: '1' } }]);
+    expect(echoOf(events).prompt).toBe('full');
+    expect(sessionOf(events)).toBe(echoOf(events).session);
+  });
+
+  it('forwards only the configured computer environment, never the host environment', async () => {
+    const computer = fakeComputer();
+    const engine = engineFor({ computerEnv: { DEEPSEEK_API_KEY: 'provisioned' } });
+    await collect(engine.run(makeContext({ input: 'echo env', computer: computer.handle }).ctx));
+
+    expect(computer.execs[0]?.env).toEqual({ DSH_TELEMETRY_DISABLED: '1', DEEPSEEK_API_KEY: 'provisioned' });
+  });
+
+  it('surfaces a failed computer exec as a run failure', async () => {
+    const handle: ComputerHandle = {
+      id: 'computer_down',
+      exec: () => Promise.reject(new Error('container not running')),
+    };
+    const { ctx } = makeContext({ input: 'echo down', computer: handle });
+    await expect(collect(engineFor().run(ctx))).rejects.toThrow(
+      'DeepSeek Harness run failed: container not running',
+    );
+  });
+
+  it('kills the computer process on close and resumes its session in the next computer', async () => {
+    const computer = fakeComputer();
+    const engine = engineFor();
+    const first = await collect(engine.run(makeContext({ input: 'echo one', computer: computer.handle }).ctx));
+    await engine.close();
+
+    expect(computer.kills).toEqual(['SIGTERM']);
+    const second = await collect(
+      engine.run(
+        makeContext({ input: 'echo two', computer: computer.handle, engineSessionId: sessionOf(first) }).ctx,
+      ),
+    );
+    expect(echoOf(second).session).toBe(sessionOf(first));
+    expect(computer.execs).toHaveLength(2);
+  });
+
+  it('never reuses a local no-tools process for a run that has a computer', async () => {
+    const computer = fakeComputer();
+    const engine = engineFor();
+    const local = await collect(engine.run(makeContext({ input: 'echo local' }).ctx));
+    const contained = await collect(
+      engine.run(makeContext({ input: 'echo contained', computer: computer.handle, engineSessionId: sessionOf(local) }).ctx),
+    );
+
+    expect(computer.execs).toHaveLength(1);
+    expect(echoOf(contained).pid).not.toBe(echoOf(local).pid);
+  });
+});
+
+describe('dsh engine without a computer', () => {
+  it('launches DSH locally with the no-tools overlay and passes its path with --patch', async () => {
+    const events = await collect(engineFor().run(makeContext({ input: 'argv now' }).ctx));
+    const args = JSON.parse(/argv=(.*)/.exec(textOf(events))?.[1] ?? 'null') as string[];
+    const patchPath = args[args.indexOf('--patch') + 1] ?? '';
+
+    expect(args.slice(0, 3)).toEqual(['--profile', 'acp', '--patch']);
+    expect(readFileSync(patchPath, 'utf8')).toBe(NO_TOOLS_PATCH);
+  });
+
+  it('writes an overlay that disables every shell, filesystem, web and subagent row', () => {
+    for (const id of NO_TOOL_ROWS) {
+      expect(NO_TOOLS_PATCH).toContain(`- id: ${id}\n  disabled: true\n`);
+    }
+    expect(NO_TOOL_ROWS).toContain('tool-bash');
+    expect(NO_TOOL_ROWS).toContain('tool-web');
+  });
+
+  it('disables those rows in the pinned DeepSeek profile', () => {
+    const launcher = pinnedDshCommand();
+    if (launcher === undefined) return;
+    const home = mkdtempSync(join(tmpdir(), 'brot-dsh-profile-'));
+    try {
+      const patch = join(home, 'no-tools.patch.yml');
+      writeFileSync(patch, NO_TOOLS_PATCH);
+      const dump = execFileSync(
+        launcher.file,
+        [...(launcher.args ?? []), '--profile', 'acp', '--patch', patch, '--dump-config'],
+        {
+          encoding: 'utf8',
+          timeout: 60_000,
+          env: { ...process.env, DSH_HOME: join(home, 'dsh'), DSH_TELEMETRY_DISABLED: '1' },
+        },
+      );
+      const states = rowStates(dump);
+      for (const id of NO_TOOL_ROWS) expect(states.get(id), id).toBe('disabled');
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 });
 
@@ -152,7 +433,7 @@ describe('dsh engine permissions', () => {
         args: { command: 'ls -la' },
       },
     ]);
-    expect(events).toEqual([
+    expect(turn(events)).toEqual([
       { type: 'tool.call', callId: 'call-1', tool: 'bash', args: { command: 'ls -la' } },
       { type: 'tool.result', callId: 'call-1', ok: true, output: 'ran ls -la' },
       { type: 'text.delta', delta: 'done' },
@@ -166,7 +447,7 @@ describe('dsh engine permissions', () => {
     });
     const events = await collect(engineFor().run(ctx));
 
-    expect(events).toEqual([
+    expect(turn(events)).toEqual([
       { type: 'tool.call', callId: 'call-1', tool: 'bash', args: { command: 'rm -rf build' } },
       { type: 'tool.result', callId: 'call-1', ok: false, output: 'denied by user: not today' },
       { type: 'text.delta', delta: 'permission selected' },
@@ -194,9 +475,9 @@ describe('dsh engine cancellation and failure', () => {
     const events: EngineEvent[] = [];
     for await (const event of engine.run(makeContext({ input: 'hang now', signal: controller.signal }).ctx)) {
       events.push(event);
-      controller.abort();
+      if (event.type === 'text.delta') controller.abort();
     }
-    expect(events).toEqual([{ type: 'text.delta', delta: 'partial ' }]);
+    expect(turn(events)).toEqual([{ type: 'text.delta', delta: 'partial ' }]);
 
     const next = await collect(engine.run(makeContext({ input: 'echo after' }).ctx));
     expect(echoOf(next).prompt).toBe('input');
@@ -210,9 +491,9 @@ describe('dsh engine cancellation and failure', () => {
     const events: EngineEvent[] = [];
     for await (const event of engine.run(makeContext({ input: 'ignore-cancel now', signal: controller.signal }).ctx)) {
       events.push(event);
-      controller.abort();
+      if (event.type === 'text.delta') controller.abort();
     }
-    expect(events).toEqual([{ type: 'text.delta', delta: 'stuck ' }]);
+    expect(turn(events)).toEqual([{ type: 'text.delta', delta: 'stuck ' }]);
 
     const after = echoOf(await collect(engine.run(makeContext({ input: 'echo second' }).ctx)));
     expect(after.session).toBe(before.session);
@@ -228,7 +509,7 @@ describe('dsh engine cancellation and failure', () => {
     })();
 
     await expect(attempt).rejects.toThrow(/DeepSeek Harness (server exited with code 3|run failed)/);
-    expect(events).toEqual([{ type: 'text.delta', delta: 'before crash ' }]);
+    expect(turn(events)).toEqual([{ type: 'text.delta', delta: 'before crash ' }]);
   });
 
   it('resumes the thread session in a new process after close', async () => {

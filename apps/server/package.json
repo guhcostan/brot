@@ -17,6 +17,7 @@
     "@brot/engines": "workspace:*",
     "@brot/protocol": "workspace:*",
     "@hono/node-server": "^2.1.5",
+    "@modelcontextprotocol/sdk": "1.32.1",
     "croner": "^10.0.1",
     "hono": "^4.13.13",
     "zod": "^4.6.7"

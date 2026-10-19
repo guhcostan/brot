@@ -4,8 +4,10 @@ import { join } from 'node:path';
 import { createEngineRegistry, createMockEngine, type EngineRegistry } from '@brot/engines';
 import type { CanonicalEvent } from '@brot/protocol';
 import { createApp } from './app';
-import { loadConfig } from './config';
-import { createServices, type Services } from './services';
+import { loadConfig, type ServerMode } from './config';
+import type { ComputerProvider } from './computers/types';
+import type { ComputerProviders } from './harness';
+import { createServices, type ServiceExtras, type Services } from './services';
 import { createWebhookApp } from './webhooks';
 
 type AppLike = { request(input: string, init?: RequestInit): Response | Promise<Response> };
@@ -21,12 +23,42 @@ export interface TestContext {
   close(): Promise<void>;
 }
 
+export interface TestContextOptions {
+  engines?: EngineRegistry;
+  /** Default: a ready `sandbox` provider, because bots default to `computer: 'sandbox'`. Pass `{}` for none. */
+  computers?: ServiceExtras['computers'];
+  mcp?: ServiceExtras['mcp'];
+  mode?: ServerMode;
+}
+
+/** A provider that starts at once and runs no commands. Stands in for Docker in tests that do not inspect the computer. */
+export function readyComputerProvider(id: ComputerProvider['id'] = 'docker'): ComputerProvider {
+  return {
+    id,
+    available: async () => ({ ok: true }),
+    ensure: async () => ({
+      id: `${id}-test-computer`,
+      exec: () => Promise.reject(new Error('exec is not available in tests')),
+    }),
+    internalEndpoint: () => ({ url: 'http://host.docker.internal:8799' }),
+    stop: async () => undefined,
+    close: async () => undefined,
+  };
+}
+
+function defaultComputers(): ComputerProviders {
+  return { sandbox: readyComputerProvider('docker') };
+}
+
 /** Builds services on a fresh temporary BROT_HOME. Uses only the mock engine unless another registry is given. */
-export async function createTestContext(options: { engines?: EngineRegistry } = {}): Promise<TestContext> {
+export async function createTestContext(options: TestContextOptions = {}): Promise<TestContext> {
   const dir = await mkdtemp(join(tmpdir(), 'brot-server-'));
-  const config = loadConfig({ BROT_HOME: dir });
-  const services = await createServices(config, options.engines ?? createEngineRegistry([createMockEngine()]));
-  const deps = { ...services, config: { host: config.host, port: config.port } };
+  const config = loadConfig({ BROT_HOME: dir, BROT_MODE: options.mode ?? 'server' });
+  const services = await createServices(config, options.engines ?? createEngineRegistry([createMockEngine()]), {
+    computers: options.computers ?? defaultComputers(),
+    mcp: options.mcp,
+  });
+  const deps = { ...services, config: { host: config.host, port: config.port, mode: config.mode } };
   return {
     dir,
     services,
