@@ -38,13 +38,19 @@ Repo: https://github.com/guhcostan/brot (private).
 | Desktop title bar, avatar hydration | Opus | macOS drag strip via Electron UA detection; `BotAvatar` SSR-safe motion/phase |
 | `LICENSE` | orchestrator | AGPL-3.0 |
 
-## Next (wave 4, priority order)
+## Wave 4 (✅ pushed: `7118f3c` contracts, `f549664` implementation)
 
-1. **Guardrail gap (blocking real use).** DSH only sends `session/request_permission` for sandbox escalation (per its source, not verified at runtime). Ordinary shell/file calls inside its sandbox never reach the broker. Decide and implement: a DSH profile that escalates every risky call, and/or run DSH inside the bot's computer with irreversible external actions only reachable through Brot's MCP tools that call the broker.
-2. **Contracts** (`packages/protocol`, `packages/db`, own wave first): `engineSessionId` on `RunContext` + `engine.session` event + nullable `threads.engineSessionId`; optional `EngineDriver.close()` called by the server on shutdown (plus idle eviction of DSH processes); decide on `thought.delta`.
-3. DSH gaps: no per-turn usage (cost meter gets nothing), every tool call is `kind: other`, `models()` is only `default` until a session exists.
-4. Server gaps listed below. Desktop per-launch server token. `apps/cli` doctor tests still use fake `claude`/`codex` ids.
-5. Verify on real targets: Electron window + title bar, Expo on a simulator, Docker build.
+Containment model in docs/ARCHITECTURE.md. Docker provider (internal network + per-bot egress sidecar proxy, hardened container, `images/computer`), host provider (desktop only), Brot MCP server at `/mcp/runs/:runId` (per-run 256-bit token, every call through the broker, secrets after allow; tools `http_request`, `notify_user`, `remember`), harness placement without fallback, persisted DSH sessions, `computer: none` runs DSH with a no-tools overlay. Seeded Capy is `computer: none`.
+
+**Never exercised against a real Docker daemon** (it was down): build `images/computer` and `images/computer/egress.Dockerfile`, then run the 3 skipped real-daemon tests and a real egress check. Unverified: that DSH honours `HTTPS_PROXY` inside the container.
+
+Known gaps: no `ComputerProvider.remove(botId)` (deleting a bot leaves its container/network/volume); no idle-stop `computer.status`; `network.blocked` can be attributed to the wrong thread when runs overlap; providers get `config.port` before listen (port 0 breaks the docker relay, tests inject providers); provider keys inside the computer (`computerEnv`) are readable by the agent: decide how DSH gets model keys; secret redaction is literal-only; run tokens of runs that never settle stay in memory.
+
+## Wave 5: teams (in progress)
+
+User priority: bots communicate and work as a team. PRODUCT.md A7, A8, A8b, A8c are now P0.
+- 5a contracts (Haiku, running): rooms (`Thread.kind`, members, responder `mention | lead`), `Message.authorBotId/mentions/viaBotId`, per-bot `thread_sessions`, `Task` board with `chainId`/`depth`, chain limits, events `task.*`, `handoff`, `bot.asked/answered`, `room.members`, MCP input schemas.
+- 5b next, in parallel: server (room routing, team MCP tools `ask_bot`/`delegate_task`/`handoff`/`update_my_task`/`list_team`, loop/cost guards, task API), web UI (Opus: rooms, @mentions, baton, task board), mobile UI (Opus).
 
 ## Decision: DeepSeek Harness is the only runtime (2026-10-19)
 

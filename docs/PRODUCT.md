@@ -51,8 +51,10 @@ Priority: **P0** = MVP (first public release), **P1** = v1 (Cloud GA), **P2** = 
 | A4 | Streaming responses with collapsible tool-call cards and a step timeline | P0 |
 | A5 | Pin, unread, duplicate, archive, delete, search | P0 |
 | A6 | Switch model mid-thread. Unavailable engines are dimmed with the reason | P0 |
-| A7 | **Rooms**: 2–N bots plus humans. Responder rules (mention, auto-router, lead bot) | P1 |
-| A8 | Bot-to-bot handoff with ownership transfer and a visible "baton" | P1 |
+| A7 | **Rooms**: 2–N bots plus humans. Responder rules (mention, auto-router, lead bot) | P0 |
+| A8 | Bot-to-bot handoff with ownership transfer and a visible "baton" | P0 |
+| A8b | Bots talk through Brot MCP tools: `ask_bot` (wait for a reply), `delegate_task` (async task with a result), `handoff`. Delegation never widens permissions; approvals always go to a human; depth, hop and cost limits per chain | P0 |
+| A8c | Team task board: who is doing what, status, parent task, result | P0 |
 | A9 | Attachments (files, images, screenshots), drag to the computer | P0 |
 | A10 | Slash commands (`/skill`, `/teardown`, `/routine`, `/handoff`) | P1 |
 | A11 | Voice: dictation, TTS replies, live call with a bot | P2 |
