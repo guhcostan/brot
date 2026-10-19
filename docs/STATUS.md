@@ -57,12 +57,26 @@ Spec: docs/TEAM-API.md. Contracts `ac08dd8` (rooms, members, responder mode, `Me
 
 Open: no UI to add/remove room members; baton is in memory (lost on restart); global SSE replay pages by timestamp and can skip same-millisecond events (needs an id cursor); `workRunId` set without `task.updated`; DSH processes share `DSH_HOME` (concurrent session store unverified); mobile has no team UI yet.
 
-## Next (wave 6 candidates)
+## Wave 6: real stack (✅ pushed `08d99ac`)
 
-1. Run the real stack: start Docker, build the images, run the skipped tests, then a real DSH run with a provider key end to end (approval → send).
-2. Mobile team UI (Opus): rooms, task board, bot-to-bot rows.
-3. SSE id cursor for replay; room member management UI; persist the baton.
-4. Model keys for DSH inside computers via the vault (`secret://`), never plain env.
+**End to end verified on 2026-10-19** with Colima (Docker 29.5.2, arm64), the real DSH 0.2.1-rc.2 in `brot-computer`, and OpenCode Go `deepseek-v4.1-flash`:
+1. A `sandbox` bot answered `pong`; the relay counted 6,991 in / 49 out tokens (US$0.0011).
+2. Asked to POST to httpbin.org, the run stopped at `waiting_approval` (`send · http_request`) with no `tool.result`; deny returned the user's reply to the model and nothing was sent.
+3. Allow once: the server sent the POST and the bot read `json.hello = "brot"`.
+4. All 109 computer tests pass against the real daemon (no skips).
+
+Model relay (`apps/server/src/llm`): DSH in the computer talks only to `/llm/runs/<runId>/v1` through the egress sidecar with a per-run token; the server adds the vault key, pins the model, sends `x-opencode-session` (stable per thread and bot) and `User-Agent: brot/0.1.0` (OpenCode Go requirements), and reports usage as `cost.updated`. Provider keys never enter the computer. Bot models are `<provider>/<model>` (seeded: `opencode-go`, `deepseek`; more in `$BROT_HOME/providers.json`).
+
+Fixes found only by the real run: Docker tmpfs is noexec by default and DSH's native addon loader dlopens from /tmp (now `exec` on /tmp only); ACP sessions used the host cwd inside the computer (now `/workspace`); OpenCode Go rejects requests without a session header.
+
+Setup: `brew install colima && colima start --cpu 4 --memory 8`, `docker build -t brot-computer:latest images/computer`, `docker build -f images/computer/egress.Dockerfile -t brot-egress:latest apps/server/src/computers`, then `PUT /api/secrets/opencode-go`.
+
+## Next
+
+1. Avatars as Brazilian animals (Opus, in progress): DESIGN.md §2.
+2. Mobile team UI (Opus).
+3. SSE id cursor; room member UI; persist the baton; per-run DSH restart (token in the URL) could use a stable per (thread, bot) relay URL.
+4. Relay tests for the session header and user agent; strip provider keys from local DSH env.
 
 ## Decision: DeepSeek Harness is the only runtime (2026-10-19)
 

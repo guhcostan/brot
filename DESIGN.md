@@ -4,7 +4,7 @@
 
 ## 1. The idea
 
-**Brot = BR + bot.** A team of AI bots, born in Brazil, built for the world. The product speaks **English first and ships multilingual** (en, pt-BR, es). The Brazilian identity lives in the **bot names and personalities**, not in the chrome: no flags, no animals, no tropical palette.
+**Brot = BR + bot.** A team of AI bots, born in Brazil, built for the world. The product speaks **English first and ships multilingual** (en, pt-BR, es). The Brazilian identity lives in the **bots**: each one is a Brazilian animal with a name and personality. The chrome stays neutral: no flags, no tropical palette.
 
 The interface is **minimal and neutral**, in the family of Grok and MausBot: grayscale surfaces, black primary actions, generous whitespace, and type doing the work. Color appears in exactly two places: the bot avatars, and the single attention color for things that need the human.
 
@@ -14,36 +14,29 @@ Three words guide every decision: **calm, trustworthy, quietly capable.**
 - **Trustworthy**, because bots act on real accounts and money: legible type, honest state, visible approvals. Never dark-patterned.
 - **Quietly capable**: craft shows in spacing, alignment, and motion, not ornament.
 
-## 2. Bot avatars: shapes with eyes
+## 2. Bot avatars: Brazilian animals, flat and bold
 
-Every bot is a **solid, flat geometric shape with two simple white eye strokes**. No outlines, no gradients, no mouths, no limbs. The set is one family: same eye construction, same proportions, same optical size.
+Every bot is the **head of a Brazilian animal**, built from a few flat geometric shapes in one saturated color, in the style of bold sticker-like mascots (reference: a flat koala head with round ears, a big grey nose, and ring eyes). No outlines, no gradients, no fur texture, no mouths. The color is a personality choice, not the animal's real color: a violet capybara is fine. Detail is limited to **one darker or lighter tone of the same color** (snout, ears, spots, beak) plus the eyes.
 
-**Shapes** (`AvatarShape`): `circle` · `squircle` · `tilted` (rounded square rotated ~12°) · `cloud` · `triangle` (rounded) · `blob` · `drop` (small teardrop).
+**Species** (`AvatarSpecies`): `capivara` (capybara: wide boxy head, small round ears, big flat snout) · `onca` (jaguar: round head, rounded ears, a few rosette spots) · `tucano` (toucan: round head, oversized curved beak) · `arara` (macaw: rounded head, hooked beak, a cheek patch) · `tamandua` (anteater: long tapering snout, small ears) · `boto` (pink river dolphin: dome head, long thin rostrum) · `preguica` (sloth: round face, darker eye mask bands) · `mico` (marmoset: small face, big ear tufts) · `lobo` (maned wolf: tall pointed ears, narrow snout) · `jabuti` (tortoise: shell-patterned dome with a small head).
 
-**Colors** (`AvatarColor`, avatar-only, never used in chrome):
+**Colors** (`AvatarColor`, avatar-only, never in chrome): `black` · `teal` · `violet` · `blue` · `orange` · `amber` · `pink` · `brown` · `gray` · `white` (light grey `#E5E7EB` head with dark detail, like the reference koala). Values live in `packages/ui` tokens.
 
-| Token | Light & dark |
-|---|---|
-| `black` | `#111111` (dark theme: `#F2F2F2` shape with `#111111` eyes) |
-| `teal` | `#14B8A6` |
-| `violet` | `#8B5CF6` |
-| `blue` | `#3B82F6` |
-| `orange` | `#F97316` |
-| `amber` | `#F59E0B` |
-| `pink` | `#EC4899` |
-| `brown` | `#92400E` |
-| `gray` | `#9CA3AF` |
-
-**Eyes** carry all expression. Two short white strokes (rounded caps), positioned in the upper-middle of the shape:
+**Eyes** carry expression and keep the same construction across species: either two short strokes or two rings, white on dark colors and near-black on light colors (white, amber, gray). Moods:
 
 | Bot state | Eyes |
 |---|---|
-| Idle | two short vertical strokes |
-| Thinking / working | strokes glance to one side |
-| Needs approval | strokes slightly taller (wide awake) |
-| Sleeping / scheduled | two short horizontal strokes (closed) |
+| Idle | two short vertical strokes (or rings) |
+| Thinking / working | eyes glance to one side |
+| Needs approval | eyes slightly larger (wide awake) |
+| Sleeping / scheduled | two short horizontal strokes (closed), slightly sleepy tilt like the reference |
 | Error / blocked | strokes tilted inward (concerned), never alarmist |
 | Success | two small upward arcs (smiling eyes) |
+
+- **Encoding**: `bot.avatar` stores `"<species>:<color>"` (e.g. `"capivara:violet"`). Legacy shape values (`circle`, `squircle`, …) map to a species; unknown values fall back to a deterministic pick from the bot id.
+- All species read at the same optical size and as one family: same eye construction, same corner softness, heads may slightly overflow the circle at small sizes.
+- Group views (room headers, the site hero) may **overlap heads** like the reference, on `--bg`; in dark mode this is the signature look.
+- The brand mark is the **black capybara** with idle eyes. Capy (chief of staff) is its default bot.
 
 **Bots are alive.** Avatars animate continuously but quietly, so the team feels present without being noisy:
 
@@ -63,14 +56,13 @@ Every bot is a **solid, flat geometric shape with two simple white eye strokes**
 - Animate only `transform` and `opacity` (GPU-friendly); pause loops for offscreen avatars and in background tabs.
 - `prefers-reduced-motion`: no loops, no blinks, no hops. Eyes switch shape instantly and entrances become plain fades.
 
-- **Encoding**: `bot.avatar` stores `"<shape>:<color>"` (e.g. `"cloud:teal"`). An unknown or missing value falls back to a deterministic pick from the bot id.
 - Avatars are the only saturated color on screen. They sit directly on the surface; no tile, no ring (except the focus ring).
-- The brand mark is the `squircle` in `black` with idle eyes.
+- Ears, tufts and beaks may move a little with the mood (ears perk on approval, droop when sleeping), always as transform-only motion.
 
 ## 3. Logo
 
 - **Wordmark**: "brot" in lowercase **Inter**, semibold, tight tracking (−0.02em).
-- **Mark**: the black squircle with two white eye strokes. It is the app icon and favicon.
+- **Mark**: the black capybara head with two white eye strokes. It is the app icon and favicon.
 - Works in one color; the mark and wordmark never need color to be recognizable.
 
 ## 4. Color
@@ -133,7 +125,7 @@ Type scale: `12 · 13 · 14 (base) · 16 · 20 · 24 · 32 · 48`. Line-height 1
 ## 7. Layout
 
 Messaging-app frame, three panes (collapsible to one on mobile):
-1. **Sidebar**: bots and rooms with shape avatars, a status dot, pinned on top, search. Selected row uses `--surface-2`, never a color.
+1. **Sidebar**: bots and rooms with animal avatars, a status dot, pinned on top, search. Selected row uses `--surface-2`, never a color.
 2. **Thread**: centered column (max ~720px). Bot messages are plain text without a bubble; user messages sit in a `--surface-2` bubble aligned right. Collapsible **tool-call cards** in mono, and inline **approval cards** (`--attention` border on `--attention-soft`: Allow / Allow always / Deny / Reply).
 3. **Context panel**: the bot's live **computer** (screen stream + Take over), plus tabs for Memory, Skills, Apps, Routines, Cost. Tabs are text with an underline, not pills.
 
@@ -155,4 +147,4 @@ AA contrast everywhere, full keyboard navigation, visible focus rings (`--focus`
 
 ## 10. Landing site
 
-The marketing site (`apps/site`) presents the project and drives two actions: **Download** (desktop / self-host) and **Start on Brot Cloud** (hosted). It leads with a row of the shape avatars and a short promise, shows the chat UI in action, and makes the "yours vs. hosted" choice obvious. See the hero concept in the published landing page. Tone and tokens match this file; it is English-first with a language switcher.
+The marketing site (`apps/site`) presents the project and drives two actions: **Download** (desktop / self-host) and **Start on Brot Cloud** (hosted). It leads with the overlapping animal heads on a dark band and a short promise, shows the chat UI in action, and makes the "yours vs. hosted" choice obvious. See the hero concept in the published landing page. Tone and tokens match this file; it is English-first with a language switcher.
