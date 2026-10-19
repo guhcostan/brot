@@ -1,0 +1,447 @@
+import { randomBytes } from 'node:crypto';
+import type { Repos } from '@brot/db';
+import type { EngineRegistry } from '@brot/engines';
+import {
+  ApprovalStatus,
+  CreateBot,
+  CreateMemory,
+  CreatePolicy,
+  CreateRoutine,
+  CreateSkill,
+  CreateThread,
+  IsoDateTime,
+  PairingComplete,
+  PostMessage,
+  PROTOCOL_VERSION,
+  ResolveApproval,
+  UpdateBot,
+  UpdateMemory,
+  UpdateRoutine,
+  UpdateSkill,
+  type CanonicalEvent,
+  type RoutineTrigger,
+} from '@brot/protocol';
+import { Hono, type Context } from 'hono';
+import { cors } from 'hono/cors';
+import { streamSSE } from 'hono/streaming';
+import type { z } from 'zod';
+import { authenticate, isLocalRequest, requireJsonWrites, type AppEnv } from './auth';
+import type { Broker } from './broker';
+import type { EventBus } from './bus';
+import type { Harness } from './harness';
+import { PairingError, type Pairing } from './pairing';
+import { cronError, type Scheduler } from './scheduler';
+import { SecretBody, SecretName, type Vault } from './vault';
+
+export const SERVER_VERSION = '0.1.0';
+
+const ALLOWED_ORIGINS = ['http://localhost:5199', 'http://127.0.0.1:5199'];
+const REPLAY_PAGE_SIZE = 500;
+const HEARTBEAT_MS = 15_000;
+
+export interface AppDeps {
+  repos: Repos;
+  bus: EventBus;
+  broker: Broker;
+  harness: Harness;
+  scheduler: Scheduler;
+  vault: Vault;
+  pairing: Pairing;
+  engines: EngineRegistry;
+  config: { host: string; port: number };
+  /** Treat loopback callers as the local user. Tests pass false to simulate a remote caller. Defaults to true. */
+  trustLoopback?: boolean;
+}
+
+type Parsed<T> = { ok: true; data: T } | { ok: false; response: Response };
+
+function invalid(c: Context<AppEnv>, error: z.ZodError): Response {
+  return c.json({ error: 'Invalid request', issues: error.issues }, 400);
+}
+
+async function parseBody<T>(c: Context<AppEnv>, schema: z.ZodType<T>): Promise<Parsed<T>> {
+  const text = await c.req.text();
+  let raw: unknown = {};
+  if (text.trim() !== '') {
+    try {
+      raw = JSON.parse(text);
+    } catch {
+      return { ok: false, response: c.json({ error: 'Request body must be valid JSON', issues: [] }, 400) };
+    }
+  }
+  const result = schema.safeParse(raw);
+  if (!result.success) return { ok: false, response: invalid(c, result.error) };
+  return { ok: true, data: result.data };
+}
+
+function notFound(c: Context<AppEnv>, what: string): Response {
+  return c.json({ error: `${what} not found` }, 404);
+}
+
+function isValidPattern(pattern: string): boolean {
+  try {
+    RegExp(pattern);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function cronIssues(trigger: RoutineTrigger): { path: string[]; message: string }[] {
+  if (trigger.type !== 'cron') return [];
+  const message = cronError(trigger.cron);
+  return message === undefined ? [] : [{ path: ['trigger', 'cron'], message: `Invalid cron pattern: ${message}` }];
+}
+
+/** A webhook routine created without a secret gets an unguessable one, since the secret is its only credential. */
+function withWebhookSecret(trigger: RoutineTrigger): RoutineTrigger {
+  if (trigger.type === 'webhook' && trigger.secret === '') {
+    return { type: 'webhook', secret: randomBytes(24).toString('base64url') };
+  }
+  return trigger;
+}
+
+async function attempt<T>(task: () => Promise<T>, fallback: T): Promise<T> {
+  try {
+    return await task();
+  } catch {
+    return fallback;
+  }
+}
+
+export function createApp(deps: AppDeps): Hono<AppEnv> {
+  const { repos, bus, broker, harness, scheduler, vault, pairing, engines, config } = deps;
+  const trustLoopback = deps.trustLoopback ?? true;
+  const app = new Hono<AppEnv>();
+
+  app.use('/api/*', cors({ origin: ALLOWED_ORIGINS, allowHeaders: ['Authorization', 'Content-Type'] }));
+  app.use('/api/*', requireJsonWrites());
+  app.use('/api/*', authenticate({ devices: repos.devices, trustLoopback }));
+
+  app.onError((error, c) => {
+    console.error(error);
+    return c.json({ error: 'Internal server error' }, 500);
+  });
+  app.notFound((c) => c.json({ error: 'Not found' }, 404));
+
+  app.get('/api/health', (c) => c.json({ ok: true, version: SERVER_VERSION, protocol: PROTOCOL_VERSION }));
+
+  app.get('/api/engines', async (c) => {
+    const result = await Promise.all(
+      engines.list().map(async (driver) => ({
+        id: driver.id,
+        label: driver.label,
+        availability: await attempt(() => driver.detect(), { available: false, reason: 'Detection failed' }),
+        models: await attempt(() => driver.models(), []),
+      })),
+    );
+    return c.json(result);
+  });
+
+  app.get('/api/bots', async (c) =>
+    c.json(await repos.bots.list({ includeArchived: c.req.query('includeArchived') === 'true' })),
+  );
+
+  app.post('/api/bots', async (c) => {
+    const body = await parseBody(c, CreateBot);
+    if (!body.ok) return body.response;
+    return c.json(await repos.bots.create(body.data), 201);
+  });
+
+  app.get('/api/bots/:id', async (c) => {
+    const bot = await repos.bots.get(c.req.param('id'));
+    return bot ? c.json(bot) : notFound(c, 'Bot');
+  });
+
+  app.patch('/api/bots/:id', async (c) => {
+    const body = await parseBody(c, UpdateBot);
+    if (!body.ok) return body.response;
+    const bot = await repos.bots.update(c.req.param('id'), body.data);
+    return bot ? c.json(bot) : notFound(c, 'Bot');
+  });
+
+  app.delete('/api/bots/:id', async (c) => {
+    const id = c.req.param('id');
+    if (!(await repos.bots.get(id))) return notFound(c, 'Bot');
+    await harness.cancelBotRuns(id);
+    await repos.bots.remove(id);
+    await scheduler.sync();
+    return c.body(null, 204);
+  });
+
+  app.get('/api/bots/:id/threads', async (c) => {
+    const id = c.req.param('id');
+    if (!(await repos.bots.get(id))) return notFound(c, 'Bot');
+    return c.json(await repos.threads.listByBot(id));
+  });
+
+  app.post('/api/bots/:id/threads', async (c) => {
+    const id = c.req.param('id');
+    if (!(await repos.bots.get(id))) return notFound(c, 'Bot');
+    const body = await parseBody(c, CreateThread);
+    if (!body.ok) return body.response;
+    return c.json(await repos.threads.create(id, body.data), 201);
+  });
+
+  app.get('/api/threads/:id/messages', async (c) => {
+    const id = c.req.param('id');
+    if (!(await repos.threads.get(id))) return notFound(c, 'Thread');
+    return c.json(await repos.messages.listByThread(id));
+  });
+
+  app.get('/api/threads/:id/runs', async (c) => {
+    const id = c.req.param('id');
+    if (!(await repos.threads.get(id))) return notFound(c, 'Thread');
+    return c.json(await repos.runs.listByThread(id));
+  });
+
+  app.post('/api/threads/:id/messages', async (c) => {
+    const id = c.req.param('id');
+    if (!(await repos.threads.get(id))) return notFound(c, 'Thread');
+    const body = await parseBody(c, PostMessage);
+    if (!body.ok) return body.response;
+    const { runId } = await harness.startRun(id, body.data.content);
+    return c.json({ runId }, 202);
+  });
+
+  app.post('/api/runs/:id/cancel', async (c) => {
+    const run = await harness.cancelRun(c.req.param('id'));
+    return run ? c.json(run) : notFound(c, 'Run');
+  });
+
+  app.get('/api/approvals', async (c) => {
+    const status = c.req.query('status');
+    if (status === undefined) return c.json(await repos.approvals.list());
+    const parsed = ApprovalStatus.safeParse(status);
+    if (!parsed.success) return invalid(c, parsed.error);
+    return c.json(await repos.approvals.list({ status: parsed.data }));
+  });
+
+  app.post('/api/approvals/:id', async (c) => {
+    const body = await parseBody(c, ResolveApproval);
+    if (!body.ok) return body.response;
+    const approval = await broker.resolve(c.req.param('id'), body.data.decision, body.data.reply);
+    return approval ? c.json(approval) : notFound(c, 'Approval');
+  });
+
+  app.get('/api/bots/:id/policies', async (c) => {
+    const id = c.req.param('id');
+    if (!(await repos.bots.get(id))) return notFound(c, 'Bot');
+    return c.json(await repos.policies.listByBot(id));
+  });
+
+  app.post('/api/bots/:id/policies', async (c) => {
+    const id = c.req.param('id');
+    if (!(await repos.bots.get(id))) return notFound(c, 'Bot');
+    const body = await parseBody(c, CreatePolicy);
+    if (!body.ok) return body.response;
+    if (body.data.argPattern !== undefined && !isValidPattern(body.data.argPattern)) {
+      return c.json(
+        { error: 'Invalid request', issues: [{ path: ['argPattern'], message: 'argPattern must be a valid regular expression' }] },
+        400,
+      );
+    }
+    return c.json(await repos.policies.create(id, body.data), 201);
+  });
+
+  app.delete('/api/policies/:id', async (c) =>
+    (await repos.policies.remove(c.req.param('id'))) ? c.body(null, 204) : notFound(c, 'Policy'),
+  );
+
+  app.get('/api/bots/:id/memories', async (c) => {
+    const id = c.req.param('id');
+    if (!(await repos.bots.get(id))) return notFound(c, 'Bot');
+    return c.json(await repos.memories.listByBot(id));
+  });
+
+  app.post('/api/bots/:id/memories', async (c) => {
+    const id = c.req.param('id');
+    if (!(await repos.bots.get(id))) return notFound(c, 'Bot');
+    const body = await parseBody(c, CreateMemory);
+    if (!body.ok) return body.response;
+    return c.json(await repos.memories.create(id, body.data), 201);
+  });
+
+  app.patch('/api/memories/:id', async (c) => {
+    const body = await parseBody(c, UpdateMemory);
+    if (!body.ok) return body.response;
+    const memory = await repos.memories.update(c.req.param('id'), body.data);
+    return memory ? c.json(memory) : notFound(c, 'Memory');
+  });
+
+  app.delete('/api/memories/:id', async (c) =>
+    (await repos.memories.remove(c.req.param('id'))) ? c.body(null, 204) : notFound(c, 'Memory'),
+  );
+
+  app.get('/api/skills', async (c) => {
+    const botId = c.req.query('botId');
+    return c.json(botId ? await repos.skills.listForBot(botId) : await repos.skills.list());
+  });
+
+  app.post('/api/skills', async (c) => {
+    const body = await parseBody(c, CreateSkill);
+    if (!body.ok) return body.response;
+    if (body.data.botId !== undefined && !(await repos.bots.get(body.data.botId))) return notFound(c, 'Bot');
+    return c.json(await repos.skills.create(body.data), 201);
+  });
+
+  app.patch('/api/skills/:id', async (c) => {
+    const body = await parseBody(c, UpdateSkill);
+    if (!body.ok) return body.response;
+    const skill = await repos.skills.update(c.req.param('id'), body.data);
+    return skill ? c.json(skill) : notFound(c, 'Skill');
+  });
+
+  app.delete('/api/skills/:id', async (c) =>
+    (await repos.skills.remove(c.req.param('id'))) ? c.body(null, 204) : notFound(c, 'Skill'),
+  );
+
+  app.get('/api/routines', async (c) => c.json(await repos.routines.list({ botId: c.req.query('botId') })));
+
+  app.post('/api/routines', async (c) => {
+    const body = await parseBody(c, CreateRoutine);
+    if (!body.ok) return body.response;
+    if (!(await repos.bots.get(body.data.botId))) return notFound(c, 'Bot');
+    const issues = cronIssues(body.data.trigger);
+    if (issues.length > 0) return c.json({ error: 'Invalid request', issues }, 400);
+    const routine = await repos.routines.create({ ...body.data, trigger: withWebhookSecret(body.data.trigger) });
+    await scheduler.sync();
+    return c.json((await repos.routines.get(routine.id)) ?? routine, 201);
+  });
+
+  app.patch('/api/routines/:id', async (c) => {
+    const id = c.req.param('id');
+    if (!(await repos.routines.get(id))) return notFound(c, 'Routine');
+    const body = await parseBody(c, UpdateRoutine);
+    if (!body.ok) return body.response;
+    if (body.data.trigger) {
+      const issues = cronIssues(body.data.trigger);
+      if (issues.length > 0) return c.json({ error: 'Invalid request', issues }, 400);
+    }
+    const trigger = body.data.trigger && withWebhookSecret(body.data.trigger);
+    await repos.routines.update(id, { ...body.data, trigger });
+    await scheduler.sync();
+    const routine = await repos.routines.get(id);
+    return routine ? c.json(routine) : notFound(c, 'Routine');
+  });
+
+  app.delete('/api/routines/:id', async (c) => {
+    const removed = await repos.routines.remove(c.req.param('id'));
+    if (!removed) return notFound(c, 'Routine');
+    await scheduler.sync();
+    return c.body(null, 204);
+  });
+
+  app.post('/api/routines/:id/run', async (c) => {
+    const result = await scheduler.runRoutineNow(c.req.param('id'));
+    return result ? c.json(result, 202) : notFound(c, 'Routine');
+  });
+
+  // Live events: replays stored events after `after` (when given), then streams live ones.
+
+  app.get('/api/events', (c) => {
+    const threadId = c.req.query('threadId') || undefined;
+    const after = c.req.query('after');
+    if (after !== undefined && !IsoDateTime.safeParse(after).success) {
+      return c.json({ error: 'after must be an ISO timestamp' }, 400);
+    }
+    return streamSSE(c, async (stream) => {
+      let writes: Promise<unknown> = Promise.resolve();
+      const enqueue = (task: () => Promise<unknown>): void => {
+        writes = writes.then(task).catch(() => undefined);
+      };
+      const sendEvent = (event: CanonicalEvent): void => {
+        enqueue(() => stream.writeSSE({ id: event.id, event: event.type, data: JSON.stringify(event) }));
+      };
+
+      let finish: () => void = () => undefined;
+      const closed = new Promise<void>((resolve) => {
+        finish = resolve;
+      });
+
+      // Subscribe before replaying so that no event falls between the replay snapshot and the live stream.
+      let replaying = after !== undefined;
+      const buffered: CanonicalEvent[] = [];
+      const seen = new Set<string>();
+      const unsubscribe = bus.subscribe(
+        (event) => {
+          if (replaying) buffered.push(event);
+          else sendEvent(event);
+        },
+        { threadId },
+      );
+      const heartbeat = setInterval(() => enqueue(() => stream.write(': keep-alive\n\n')), HEARTBEAT_MS);
+      heartbeat.unref();
+      stream.onAbort(() => {
+        unsubscribe();
+        clearInterval(heartbeat);
+        finish();
+      });
+
+      if (after !== undefined) {
+        let cursor = after;
+        for (;;) {
+          const page = await repos.events.list({ threadId, after: cursor, limit: REPLAY_PAGE_SIZE });
+          for (const event of page) {
+            seen.add(event.id);
+            sendEvent(event);
+          }
+          const last = page.at(-1);
+          if (page.length < REPLAY_PAGE_SIZE || !last) break;
+          cursor = last.at;
+        }
+      }
+      replaying = false;
+      for (const event of buffered.splice(0)) {
+        if (!seen.has(event.id)) sendEvent(event);
+      }
+
+      await closed;
+    });
+  });
+
+  // Secrets: names only. Values are written here and never returned.
+
+  app.get('/api/secrets', async (c) => c.json(await vault.list()));
+
+  app.put('/api/secrets/:name', async (c) => {
+    const name = SecretName.safeParse(c.req.param('name'));
+    if (!name.success) return invalid(c, name.error);
+    const body = await parseBody(c, SecretBody);
+    if (!body.ok) return body.response;
+    await vault.set(name.data, body.data.value);
+    return c.json({ name: name.data });
+  });
+
+  app.delete('/api/secrets/:name', async (c) => {
+    const name = SecretName.safeParse(c.req.param('name'));
+    if (!name.success) return invalid(c, name.error);
+    return (await vault.delete(name.data)) ? c.body(null, 204) : notFound(c, 'Secret');
+  });
+
+  app.post('/api/pairing/start', (c) => {
+    if (!isLocalRequest(c, trustLoopback)) {
+      return c.json({ error: 'Pairing can only be started from this machine' }, 403);
+    }
+    return c.json(pairing.start({ host: config.host, port: config.port }), 201);
+  });
+
+  app.post('/api/pairing/complete', async (c) => {
+    const body = await parseBody(c, PairingComplete);
+    if (!body.ok) return body.response;
+    try {
+      return c.json(await pairing.complete(body.data), 201);
+    } catch (error) {
+      if (error instanceof PairingError) return c.json({ error: error.message }, error.status);
+      throw error;
+    }
+  });
+
+  app.get('/api/devices', async (c) => c.json(await repos.devices.list()));
+
+  app.delete('/api/devices/:id', async (c) =>
+    (await repos.devices.remove(c.req.param('id'))) ? c.body(null, 204) : notFound(c, 'Device'),
+  );
+
+  return app;
+}

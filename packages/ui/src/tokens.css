@@ -1,0 +1,121 @@
+/*
+ * Design tokens from DESIGN.md (sections 4-6). Mirrored in tokens.ts; tokens.test.ts keeps them in sync.
+ * Semantic colors reference brand tokens so they follow the theme, and dark mode is set both by
+ * system preference (unless data-theme="light") and by an explicit data-theme="dark".
+ */
+
+:root {
+  color-scheme: light;
+
+  --brand: #2E7D5B;
+  --brand-ink: #18492F;
+  --sun: #C8781E;
+  --live: #D14A32;
+  --river: #2E6E9E;
+
+  --paper: #FBF7F0;
+  --surface: #FFFFFF;
+  --surface-2: #F2ECE0;
+  --line: #E7DDCB;
+  --ink: #241F18;
+  --ink-2: #6A6153;
+
+  --danger: #D14A32;
+  --warn: #C8781E;
+  --ok: #2E7D5B;
+  --info: #2E6E9E;
+
+  --shadow-1: 0 1px 2px rgba(36, 31, 24, 0.06);
+  --shadow-2: 0 1px 2px rgba(36, 31, 24, 0.06), 0 4px 12px rgba(36, 31, 24, 0.06);
+  --shadow-3: 0 2px 4px rgba(36, 31, 24, 0.05), 0 12px 32px rgba(36, 31, 24, 0.1);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+
+    --brand: #4FB488;
+    --brand-ink: #BFEAD4;
+    --sun: #E8A24A;
+    --live: #F0633F;
+    --river: #6FB1D8;
+
+    --paper: #14110D;
+    --surface: #1E1A14;
+    --surface-2: #272219;
+    --line: #3A3227;
+    --ink: #F3EEE2;
+    --ink-2: #B2A892;
+
+    --danger: #F0633F;
+    --warn: #E8A24A;
+    --ok: #4FB488;
+    --info: #6FB1D8;
+
+    --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-2: 0 1px 2px rgba(0, 0, 0, 0.4), 0 4px 12px rgba(0, 0, 0, 0.3);
+    --shadow-3: 0 2px 4px rgba(0, 0, 0, 0.35), 0 12px 32px rgba(0, 0, 0, 0.45);
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --brand: #4FB488;
+  --brand-ink: #BFEAD4;
+  --sun: #E8A24A;
+  --live: #F0633F;
+  --river: #6FB1D8;
+
+  --paper: #14110D;
+  --surface: #1E1A14;
+  --surface-2: #272219;
+  --line: #3A3227;
+  --ink: #F3EEE2;
+  --ink-2: #B2A892;
+
+  --danger: #F0633F;
+  --warn: #E8A24A;
+  --ok: #4FB488;
+  --info: #6FB1D8;
+
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-2: 0 1px 2px rgba(0, 0, 0, 0.4), 0 4px 12px rgba(0, 0, 0, 0.3);
+  --shadow-3: 0 2px 4px rgba(0, 0, 0, 0.35), 0 12px 32px rgba(0, 0, 0, 0.45);
+}
+
+:root {
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 18px;
+  --r-xl: 28px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  --font-display: "Fraunces Variable", Fraunces, Georgia, serif;
+  --font-ui: "Inter Variable", Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --text-xs: 12px;
+  --text-base: 14px;
+  --text-md: 16px;
+  --text-lg: 19px;
+  --text-xl: 23px;
+  --text-2xl: 28px;
+  --text-3xl: 37px;
+  --text-4xl: 50px;
+
+  --leading-body: 1.5;
+  --leading-display: 1.15;
+
+  --motion-fast: 120ms;
+  --motion-base: 200ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+}

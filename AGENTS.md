@@ -12,6 +12,8 @@ An open-source (AGPL-3.0) team of AI bots in a chat app. Each bot has a job, an 
 - [`DESIGN.md`](DESIGN.md): tokens, typography, components, voice
 - [`docs/BROWSER-AGENT.md`](docs/BROWSER-AGENT.md), [`docs/REMOTE-CONTROL.md`](docs/REMOTE-CONTROL.md), [`docs/REA-INTEGRATION.md`](docs/REA-INTEGRATION.md)
 
+**Current build state and next steps: [`docs/STATUS.md`](docs/STATUS.md).** Read it first when resuming work, and update it at the end of every wave.
+
 ## Commands
 
 ```bash

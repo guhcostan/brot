@@ -1,0 +1,27 @@
+{
+  "name": "@brot/server",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "start": "tsx src/main.ts",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@brot/db": "workspace:*",
+    "@brot/engines": "workspace:*",
+    "@brot/protocol": "workspace:*",
+    "@hono/node-server": "^2.1.5",
+    "croner": "^10.0.1",
+    "hono": "^4.13.13",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2"
+  }
+}
