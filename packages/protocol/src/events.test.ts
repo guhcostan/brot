@@ -19,6 +19,20 @@ const approval = {
   createdAt: at,
 };
 const memory = { id: 'mem1', botId: 'bot_1', kind: 'fact', content: 'x', createdAt: at, updatedAt: at };
+const task = {
+  id: 'task_2',
+  title: 'Draft copy',
+  status: 'in_progress',
+  assigneeBotId: 'bot_2',
+  createdByBotId: 'bot_1',
+  createdByUser: false,
+  parentTaskId: 'task_1',
+  threadId: 't1',
+  chainId: 'task_1',
+  depth: 1,
+  createdAt: at,
+  updatedAt: at,
+};
 
 const validEvents: Array<{ type: CanonicalEventType; event: Record<string, unknown> }> = [
   { type: 'run.started', event: { ...base, type: 'run.started', botId: 'bot_1', engine: 'mock' } },
@@ -41,6 +55,19 @@ const validEvents: Array<{ type: CanonicalEventType; event: Record<string, unkno
     event: { ...base, type: 'computer.status', computerId: 'cmp_1', botId: 'bot_1', state: 'error', reason: 'pull failed' },
   },
   { type: 'network.blocked', event: { ...base, type: 'network.blocked', botId: 'bot_1', host: 'evil.example.com' } },
+  { type: 'task.created', event: { ...base, type: 'task.created', task } },
+  { type: 'task.updated', event: { ...base, type: 'task.updated', task: { ...task, status: 'done', result: 'Posted' } } },
+  { type: 'handoff', event: { ...base, type: 'handoff', fromBotId: 'bot_1', toBotId: 'bot_2', note: 'Your turn' } },
+  { type: 'handoff', event: { ...base, type: 'handoff', fromBotId: 'bot_1', toBotId: 'bot_2' } },
+  {
+    type: 'bot.asked',
+    event: { ...base, type: 'bot.asked', fromBotId: 'bot_1', toBotId: 'bot_2', question: 'Is the deck ready?', askId: 'ask_1' },
+  },
+  {
+    type: 'bot.answered',
+    event: { ...base, type: 'bot.answered', askId: 'ask_1', fromBotId: 'bot_1', toBotId: 'bot_2', answer: 'Yes' },
+  },
+  { type: 'room.members', event: { ...base, type: 'room.members', botIds: ['bot_1', 'bot_2'] } },
   { type: 'run.completed', event: { ...base, type: 'run.completed' } },
   { type: 'run.failed', event: { ...base, type: 'run.failed', error: 'boom' } },
 ];
@@ -71,6 +98,26 @@ describe('parseEvent', () => {
 
   it('rejects a network.blocked without a host', () => {
     expect(() => parseEvent({ ...base, type: 'network.blocked', botId: 'bot_1' })).toThrow();
+  });
+
+  it('rejects a task event whose task breaks the depth or chain rules', () => {
+    expect(() => parseEvent({ ...base, type: 'task.created', task: { ...task, depth: 4 } })).toThrow();
+    expect(() => parseEvent({ ...base, type: 'task.updated', task: { ...task, status: 'paused' } })).toThrow();
+    expect(() => parseEvent({ ...base, type: 'task.updated', task: { ...task, createdByUser: true } })).toThrow();
+  });
+
+  it('rejects a bot exchange without its ask id or answer', () => {
+    expect(() =>
+      parseEvent({ ...base, type: 'bot.asked', fromBotId: 'bot_1', toBotId: 'bot_2', question: 'Hi' }),
+    ).toThrow();
+    expect(() =>
+      parseEvent({ ...base, type: 'bot.answered', askId: 'ask_1', fromBotId: 'bot_1', toBotId: 'bot_2' }),
+    ).toThrow();
+  });
+
+  it('accepts an empty room member list and rejects a handoff without a target', () => {
+    expect(parseEvent({ ...base, type: 'room.members', botIds: [] }).type).toBe('room.members');
+    expect(() => parseEvent({ ...base, type: 'handoff', fromBotId: 'bot_1' })).toThrow();
   });
 
   it('rejects an unknown event type', () => {

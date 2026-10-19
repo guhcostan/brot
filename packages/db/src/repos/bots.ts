@@ -17,6 +17,7 @@ export function toBot(row: BotRow): Bot {
     model: row.model ?? undefined,
     computer: row.computer,
     egress: row.egress,
+    teamBudgetUsd: row.teamBudgetUsd ?? undefined,
     pinned: row.pinned,
     archived: row.archived,
     createdAt: row.createdAt,

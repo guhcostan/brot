@@ -7,10 +7,13 @@ import { createEventRepo } from './events';
 import { createMemoryRepo } from './memories';
 import { createMessageRepo } from './messages';
 import { createPolicyRepo } from './policies';
+import { createRoomRepo } from './rooms';
 import { createRoutineRepo } from './routines';
 import { createRunRepo } from './runs';
 import { createSkillRepo } from './skills';
+import { createTaskRepo } from './tasks';
 import { createThreadRepo } from './threads';
+import { createThreadSessionRepo } from './thread-sessions';
 
 export function createRepos(db: Db) {
   return {
@@ -26,6 +29,9 @@ export function createRepos(db: Db) {
     routines: createRoutineRepo(db),
     devices: createDeviceRepo(db),
     events: createEventRepo(db),
+    rooms: createRoomRepo(db),
+    threadSessions: createThreadSessionRepo(db),
+    tasks: createTaskRepo(db),
   };
 }
 
@@ -36,3 +42,4 @@ export type { CreateMessageInput } from './messages';
 export type { CreateDeviceInput } from './devices';
 export type { RoutineScheduleUpdate } from './routines';
 export type { RunPatch } from './runs';
+export type { TaskFilter } from './tasks';

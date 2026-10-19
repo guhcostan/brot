@@ -1,5 +1,5 @@
 import { asc, eq, sql } from 'drizzle-orm';
-import { MessageRole, type Message } from '@brot/protocol';
+import { Message, MessageRole } from '@brot/protocol';
 import type { Db } from '../client';
 import { messages } from '../schema';
 import { newId, nowIso, required } from './common';
@@ -12,6 +12,9 @@ export interface CreateMessageInput {
   content: string;
   /** Optional pre-assigned id, so the harness can reference the message before it is stored. */
   id?: string;
+  authorBotId?: string;
+  mentions?: string[];
+  viaBotId?: string;
 }
 
 export function toMessage(row: MessageRow): Message {
@@ -21,6 +24,9 @@ export function toMessage(row: MessageRow): Message {
     role: row.role,
     content: row.content,
     createdAt: row.createdAt,
+    authorBotId: row.authorBotId ?? undefined,
+    mentions: row.mentions ?? undefined,
+    viaBotId: row.viaBotId ?? undefined,
   };
 }
 
@@ -37,6 +43,7 @@ export function createMessageRepo(db: Db) {
 
     async create(input: CreateMessageInput): Promise<Message> {
       const role = MessageRole.parse(input.role);
+      const team = Message.pick({ authorBotId: true, mentions: true, viaBotId: true }).parse(input);
       const [row] = await db
         .insert(messages)
         .values({
@@ -45,6 +52,9 @@ export function createMessageRepo(db: Db) {
           role,
           content: input.content,
           createdAt: nowIso(),
+          authorBotId: team.authorBotId ?? null,
+          mentions: team.mentions ?? null,
+          viaBotId: team.viaBotId ?? null,
         })
         .returning();
       return toMessage(required(row, 'message'));

@@ -491,3 +491,367 @@ describe('cascade on bot delete', () => {
     expect((await repos.skills.list()).map((s) => s.id)).toEqual([global.id]);
   });
 });
+
+async function seedRoom(count = 3) {
+  const bots = [];
+  for (let i = 0; i < count; i++) bots.push(await repos.bots.create({ name: `Bot ${i + 1}`, job: 'x' }));
+  const [lead] = bots;
+  if (!lead) throw new Error('seedRoom needs at least one bot');
+  const room = await repos.rooms.create({
+    title: 'Launch',
+    botIds: bots.map((bot) => bot.id),
+    leadBotId: lead.id,
+  });
+  return { bots, lead, room };
+}
+
+const memberIds = async (threadId: string) =>
+  (await repos.rooms.listMembers(threadId)).map((member) => member.botId).sort();
+
+describe('rooms', () => {
+  it('creates a room with its lead as botId, the lead responder by default, and its members', async () => {
+    const { bots, lead, room } = await seedRoom(3);
+
+    expect(room).toMatchObject({
+      kind: 'room',
+      title: 'Launch',
+      botId: lead.id,
+      leadBotId: lead.id,
+      responder: 'lead',
+    });
+    expect(await memberIds(room.id)).toEqual(bots.map((bot) => bot.id).sort());
+    expect(await repos.threads.get(room.id)).toEqual(room);
+  });
+
+  it('keeps rooms out of the DM list when asked', async () => {
+    const { lead, room } = await seedRoom(2);
+    const dm = await repos.threads.create(lead.id, { title: 'Chat' });
+
+    expect((await repos.threads.listByBot(lead.id)).map((t) => t.id).sort()).toEqual([dm.id, room.id].sort());
+    expect((await repos.threads.listByBot(lead.id, { kind: 'dm' })).map((t) => t.id)).toEqual([dm.id]);
+    expect((await repos.threads.listByBot(lead.id, { kind: 'room' })).map((t) => t.id)).toEqual([room.id]);
+    expect(dm.kind).toBe('dm');
+    expect(dm.leadBotId).toBeUndefined();
+  });
+
+  it('rejects a room whose lead is not a member, or that names an unknown bot', async () => {
+    const { bots } = await seedRoom(2);
+    await expect(
+      repos.rooms.create({ title: 'x', botIds: bots.map((b) => b.id), leadBotId: 'bot_missing' }),
+    ).rejects.toThrow(/lead bot/);
+    await expect(
+      repos.rooms.create({ title: 'x', botIds: [bots[0]!.id, 'bot_missing'], leadBotId: bots[0]!.id }),
+    ).rejects.toThrow();
+  });
+
+  it('adds and removes members, ignoring no-op changes', async () => {
+    const { bots, lead, room } = await seedRoom(2);
+    const extra = await repos.bots.create({ name: 'Extra', job: 'x' });
+
+    const added = await repos.rooms.updateMembers(room.id, { add: [extra.id, lead.id] });
+    expect(added?.map((m) => m.botId).sort()).toEqual([...bots.map((b) => b.id), extra.id].sort());
+
+    const removed = await repos.rooms.updateMembers(room.id, { remove: [bots[1]!.id, 'bot_never_joined'] });
+    expect(removed?.map((m) => m.botId).sort()).toEqual([lead.id, extra.id].sort());
+    expect(removed?.every((m) => m.threadId === room.id)).toBe(true);
+  });
+
+  it('refuses a change that removes the lead, leaves fewer than two bots, or passes twelve', async () => {
+    const { bots, lead, room } = await seedRoom(2);
+
+    await expect(repos.rooms.updateMembers(room.id, { remove: [lead.id] })).rejects.toThrow(/lead bot cannot leave/);
+    await expect(repos.rooms.updateMembers(room.id, { remove: [bots[1]!.id] })).rejects.toThrow(/2 to 12/);
+    expect(await memberIds(room.id)).toEqual(bots.map((b) => b.id).sort());
+
+    const crowd = [];
+    for (let i = 0; i < 10; i++) crowd.push((await repos.bots.create({ name: `Crowd ${i}`, job: 'x' })).id);
+    await repos.rooms.updateMembers(room.id, { add: crowd });
+    expect((await repos.rooms.listMembers(room.id)).length).toBe(12);
+    const thirteenth = await repos.bots.create({ name: 'Thirteenth', job: 'x' });
+    await expect(repos.rooms.updateMembers(room.id, { add: [thirteenth.id] })).rejects.toThrow(/12/);
+    expect((await repos.rooms.listMembers(room.id)).length).toBe(12);
+  });
+
+  it('returns undefined for an unknown thread and refuses to change a DM as if it were a room', async () => {
+    const { lead } = await seedRoom(2);
+    const dm = await repos.threads.create(lead.id, { title: 'Chat' });
+    expect(await repos.rooms.updateMembers('missing', { add: [lead.id] })).toBeUndefined();
+    await expect(repos.rooms.updateMembers(dm.id, { add: [lead.id] })).rejects.toThrow(/not a room/);
+    expect(await repos.rooms.listMembers(dm.id)).toEqual([]);
+  });
+
+  it('removes a room when its lead bot is deleted, and a member when that bot is deleted', async () => {
+    const { bots, lead, room } = await seedRoom(3);
+    const member = bots[2]!;
+
+    expect(await repos.bots.remove(member.id)).toBe(true);
+    expect(await memberIds(room.id)).toEqual(bots.slice(0, 2).map((b) => b.id).sort());
+
+    expect(await repos.bots.remove(lead.id)).toBe(true);
+    expect(await repos.threads.get(room.id)).toBeUndefined();
+    expect(await repos.rooms.listMembers(room.id)).toEqual([]);
+  });
+});
+
+describe('message team fields', () => {
+  it('stores the author, mentions, and recipient of a bot message and returns them', async () => {
+    const { lead, room, bots } = await seedRoom(2);
+    const [, second] = bots;
+    const message = await repos.messages.create({
+      threadId: room.id,
+      role: 'assistant',
+      content: 'Over to you, Capy',
+      authorBotId: lead.id,
+      mentions: [second!.id],
+      viaBotId: second!.id,
+    });
+    expect(message).toMatchObject({ authorBotId: lead.id, mentions: [second!.id], viaBotId: second!.id });
+    expect((await repos.messages.listByThread(room.id))[0]).toEqual(message);
+  });
+
+  it('leaves the team fields absent on a plain message and rejects malformed mentions', async () => {
+    const { lead } = await seedRoom(2);
+    const thread = await repos.threads.create(lead.id, { title: 'Chat' });
+    const plain = await repos.messages.create({ threadId: thread.id, role: 'user', content: 'hi' });
+    expect(plain.authorBotId).toBeUndefined();
+    expect(plain.mentions).toBeUndefined();
+    expect(plain.viaBotId).toBeUndefined();
+    await expect(
+      repos.messages.create({ threadId: thread.id, role: 'user', content: 'x', mentions: 'bot_1' as unknown as string[] }),
+    ).rejects.toThrow();
+  });
+});
+
+describe('thread sessions', () => {
+  it('stores one session per bot per thread and upserts it', async () => {
+    const { bots, room } = await seedRoom(2);
+    const [first, second] = bots;
+
+    expect(await repos.threadSessions.get(room.id, first!.id)).toBeUndefined();
+    await repos.threadSessions.set(room.id, first!.id, 'sess_a1');
+    await repos.threadSessions.set(room.id, second!.id, 'sess_b1');
+    expect(await repos.threadSessions.get(room.id, first!.id)).toBe('sess_a1');
+    expect(await repos.threadSessions.get(room.id, second!.id)).toBe('sess_b1');
+
+    await repos.threadSessions.set(room.id, first!.id, 'sess_a2');
+    expect(await repos.threadSessions.get(room.id, first!.id)).toBe('sess_a2');
+    const rows = await handle.client.execute({
+      sql: 'SELECT COUNT(*) AS n FROM thread_sessions WHERE thread_id = ? AND bot_id = ?',
+      args: [room.id, first!.id],
+    });
+    expect(Number(rows.rows[0]?.n)).toBe(1);
+
+    await repos.threadSessions.set(room.id, first!.id, null);
+    expect(await repos.threadSessions.get(room.id, first!.id)).toBeUndefined();
+    expect(await repos.threadSessions.get(room.id, second!.id)).toBe('sess_b1');
+  });
+
+  it('removes a thread session with its thread', async () => {
+    const { bots, room } = await seedRoom(2);
+    await repos.threadSessions.set(room.id, bots[0]!.id, 'sess_a1');
+    expect(await repos.threads.get(room.id)).toBeDefined();
+    await handle.client.execute({ sql: 'DELETE FROM threads WHERE id = ?', args: [room.id] });
+    expect(await repos.threadSessions.get(room.id, bots[0]!.id)).toBeUndefined();
+  });
+});
+
+describe('team tasks', () => {
+  async function seedChain() {
+    const { bots, room } = await seedRoom(3);
+    const [user, onca, capy] = bots;
+    const root = await repos.tasks.create({
+      title: 'Launch the post',
+      assigneeBotId: onca!.id,
+      threadId: room.id,
+    });
+    return { user: user!, onca: onca!, capy: capy!, room, root };
+  }
+
+  it('creates a user task as depth 0 that starts its own chain', async () => {
+    const { onca, room, root } = await seedChain();
+    expect(root).toMatchObject({
+      title: 'Launch the post',
+      status: 'open',
+      assigneeBotId: onca.id,
+      createdByUser: true,
+      threadId: room.id,
+      chainId: root.id,
+      depth: 0,
+    });
+    expect(root.createdByBotId).toBeUndefined();
+    expect(root.parentTaskId).toBeUndefined();
+    expect(await repos.tasks.get(root.id)).toEqual(root);
+  });
+
+  it('places a delegated task one level below its parent, in the parent chain', async () => {
+    const { onca, capy, room, root } = await seedChain();
+    const child = await repos.tasks.create({
+      title: 'Draft the copy',
+      description: 'Two short paragraphs',
+      assigneeBotId: capy.id,
+      createdByBotId: onca.id,
+      parentTaskId: root.id,
+      threadId: room.id,
+    });
+    expect(child).toMatchObject({
+      createdByUser: false,
+      createdByBotId: onca.id,
+      parentTaskId: root.id,
+      chainId: root.chainId,
+      depth: 1,
+      description: 'Two short paragraphs',
+    });
+  });
+
+  it('starts a new chain for a delegation with no parent, at depth 1', async () => {
+    const { onca, capy, room } = await seedChain();
+    const loose = await repos.tasks.create({
+      title: 'Check the links',
+      assigneeBotId: capy.id,
+      createdByBotId: onca.id,
+      threadId: room.id,
+    });
+    expect(loose).toMatchObject({ depth: 1, chainId: loose.id, createdByUser: false });
+    expect(loose.parentTaskId).toBeUndefined();
+  });
+
+  it('refuses a delegation below the deepest allowed level', async () => {
+    const { onca, capy, room, root } = await seedChain();
+    let parent = root;
+    for (let depth = 1; depth <= 3; depth++) {
+      parent = await repos.tasks.create({
+        title: `Level ${depth}`,
+        assigneeBotId: capy.id,
+        createdByBotId: onca.id,
+        parentTaskId: parent.id,
+        threadId: room.id,
+      });
+      expect(parent.depth).toBe(depth);
+    }
+    await expect(
+      repos.tasks.create({
+        title: 'Too deep',
+        assigneeBotId: capy.id,
+        createdByBotId: onca.id,
+        parentTaskId: parent.id,
+        threadId: room.id,
+      }),
+    ).rejects.toThrow(/at most depth 3/);
+    expect(await repos.tasks.list({ chainId: root.chainId })).toHaveLength(4);
+  });
+
+  it('caps a chain at twenty tasks, the root included', async () => {
+    const { onca, capy, room, root } = await seedChain();
+    for (let i = 1; i < 20; i++) {
+      await repos.tasks.create({
+        title: `Child ${i}`,
+        assigneeBotId: capy.id,
+        createdByBotId: onca.id,
+        parentTaskId: root.id,
+        threadId: room.id,
+      });
+    }
+    expect(await repos.tasks.list({ chainId: root.chainId })).toHaveLength(20);
+    await expect(
+      repos.tasks.create({
+        title: 'Twenty-first',
+        assigneeBotId: capy.id,
+        createdByBotId: onca.id,
+        parentTaskId: root.id,
+        threadId: room.id,
+      }),
+    ).rejects.toThrow(/20 tasks/);
+  });
+
+  it('refuses a delegation under a parent that does not exist', async () => {
+    const { onca, capy, room } = await seedChain();
+    await expect(
+      repos.tasks.create({
+        title: 'Orphan',
+        assigneeBotId: capy.id,
+        createdByBotId: onca.id,
+        parentTaskId: 'task_missing',
+        threadId: room.id,
+      }),
+    ).rejects.toThrow(/does not exist/);
+  });
+
+  it('filters the board by assignee, status, chain, and thread', async () => {
+    const { onca, capy, room, root } = await seedChain();
+    const child = await repos.tasks.create({
+      title: 'Draft',
+      assigneeBotId: capy.id,
+      createdByBotId: onca.id,
+      parentTaskId: root.id,
+      threadId: room.id,
+    });
+    const otherRoom = await repos.rooms.create({ title: 'Other', botIds: [onca.id, capy.id], leadBotId: onca.id });
+    const elsewhere = await repos.tasks.create({
+      title: 'Elsewhere',
+      assigneeBotId: capy.id,
+      threadId: otherRoom.id,
+    });
+    await repos.tasks.update(child.id, { status: 'done' });
+
+    const ids = async (filter: Parameters<typeof repos.tasks.list>[0]) =>
+      (await repos.tasks.list(filter)).map((task) => task.id).sort();
+    expect(await ids({})).toEqual([root.id, child.id, elsewhere.id].sort());
+    expect(await ids({ assigneeBotId: capy.id })).toEqual([child.id, elsewhere.id].sort());
+    expect(await ids({ status: 'done' })).toEqual([child.id]);
+    expect(await ids({ chainId: root.chainId })).toEqual([root.id, child.id].sort());
+    expect(await ids({ threadId: otherRoom.id })).toEqual([elsewhere.id]);
+    expect(await ids({ assigneeBotId: capy.id, status: 'open', threadId: room.id })).toEqual([]);
+    expect((await repos.tasks.listChildren(root.id)).map((task) => task.id)).toEqual([child.id]);
+    expect(await repos.tasks.listChildren(child.id)).toEqual([]);
+  });
+
+  it('updates status, result, assignee, and work thread, and bumps updatedAt', async () => {
+    const { onca, capy, room, root } = await seedChain();
+    const workThread = await repos.threads.create(capy.id, { title: 'Work on: Launch the post' });
+
+    const started = await repos.tasks.update(root.id, { status: 'in_progress', workThreadId: workThread.id });
+    expect(started).toMatchObject({ status: 'in_progress', workThreadId: workThread.id });
+    expect(started!.updatedAt >= root.updatedAt).toBe(true);
+
+    const done = await repos.tasks.update(root.id, { status: 'done', result: 'Posted', assigneeBotId: capy.id });
+    expect(done).toMatchObject({ status: 'done', result: 'Posted', assigneeBotId: capy.id, workThreadId: workThread.id });
+    expect((await repos.tasks.list({ assigneeBotId: onca.id })).map((t) => t.id)).toEqual([]);
+    expect(room.id).toBe(root.threadId);
+
+    expect(await repos.tasks.update('task_missing', { status: 'done' })).toBeUndefined();
+    await expect(repos.tasks.update(root.id, {})).rejects.toThrow(/at least one field/);
+  });
+
+  it('keeps a delegated task when its creator bot is deleted, without a creator', async () => {
+    const { onca, capy, room } = await seedChain();
+    const child = await repos.tasks.create({
+      title: 'Orphaned work',
+      assigneeBotId: capy.id,
+      createdByBotId: onca.id,
+      threadId: room.id,
+    });
+    expect(await repos.bots.remove(onca.id)).toBe(true);
+    const survivor = await repos.tasks.get(child.id);
+    expect(survivor).toMatchObject({ createdByUser: false, depth: 1 });
+    expect(survivor?.createdByBotId).toBeUndefined();
+  });
+
+  it('deletes a task with its assignee', async () => {
+    const { capy, room } = await seedChain();
+    const task = await repos.tasks.create({ title: 'Gone soon', assigneeBotId: capy.id, threadId: room.id });
+    expect(await repos.bots.remove(capy.id)).toBe(true);
+    expect(await repos.tasks.get(task.id)).toBeUndefined();
+  });
+});
+
+describe('bot team budget', () => {
+  it('stores a team budget and clears it with null', async () => {
+    const bot = await repos.bots.create({ name: 'Onça', job: 'Lead', teamBudgetUsd: 4.5 });
+    expect(bot.teamBudgetUsd).toBe(4.5);
+    expect((await repos.bots.get(bot.id))?.teamBudgetUsd).toBe(4.5);
+
+    const cleared = await repos.bots.update(bot.id, { teamBudgetUsd: null });
+    expect(cleared?.teamBudgetUsd).toBeUndefined();
+    expect((await repos.bots.get(bot.id))?.teamBudgetUsd).toBeUndefined();
+  });
+});

@@ -62,3 +62,59 @@ export type HttpMcpServer = z.infer<typeof HttpMcpServer>;
  */
 export const McpServerSpec = z.union([StdioMcpServer, HttpMcpServer]);
 export type McpServerSpec = z.infer<typeof McpServerSpec>;
+
+/** A tool's root must be an object, so a target bot is one optional field each, and exactly one is required. */
+function exactlyOneBot(value: { botId?: string; botName?: string }, ctx: z.RefinementCtx): void {
+  if ((value.botId === undefined) === (value.botName === undefined)) {
+    ctx.addIssue({ code: 'custom', message: 'name the target bot with exactly one of botId or botName' });
+  }
+}
+
+const BotRef = z.string().min(1);
+
+/** Input of `ask_bot`: asks another bot a question and waits for its answer. */
+export const AskBotInput = z
+  .object({
+    botId: BotRef.optional(),
+    botName: BotRef.optional(),
+    question: z.string().min(1),
+  })
+  .superRefine(exactlyOneBot);
+export type AskBotInput = z.infer<typeof AskBotInput>;
+
+/** Input of `delegate_task`: hands a task to another bot. The bot works it asynchronously and reports a result. */
+export const DelegateTaskInput = z
+  .object({
+    botId: BotRef.optional(),
+    botName: BotRef.optional(),
+    title: z.string().min(1),
+    description: z.string().optional(),
+    parentTaskId: z.string().min(1).optional(),
+  })
+  .superRefine(exactlyOneBot);
+export type DelegateTaskInput = z.infer<typeof DelegateTaskInput>;
+
+/** Input of `handoff`: passes the room's baton to another member. */
+export const HandoffInput = z
+  .object({
+    botId: BotRef.optional(),
+    botName: BotRef.optional(),
+    note: z.string().optional(),
+  })
+  .superRefine(exactlyOneBot);
+export type HandoffInput = z.infer<typeof HandoffInput>;
+
+/**
+ * Input of `update_my_task`: the assignee reports progress on its own task. A bot cannot reopen a task
+ * (`open`) or cancel it, since those belong to whoever created the work.
+ */
+export const UpdateMyTaskInput = z.object({
+  taskId: z.string().min(1),
+  status: z.enum(['in_progress', 'blocked', 'done', 'failed']),
+  result: z.string().optional(),
+});
+export type UpdateMyTaskInput = z.infer<typeof UpdateMyTaskInput>;
+
+/** Input of `list_team`, which takes no arguments. */
+export const ListTeamInput = z.object({});
+export type ListTeamInput = z.infer<typeof ListTeamInput>;

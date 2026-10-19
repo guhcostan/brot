@@ -2,10 +2,12 @@ import { sql } from 'drizzle-orm';
 import {
   index,
   integer,
+  primaryKey,
   real,
   sqliteTable,
   text,
   uniqueIndex,
+  type AnySQLiteColumn,
 } from 'drizzle-orm/sqlite-core';
 import type {
   ApprovalDecision,
@@ -19,8 +21,11 @@ import type {
   MemoryKind,
   MessageRole,
   PolicyEffect,
+  ResponderMode,
   RoutineTrigger,
   RunStatus,
+  TaskStatus,
+  ThreadKind,
 } from '@brot/protocol';
 
 type JsonObject = Record<string, unknown>;
@@ -38,12 +43,17 @@ export const bots = sqliteTable('bots', {
     .$type<EgressPolicy>()
     .notNull()
     .default(sql`'{"mode":"deny","allow":[]}'`),
+  teamBudgetUsd: real('team_budget_usd'),
   pinned: integer('pinned', { mode: 'boolean' }).notNull().default(false),
   archived: integer('archived', { mode: 'boolean' }).notNull().default(false),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
 });
 
+/**
+ * DMs and rooms. `botId` is the bot the DM talks to, or the lead bot of a room. `engineSessionId` is the
+ * DM's engine session. Rooms keep one engine session per bot in `thread_sessions`, not here.
+ */
 export const threads = sqliteTable(
   'threads',
   {
@@ -53,6 +63,9 @@ export const threads = sqliteTable(
       .references(() => bots.id, { onDelete: 'cascade' }),
     title: text('title').notNull(),
     engineSessionId: text('engine_session_id'),
+    kind: text('kind').$type<ThreadKind>().notNull().default('dm'),
+    leadBotId: text('lead_bot_id').references(() => bots.id, { onDelete: 'cascade' }),
+    responder: text('responder').$type<ResponderMode>(),
     createdAt: text('created_at').notNull(),
     updatedAt: text('updated_at').notNull(),
   },
@@ -85,6 +98,10 @@ export const messages = sqliteTable(
     role: text('role').$type<MessageRole>().notNull(),
     content: text('content').notNull(),
     createdAt: text('created_at').notNull(),
+    authorBotId: text('author_bot_id').references(() => bots.id, { onDelete: 'set null' }),
+    /** Bot ids @mentioned in the message. Not a foreign key: a deleted bot leaves a stale id, which is harmless. */
+    mentions: text('mentions', { mode: 'json' }).$type<string[]>(),
+    viaBotId: text('via_bot_id').references(() => bots.id, { onDelete: 'set null' }),
   },
   (t) => [index('messages_thread_idx').on(t.threadId)],
 );
@@ -230,4 +247,69 @@ export const events = sqliteTable(
     at: text('at').notNull(),
   },
   (t) => [index('events_thread_at_idx').on(t.threadId, t.at)],
+);
+
+/** A bot's membership in a room thread. The lead bot is a member too. */
+export const roomMembers = sqliteTable(
+  'room_members',
+  {
+    threadId: text('thread_id')
+      .notNull()
+      .references(() => threads.id, { onDelete: 'cascade' }),
+    botId: text('bot_id')
+      .notNull()
+      .references(() => bots.id, { onDelete: 'cascade' }),
+    joinedAt: text('joined_at').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.threadId, t.botId] })],
+);
+
+/**
+ * One engine session per bot per thread. Rooms use this table so each member resumes its own session.
+ * `engineSessionId` is null after a reset. The row stays so `updatedAt` still says when it changed.
+ */
+export const threadSessions = sqliteTable(
+  'thread_sessions',
+  {
+    threadId: text('thread_id')
+      .notNull()
+      .references(() => threads.id, { onDelete: 'cascade' }),
+    botId: text('bot_id')
+      .notNull()
+      .references(() => bots.id, { onDelete: 'cascade' }),
+    engineSessionId: text('engine_session_id'),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.threadId, t.botId] })],
+);
+
+export const tasks = sqliteTable(
+  'tasks',
+  {
+    id: text('id').primaryKey(),
+    title: text('title').notNull(),
+    description: text('description'),
+    status: text('status').$type<TaskStatus>().notNull(),
+    assigneeBotId: text('assignee_bot_id')
+      .notNull()
+      .references(() => bots.id, { onDelete: 'cascade' }),
+    createdByBotId: text('created_by_bot_id').references(() => bots.id, { onDelete: 'set null' }),
+    createdByUser: integer('created_by_user', { mode: 'boolean' }).notNull(),
+    parentTaskId: text('parent_task_id').references((): AnySQLiteColumn => tasks.id, { onDelete: 'set null' }),
+    threadId: text('thread_id')
+      .notNull()
+      .references(() => threads.id, { onDelete: 'cascade' }),
+    workThreadId: text('work_thread_id').references(() => threads.id, { onDelete: 'set null' }),
+    result: text('result'),
+    chainId: text('chain_id').notNull(),
+    depth: integer('depth').notNull(),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (t) => [
+    index('tasks_assignee_idx').on(t.assigneeBotId),
+    index('tasks_chain_idx').on(t.chainId),
+    index('tasks_thread_idx').on(t.threadId),
+    index('tasks_parent_idx').on(t.parentTaskId),
+  ],
 );

@@ -53,14 +53,107 @@ describe('migrate', () => {
       'memories',
       'messages',
       'policies',
+      'room_members',
       'routines',
       'runs',
       'skills',
+      'tasks',
+      'thread_sessions',
       'threads',
     ]);
 
     const applied = await handle.client.execute('SELECT COUNT(*) AS count FROM __drizzle_migrations');
-    expect(Number(applied.rows[0]?.count)).toBe(2);
+    expect(Number(applied.rows[0]?.count)).toBe(3);
+  });
+
+  it('adds the rooms, team task, and per-bot session schema on a fresh database', async () => {
+    const { handle } = await tempDb();
+    await migrate(handle.db);
+
+    expect(await columnNames(handle, 'threads')).toEqual(
+      expect.arrayContaining(['kind', 'lead_bot_id', 'responder', 'engine_session_id']),
+    );
+    expect(await columnNames(handle, 'messages')).toEqual(
+      expect.arrayContaining(['author_bot_id', 'mentions', 'via_bot_id']),
+    );
+    expect(await columnNames(handle, 'bots')).toContain('team_budget_usd');
+    expect(await columnNames(handle, 'tasks')).toEqual([
+      'id',
+      'title',
+      'description',
+      'status',
+      'assignee_bot_id',
+      'created_by_bot_id',
+      'created_by_user',
+      'parent_task_id',
+      'thread_id',
+      'work_thread_id',
+      'result',
+      'chain_id',
+      'depth',
+      'created_at',
+      'updated_at',
+    ]);
+    expect(await columnNames(handle, 'thread_sessions')).toEqual(['thread_id', 'bot_id', 'engine_session_id', 'updated_at']);
+    expect(await columnNames(handle, 'room_members')).toEqual(['thread_id', 'bot_id', 'joined_at']);
+  });
+
+  it('upgrades a wave 4 database in place: old threads become DMs and bots that authored messages can still be deleted', async () => {
+    const { handle } = await tempDb();
+    const journal = JSON.parse(await readFile(join(migrationsFolder, 'meta', '_journal.json'), 'utf8')) as {
+      entries: Array<{ tag: string; when: number }>;
+    };
+    const [wave3, wave4] = journal.entries;
+    if (!wave3 || !wave4) throw new Error('journal must hold the wave 3 and wave 4 migrations');
+
+    // Recreate the database as wave 4 left it: the first two migrations applied, with data in them.
+    for (const entry of [wave3, wave4]) {
+      await handle.client.executeMultiple(await readFile(join(migrationsFolder, `${entry.tag}.sql`), 'utf8'));
+    }
+    await handle.client.execute(
+      'CREATE TABLE "__drizzle_migrations" ("id" INTEGER PRIMARY KEY AUTOINCREMENT, "hash" text NOT NULL, "created_at" numeric)',
+    );
+    for (const entry of [wave3, wave4]) {
+      await handle.client.execute({
+        sql: 'INSERT INTO "__drizzle_migrations" ("hash", "created_at") VALUES (?, ?)',
+        args: [entry.tag, entry.when],
+      });
+    }
+    await handle.client.execute(
+      `INSERT INTO bots (id, name, job, instructions, engine, computer, pinned, archived, created_at, updated_at)
+       VALUES ('bot_old', 'Ada', 'Researcher', '', 'mock', 'none', 0, 0, '2026-10-19T10:00:00.000Z', '2026-10-19T10:00:00.000Z')`,
+    );
+    await handle.client.execute(
+      `INSERT INTO threads (id, bot_id, title, engine_session_id, created_at, updated_at)
+       VALUES ('thread_old', 'bot_old', 'Chat', 'sess_1', '2026-10-19T10:00:00.000Z', '2026-10-19T10:00:00.000Z')`,
+    );
+    await handle.client.execute(
+      `INSERT INTO messages (id, thread_id, role, content, created_at)
+       VALUES ('msg_old', 'thread_old', 'user', 'Hi', '2026-10-19T10:00:00.000Z')`,
+    );
+
+    await migrate(handle.db);
+
+    const repos = createRepos(handle.db);
+    const thread = await repos.threads.get('thread_old');
+    expect(thread).toMatchObject({ kind: 'dm', botId: 'bot_old', engineSessionId: 'sess_1' });
+    expect(thread?.leadBotId).toBeUndefined();
+    expect(thread?.responder).toBeUndefined();
+    expect((await repos.threads.listByBot('bot_old', { kind: 'dm' })).map((t) => t.id)).toEqual(['thread_old']);
+    expect((await repos.bots.get('bot_old'))?.teamBudgetUsd).toBeUndefined();
+
+    const [old] = await repos.messages.listByThread('thread_old');
+    expect(old).toMatchObject({ id: 'msg_old', content: 'Hi' });
+    expect(old?.authorBotId).toBeUndefined();
+    expect(old?.mentions).toBeUndefined();
+
+    // A bot that wrote a message in a room is deleted without being blocked: the message keeps its text
+    // and loses the author link.
+    const capy = await repos.bots.create({ name: 'Capy', job: 'Helper' });
+    await repos.messages.create({ threadId: 'thread_old', role: 'assistant', content: 'From Capy', authorBotId: capy.id });
+    expect(await repos.bots.remove(capy.id)).toBe(true);
+    const survivor = (await repos.messages.listByThread('thread_old')).find((m) => m.content === 'From Capy');
+    expect(survivor?.authorBotId).toBeUndefined();
   });
 
   it('adds the wave 4 columns and the computer-per-bot constraint on a fresh database', async () => {

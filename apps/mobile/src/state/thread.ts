@@ -153,6 +153,12 @@ export function applyThreadEvent(state: ThreadState, event: CanonicalEvent): Thr
     case 'cost.updated':
     case 'computer.status':
     case 'network.blocked':
+    case 'task.created':
+    case 'task.updated':
+    case 'handoff':
+    case 'bot.asked':
+    case 'bot.answered':
+    case 'room.members':
       return base;
   }
 }

@@ -1,5 +1,5 @@
-import { asc, desc, eq } from 'drizzle-orm';
-import { CreateThread, type Thread } from '@brot/protocol';
+import { and, asc, desc, eq } from 'drizzle-orm';
+import { CreateThread, type Thread, type ThreadKind } from '@brot/protocol';
 import type { Db } from '../client';
 import { threads } from '../schema';
 import { newId, nowIso, required } from './common';
@@ -11,6 +11,9 @@ export function toThread(row: ThreadRow): Thread {
     id: row.id,
     botId: row.botId,
     title: row.title,
+    kind: row.kind,
+    leadBotId: row.leadBotId ?? undefined,
+    responder: row.responder ?? undefined,
     engineSessionId: row.engineSessionId ?? undefined,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -19,11 +22,15 @@ export function toThread(row: ThreadRow): Thread {
 
 export function createThreadRepo(db: Db) {
   return {
-    async listByBot(botId: string): Promise<Thread[]> {
+    /**
+     * Threads whose `botId` is this bot. For a room that is the lead bot, so pass `kind: 'dm'` to list
+     * only the bot's DMs.
+     */
+    async listByBot(botId: string, options: { kind?: ThreadKind } = {}): Promise<Thread[]> {
       const rows = await db
         .select()
         .from(threads)
-        .where(eq(threads.botId, botId))
+        .where(and(eq(threads.botId, botId), options.kind ? eq(threads.kind, options.kind) : undefined))
         .orderBy(desc(threads.updatedAt), asc(threads.id));
       return rows.map(toThread);
     },

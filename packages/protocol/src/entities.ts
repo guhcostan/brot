@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { EgressPolicy } from './egress';
+import { TEAM_MAX_DEPTH } from './constants';
 
 export const IsoDateTime = z.iso.datetime();
 export type IsoDateTime = z.infer<typeof IsoDateTime>;
@@ -26,6 +27,11 @@ export const Bot = z.object({
   computer: ComputerKind,
   /** Absent means deny-all. Stored bots always carry a policy; the default is `{ mode: 'deny', allow: [] }`. */
   egress: EgressPolicy.optional(),
+  /**
+   * Cost cap in USD for one team chain (every task that shares a `chainId`) this bot takes part in.
+   * When several bots in a chain set one, the smallest applies. Absent means no cap.
+   */
+  teamBudgetUsd: z.number().nonnegative().optional(),
   pinned: z.boolean(),
   archived: z.boolean(),
   createdAt: IsoDateTime,
@@ -33,16 +39,102 @@ export const Bot = z.object({
 });
 export type Bot = z.infer<typeof Bot>;
 
+export const ThreadKind = z.enum(['dm', 'room']);
+export type ThreadKind = z.infer<typeof ThreadKind>;
+
+/**
+ * Who answers in a room.
+ * - `mention`: only the bots @mentioned in a message answer.
+ * - `lead`: the mentioned bots answer. When nobody is mentioned, the lead bot answers and may hand the
+ *   message to another member.
+ */
+export const ResponderMode = z.enum(['mention', 'lead']);
+export type ResponderMode = z.infer<typeof ResponderMode>;
+
+/**
+ * A conversation: a DM with one bot (`kind: 'dm'`) or a room with several bots (`kind: 'room'`).
+ * For a room, `botId` repeats `leadBotId` so code that expects one bot per thread keeps working.
+ */
 export const Thread = z.object({
   id: z.string(),
   botId: z.string(),
   title: z.string(),
-  /** The engine session to resume for this thread, as last reported through the `engine.session` event. */
+  /** Absent means `dm`. The server always sends it. */
+  kind: ThreadKind.optional(),
+  /** The bot that created the room and answers when nobody is mentioned. Rooms only. */
+  leadBotId: z.string().optional(),
+  /** Rooms only. Absent on DMs. */
+  responder: ResponderMode.optional(),
+  /**
+   * The engine session to resume for a DM, as last reported through the `engine.session` event.
+   * Rooms keep one session per bot in `thread_sessions` instead, and leave this unset.
+   */
   engineSessionId: z.string().optional(),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
 export type Thread = z.infer<typeof Thread>;
+
+/** A bot's membership in a room. The lead bot is a member too. */
+export const RoomMember = z.object({
+  threadId: z.string(),
+  botId: z.string(),
+  joinedAt: IsoDateTime,
+});
+export type RoomMember = z.infer<typeof RoomMember>;
+
+/**
+ * Status of a team task. `open` waits for its assignee, `in_progress` is being worked, and `blocked`
+ * waits on someone else. `done`, `failed` and `cancelled` end the task.
+ */
+export const TaskStatus = z.enum(['open', 'in_progress', 'blocked', 'done', 'failed', 'cancelled']);
+export type TaskStatus = z.infer<typeof TaskStatus>;
+
+/**
+ * A unit of team work. A user creates a task at depth 0. A bot that delegates creates a child at
+ * `parent.depth + 1`, or at depth 1 when it names no parent. A task shares its chain's `chainId`, and a
+ * user-created task starts its chain with its own id.
+ */
+export const Task = z
+  .object({
+    id: z.string(),
+    title: z.string().min(1),
+    description: z.string().optional(),
+    status: TaskStatus,
+    assigneeBotId: z.string(),
+    /** The bot that delegated the task. Absent for user-created tasks, and for tasks whose creator was deleted. */
+    createdByBotId: z.string().optional(),
+    createdByUser: z.boolean(),
+    parentTaskId: z.string().optional(),
+    /** The thread where the task was requested. */
+    threadId: z.string(),
+    /** The assignee's DM thread where the work happens. Set when the assignee starts. */
+    workThreadId: z.string().optional(),
+    result: z.string().optional(),
+    chainId: z.string(),
+    depth: z.number().int().min(0).max(TEAM_MAX_DEPTH),
+    createdAt: IsoDateTime,
+    updatedAt: IsoDateTime,
+  })
+  .superRefine((task, ctx) => {
+    if (task.createdByUser) {
+      if (task.depth !== 0) {
+        ctx.addIssue({ code: 'custom', path: ['depth'], message: 'a user-created task is depth 0' });
+      }
+      if (task.createdByBotId !== undefined) {
+        ctx.addIssue({ code: 'custom', path: ['createdByBotId'], message: 'a user-created task has no creator bot' });
+      }
+      if (task.parentTaskId !== undefined) {
+        ctx.addIssue({ code: 'custom', path: ['parentTaskId'], message: 'a user-created task is a chain root' });
+      }
+      if (task.chainId !== task.id) {
+        ctx.addIssue({ code: 'custom', path: ['chainId'], message: 'a user-created task starts its chain with its own id' });
+      }
+    } else if (task.depth < 1) {
+      ctx.addIssue({ code: 'custom', path: ['depth'], message: 'a delegated task is depth 1 or more' });
+    }
+  });
+export type Task = z.infer<typeof Task>;
 
 export const ComputerState = z.enum(['stopped', 'starting', 'ready', 'error']);
 export type ComputerState = z.infer<typeof ComputerState>;
@@ -76,6 +168,15 @@ export const Message = z.object({
   role: MessageRole,
   content: z.string(),
   createdAt: IsoDateTime,
+  /** The bot that wrote an assistant message. Absent on older rows, where it is the thread's bot. */
+  authorBotId: z.string().optional(),
+  /** Bot ids @mentioned in the message. */
+  mentions: z.array(z.string()).optional(),
+  /**
+   * For a message one bot posts to another, the bot it was addressed to. `authorBotId` is the sender,
+   * so the UI can render "sender → recipient".
+   */
+  viaBotId: z.string().optional(),
 });
 export type Message = z.infer<typeof Message>;
 

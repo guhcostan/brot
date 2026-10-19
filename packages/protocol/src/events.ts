@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { Approval, ComputerState, IsoDateTime, Memory, Message } from './entities';
+import { Approval, ComputerState, IsoDateTime, Memory, Message, Task } from './entities';
 
 const base = {
   id: z.string(),
@@ -95,6 +95,55 @@ export const CanonicalEvent = z.discriminatedUnion('type', [
     type: z.literal('network.blocked'),
     botId: z.string(),
     host: BlockedHost,
+  }),
+  /** A team task was created. The event's `threadId` is the thread where it was requested. */
+  z.object({
+    ...base,
+    type: z.literal('task.created'),
+    task: Task,
+  }),
+  /** A team task changed status, result, assignee, or work thread. Carries the whole task after the change. */
+  z.object({
+    ...base,
+    type: z.literal('task.updated'),
+    task: Task,
+  }),
+  /**
+   * A room baton pass: `fromBotId` hands the conversation to `toBotId`. Shown in the room's timeline, and
+   * `toBotId` becomes the bot that answers next.
+   */
+  z.object({
+    ...base,
+    type: z.literal('handoff'),
+    fromBotId: z.string(),
+    toBotId: z.string(),
+    note: z.string().optional(),
+  }),
+  /**
+   * A bot asked another bot a question, and is waiting for the answer. `askId` links it to the matching
+   * `bot.answered`. The event's `threadId` is the thread where the exchange is shown.
+   */
+  z.object({
+    ...base,
+    type: z.literal('bot.asked'),
+    fromBotId: z.string(),
+    toBotId: z.string(),
+    question: z.string(),
+    askId: z.string(),
+  }),
+  z.object({
+    ...base,
+    type: z.literal('bot.answered'),
+    askId: z.string(),
+    fromBotId: z.string(),
+    toBotId: z.string(),
+    answer: z.string(),
+  }),
+  /** The members of a room after a change. Lists every member, not only the added or removed ones. */
+  z.object({
+    ...base,
+    type: z.literal('room.members'),
+    botIds: z.array(z.string()),
   }),
   z.object({
     ...base,

@@ -7,5 +7,6 @@ export type {
   CreateMessageInput,
   RoutineScheduleUpdate,
   RunPatch,
+  TaskFilter,
 } from './repos';
 export * as schema from './schema';

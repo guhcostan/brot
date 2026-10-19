@@ -45,6 +45,12 @@ const EVENT_NAMES: Record<CanonicalEventType, true> = {
   'cost.updated': true,
   'computer.status': true,
   'network.blocked': true,
+  'task.created': true,
+  'task.updated': true,
+  'handoff': true,
+  'bot.asked': true,
+  'bot.answered': true,
+  'room.members': true,
   'run.completed': true,
   'run.failed': true,
 };

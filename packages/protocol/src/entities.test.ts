@@ -1,5 +1,23 @@
 import { describe, expect, it } from 'vitest';
-import { Approval, Bot, Computer, Device, Memory, Message, Policy, Routine, Run, Skill, Thread } from './entities';
+import { TEAM_MAX_DEPTH } from './constants';
+import {
+  Approval,
+  Bot,
+  Computer,
+  Device,
+  Memory,
+  Message,
+  Policy,
+  ResponderMode,
+  RoomMember,
+  Routine,
+  Run,
+  Skill,
+  Task,
+  TaskStatus,
+  Thread,
+  ThreadKind,
+} from './entities';
 
 const at = '2026-10-19T12:00:00.000Z';
 
@@ -127,5 +145,143 @@ describe('entity schemas', () => {
     expect(() => Bot.parse({ ...bot, createdAt: 'yesterday' })).toThrow();
     expect(() => Run.parse({ ...bot, status: 'paused' })).toThrow();
     expect(() => Routine.parse({ ...bot, trigger: { type: 'interval' } })).toThrow();
+  });
+});
+
+describe('rooms, messages, and team tasks', () => {
+  const task = {
+    id: 'task_1',
+    title: 'Draft the launch post',
+    status: 'open' as const,
+    assigneeBotId: 'bot_2',
+    createdByUser: true,
+    threadId: 't1',
+    chainId: 'task_1',
+    depth: 0,
+    createdAt: at,
+    updatedAt: at,
+  };
+
+  it('reads a thread row written before rooms existed as a DM', () => {
+    const parsed = Thread.parse({ id: 't1', botId: 'bot_1', title: 'Chat', createdAt: at, updatedAt: at });
+    expect(parsed.kind).toBeUndefined();
+    expect(parsed.responder).toBeUndefined();
+  });
+
+  it('round-trips a room thread with its lead bot and responder', () => {
+    const room = {
+      id: 't2',
+      botId: 'bot_1',
+      title: 'Launch room',
+      kind: 'room',
+      leadBotId: 'bot_1',
+      responder: 'mention',
+      createdAt: at,
+      updatedAt: at,
+    };
+    expect(roundTrip(Thread, room)).toEqual(room);
+    expect(ThreadKind.options).toEqual(['dm', 'room']);
+    expect(ResponderMode.options).toEqual(['mention', 'lead']);
+  });
+
+  it('rejects an unknown thread kind or responder mode', () => {
+    expect(() => Thread.parse({ id: 't', botId: 'b', title: 'x', kind: 'group', createdAt: at, updatedAt: at })).toThrow();
+    expect(() =>
+      Thread.parse({ id: 't', botId: 'b', title: 'x', responder: 'auto', createdAt: at, updatedAt: at }),
+    ).toThrow();
+  });
+
+  it('round-trips room membership', () => {
+    const member = { threadId: 't2', botId: 'bot_2', joinedAt: at };
+    expect(roundTrip(RoomMember, member)).toEqual(member);
+    expect(() => RoomMember.parse({ threadId: 't2', botId: 'bot_2' })).toThrow();
+  });
+
+  it('round-trips the author, mentions, and recipient of a message', () => {
+    const message = {
+      id: 'm2',
+      threadId: 't2',
+      role: 'assistant',
+      content: 'Over to you',
+      createdAt: at,
+      authorBotId: 'bot_1',
+      mentions: ['bot_2'],
+      viaBotId: 'bot_2',
+    };
+    expect(roundTrip(Message, message)).toEqual(message);
+    expect(() => Message.parse({ ...message, mentions: 'bot_2' })).toThrow();
+  });
+
+  it('accepts a bot with a team budget and rejects a negative one', () => {
+    const budgeted = {
+      id: 'bot_1',
+      name: 'Onça',
+      job: 'Lead',
+      instructions: '',
+      engine: 'dsh',
+      computer: 'none',
+      pinned: false,
+      archived: false,
+      teamBudgetUsd: 2.5,
+      createdAt: at,
+      updatedAt: at,
+    };
+    expect(roundTrip(Bot, budgeted)).toEqual(budgeted);
+    expect(() => Bot.parse({ ...budgeted, teamBudgetUsd: -1 })).toThrow();
+  });
+
+  it('accepts every task status and nothing else', () => {
+    for (const status of ['open', 'in_progress', 'blocked', 'done', 'failed', 'cancelled']) {
+      expect(TaskStatus.parse(status)).toBe(status);
+    }
+    expect(() => TaskStatus.parse('paused')).toThrow();
+  });
+
+  it('round-trips a user-created root task', () => {
+    expect(roundTrip(Task, task)).toEqual(task);
+  });
+
+  it('round-trips a delegated task under its parent', () => {
+    const child = {
+      ...task,
+      id: 'task_2',
+      createdByUser: false,
+      createdByBotId: 'bot_1',
+      parentTaskId: 'task_1',
+      workThreadId: 'thr_bot_2',
+      result: 'Posted',
+      status: 'done' as const,
+      chainId: 'task_1',
+      depth: 1,
+    };
+    expect(roundTrip(Task, child)).toEqual(child);
+  });
+
+  it('accepts a delegated task at the deepest allowed level', () => {
+    expect(Task.parse({ ...task, id: 'task_9', createdByUser: false, createdByBotId: 'bot_1', chainId: 'task_1', depth: TEAM_MAX_DEPTH }).depth).toBe(TEAM_MAX_DEPTH);
+  });
+
+  it('rejects a task deeper than the chain limit', () => {
+    expect(() =>
+      Task.parse({ ...task, id: 'task_9', createdByUser: false, createdByBotId: 'bot_1', chainId: 'task_1', depth: TEAM_MAX_DEPTH + 1 }),
+    ).toThrow();
+  });
+
+  it('rejects a user-created task that is not depth 0, names a creator, has a parent, or breaks its chain', () => {
+    expect(() => Task.parse({ ...task, depth: 1 })).toThrow(/depth 0/);
+    expect(() => Task.parse({ ...task, createdByBotId: 'bot_1' })).toThrow(/creator/);
+    expect(() => Task.parse({ ...task, parentTaskId: 'task_0' })).toThrow(/chain root/);
+    expect(() => Task.parse({ ...task, chainId: 'other' })).toThrow(/own id/);
+  });
+
+  it('rejects a delegated task at depth 0', () => {
+    expect(() => Task.parse({ ...task, createdByUser: false, createdByBotId: 'bot_1', chainId: 'task_1', depth: 0 })).toThrow(
+      /depth 1 or more/,
+    );
+  });
+
+  it('keeps a delegated task whose creator bot was deleted', () => {
+    const orphan = { ...task, id: 'task_3', createdByUser: false, chainId: 'task_1', depth: 1 };
+    expect(roundTrip(Task, orphan)).toEqual(orphan);
   });
 });

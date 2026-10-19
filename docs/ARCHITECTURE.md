@@ -43,7 +43,7 @@ The **server is the product**. Desktop and Cloud are packaging. A self-hoster ru
 ### Canonical event protocol (`packages/protocol`)
 The DSH runtime's ACP notifications is normalized into **one versioned event union**, validated with zod:
 
-`run.started · message.delta · message.completed · tool.call · tool.result · approval.requested · approval.resolved · computer.frame · memory.written · handoff · cost.updated · run.completed · run.failed`
+`run.started · message.delta · message.completed · tool.call · tool.result · approval.requested · approval.resolved · computer.status · computer.frame · network.blocked · memory.written · task.created · task.updated · handoff · bot.asked · bot.answered · room.members · cost.updated · run.completed · run.failed`
 
 - The log is append-only per thread (an `events` table, also exportable as NDJSON).
 - The UI state is a pure fold over events, so you can replay, time-travel debug, and share runs.
