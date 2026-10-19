@@ -1,6 +1,7 @@
 import type {
   Bot,
   ComputerHandle,
+  LlmRoute,
   McpServerSpec,
   Memory,
   Message,
@@ -35,6 +36,7 @@ export interface TestContextOptions {
   engineSessionId?: string;
   computer?: ComputerHandle;
   mcpServers?: McpServerSpec[];
+  llm?: LlmRoute;
 }
 
 export function makeContext(opts: TestContextOptions = {}): { ctx: RunContext; requests: ToolRequest[] } {
@@ -51,6 +53,7 @@ export function makeContext(opts: TestContextOptions = {}): { ctx: RunContext; r
     engineSessionId: opts.engineSessionId,
     computer: opts.computer,
     mcpServers: opts.mcpServers,
+    llm: opts.llm,
     requestTool: async (req) => {
       requests.push(req);
       return opts.decide ? opts.decide(req) : { allowed: true };

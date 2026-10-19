@@ -17,6 +17,8 @@ export interface ServerConfig {
   mode: ServerMode;
   /** Image a `computer: 'sandbox'` bot runs in. */
   computerImage: string;
+  /** Extra and overriding model providers, read at start. Holds secret names only, never keys. */
+  providersFile: string;
 }
 
 export interface ConfigOverrides {
@@ -63,5 +65,6 @@ export function loadConfig(
     dbUrl: `file:${join(home, 'brot.db')}`,
     mode: overrides.mode ?? readMode(env.BROT_MODE),
     computerImage: overrides.computerImage ?? env.BROT_COMPUTER_IMAGE ?? DEFAULT_COMPUTER_IMAGE,
+    providersFile: join(home, 'providers.json'),
   };
 }

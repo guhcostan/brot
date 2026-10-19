@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { Repos } from '@brot/db';
 import { modelHostsFor, type EngineRegistry } from '@brot/engines';
 import type {
@@ -7,6 +8,7 @@ import type {
   ComputerState,
   EngineDriver,
   EngineEvent,
+  LlmRoute,
   Message,
   Run,
   RunContext,
@@ -17,6 +19,7 @@ import type { Broker } from './broker';
 import type { EventBus } from './bus';
 import type { ComputerProvider } from './computers/types';
 import type { ServerMode } from './config';
+import type { LlmRelay, ResolvedRoute, RunUsage } from './llm';
 import type { BrotMcp } from './mcp/types';
 import type { ChainLedger } from './rooms/chains';
 import { buildTurn, type Turn } from './rooms/context';
@@ -37,7 +40,15 @@ export interface HarnessDeps {
   /** This server's loopback URL: the MCP endpoint for runs that have no computer. */
   loopbackUrl(): string;
   chains: ChainLedger;
+  /** Relays model requests of `RELAYED_ENGINES` runs, so the provider key never reaches the engine. */
+  llm: LlmRelay;
 }
+
+/**
+ * Engines that call their model through the Brot relay (`ctx.llm`) and not over their own network route. Their
+ * bots need a provider and a vault secret, and the computer needs no model hosts.
+ */
+const RELAYED_ENGINES: ReadonlySet<string> = new Set(['dsh']);
 
 /**
  * A run for one bot in one thread. `inputMessage` is the stored message the run answers. When it is absent,
@@ -76,6 +87,8 @@ interface ActiveRun {
   controller: AbortController;
   text: string;
   usage: { tokensIn: number; tokensOut: number; costUsd: number };
+  /** Set when the run's model goes through the relay. The relay counts its usage, so engine usage events are ignored. */
+  relayed: boolean;
   /** Rooms, and runs of a bot that is not the thread's own, keep their session in `thread_sessions`. */
   ownSession: boolean;
   /** Set by the first terminal write, so completion, failure and cancellation cannot all write. */
@@ -88,10 +101,16 @@ interface ActiveRun {
 type TerminalStatus = 'completed' | 'failed' | 'cancelled';
 
 export function createHarness(deps: HarnessDeps): Harness {
-  const { repos, bus, broker, engines, computers, mcp, mode, computerImage, loopbackUrl, chains } = deps;
+  const { repos, bus, broker, engines, computers, mcp, llm, mode, computerImage, loopbackUrl, chains } = deps;
   const active = new Map<string, ActiveRun>();
   /** The trigger message of each bot's latest run in each thread. Room context is built from it. */
   const lastTrigger = new Map<string, string>();
+
+  llm.onUsage((runId, usage) => {
+    const state = active.get(runId);
+    if (state === undefined || state.settled) return;
+    recordUsage(state, usage).catch((error: unknown) => console.error(`usage of run ${runId} could not be recorded`, error));
+  });
 
   async function storeMessage(input: {
     threadId: string;
@@ -168,6 +187,7 @@ export function createHarness(deps: HarnessDeps): Harness {
       controller: new AbortController(),
       text: '',
       usage: { tokensIn: 0, tokensOut: 0, costUsd: 0 },
+      relayed: false,
       ownSession,
       settled: false,
       finish,
@@ -182,10 +202,21 @@ export function createHarness(deps: HarnessDeps): Harness {
   async function execute(state: ActiveRun, bot: Bot, turn: Turn, engineSessionId: string | undefined): Promise<void> {
     try {
       const driver = await readyDriver(bot);
-      const place = await placeRun(state, bot);
+      const relay = RELAYED_ENGINES.has(bot.engine) ? await relayRoute(state, bot) : undefined;
+      const place = await placeRun(state, bot, relay === undefined ? modelHostsFor(bot.engine) : []);
       if (state.controller.signal.aborted) return;
+      const llmRoute: LlmRoute | undefined =
+        relay === undefined
+          ? undefined
+          : {
+              provider: relay.provider.id,
+              model: relay.model,
+              api: relay.provider.api,
+              baseUrl: `${place.brotBaseUrl}/llm/runs/${encodeURIComponent(state.runId)}/v1`,
+              token: relay.token,
+            };
       const mcpServers = mcp
-        ? [mcp.specForRun({ botId: bot.id, threadId: state.threadId, runId: state.runId }, place.mcpBaseUrl)]
+        ? [mcp.specForRun({ botId: bot.id, threadId: state.threadId, runId: state.runId }, place.brotBaseUrl)]
         : undefined;
       const ctx: RunContext = {
         runId: state.runId,
@@ -200,6 +231,7 @@ export function createHarness(deps: HarnessDeps): Harness {
         ...(engineSessionId === undefined ? {} : { engineSessionId }),
         ...(place.computer === undefined ? {} : { computer: place.computer }),
         ...(mcpServers === undefined ? {} : { mcpServers }),
+        ...(llmRoute === undefined ? {} : { llm: llmRoute }),
       };
       for await (const event of driver.run(ctx)) {
         if (state.controller.signal.aborted) break;
@@ -216,6 +248,19 @@ export function createHarness(deps: HarnessDeps): Harness {
     }
   }
 
+  /**
+   * Resolves a relayed bot's model to its provider and mints the run's token. Runs before the computer starts, so a
+   * missing provider or key fails the run without starting anything. The token is revoked when the run settles.
+   */
+  async function relayRoute(state: ActiveRun, bot: Bot): Promise<ResolvedRoute & { token: string }> {
+    if (bot.model === undefined) {
+      throw new Error(`Bot "${bot.name}" has no model. Set it to <provider>/<model>, for example opencode-go/deepseek-v4.1-flash.`);
+    }
+    const resolved = { ...(await llm.resolve(bot.model)), session: conversationId(state.threadId, bot.id) };
+    state.relayed = true;
+    return { ...resolved, token: llm.issue(state.runId, resolved) };
+  }
+
   async function readyDriver(bot: Bot): Promise<EngineDriver> {
     const driver = engines.get(bot.engine);
     if (!driver) throw new Error(`Engine "${bot.engine}" is not registered on this server`);
@@ -227,23 +272,25 @@ export function createHarness(deps: HarnessDeps): Harness {
   }
 
   /**
-   * Where the run's tools execute. A `none` bot gets no computer and reaches Brot MCP on loopback. A
+   * Where the run's tools execute. A `none` bot gets no computer and reaches Brot on loopback. A
    * `sandbox` or `host` bot must get its own provider's computer; a missing or unavailable provider fails
-   * the run and never falls back to another kind.
+   * the run and never falls back to another kind. `brotBaseUrl` is the Brot server as seen from the engine.
    */
   async function placeRun(
     state: ActiveRun,
     bot: Bot,
-  ): Promise<{ computer?: ComputerHandle; mcpBaseUrl: string }> {
-    if (bot.computer === 'none') return { mcpBaseUrl: loopbackUrl() };
-    return startComputer(state, bot, bot.computer);
+    extraHosts: string[],
+  ): Promise<{ computer?: ComputerHandle; brotBaseUrl: string }> {
+    if (bot.computer === 'none') return { brotBaseUrl: loopbackUrl() };
+    return startComputer(state, bot, bot.computer, extraHosts);
   }
 
   async function startComputer(
     state: ActiveRun,
     bot: Bot,
     kind: Exclude<ComputerKind, 'none'>,
-  ): Promise<{ computer: ComputerHandle; mcpBaseUrl: string }> {
+    extraHosts: string[],
+  ): Promise<{ computer: ComputerHandle; brotBaseUrl: string }> {
     const image = kind === 'host' ? 'host' : computerImage;
     const scope = { threadId: state.threadId, runId: state.runId };
     try {
@@ -259,11 +306,11 @@ export function createHarness(deps: HarnessDeps): Harness {
         await setComputerState(bot, image, scope, { state: 'starting' });
       }
       const computer = await provider.ensure(bot, {
-        extraHosts: modelHostsFor(bot.engine),
+        extraHosts,
         onBlocked: (host) => reportBlocked(state, bot.id, host),
       });
       await setComputerState(bot, image, scope, { state: 'ready' });
-      return { computer, mcpBaseUrl: provider.internalEndpoint().url };
+      return { computer, brotBaseUrl: provider.internalEndpoint().url };
     } catch (error) {
       const message = errorMessage(error);
       await setComputerState(bot, image, scope, { state: 'error', error: message });
@@ -319,13 +366,8 @@ export function createHarness(deps: HarnessDeps): Harness {
         await bus.publish({ type: 'tool.result', threadId, runId, callId: event.callId, ok: event.ok, output: event.output });
         return;
       case 'usage':
-        state.usage.tokensIn += event.tokensIn;
-        state.usage.tokensOut += event.tokensOut;
-        state.usage.costUsd += event.costUsd;
-        chains.recordUsage(runId, event.costUsd);
-        await repos.runs.update(runId, { ...state.usage });
-        // cost.updated carries run totals, matching what the run row stores.
-        await bus.publish({ type: 'cost.updated', threadId, runId, ...state.usage });
+        // A relayed run is counted from the relay, which sees every provider response.
+        if (!state.relayed) await recordUsage(state, event);
         return;
       case 'memory': {
         const memory = await repos.memories.create(bot.id, {
@@ -344,6 +386,17 @@ export function createHarness(deps: HarnessDeps): Harness {
         }
         return;
     }
+  }
+
+  /** Adds one usage report to the run's totals, then publishes the totals. `cost.updated` carries run totals. */
+  async function recordUsage(state: ActiveRun, usage: RunUsage): Promise<void> {
+    const { threadId, runId } = state;
+    state.usage.tokensIn += usage.tokensIn;
+    state.usage.tokensOut += usage.tokensOut;
+    state.usage.costUsd += usage.costUsd;
+    chains.recordUsage(runId, usage.costUsd);
+    await repos.runs.update(runId, { ...state.usage });
+    await bus.publish({ type: 'cost.updated', threadId, runId, ...state.usage });
   }
 
   async function complete(state: ActiveRun): Promise<void> {
@@ -367,6 +420,7 @@ export function createHarness(deps: HarnessDeps): Harness {
     state.error = error;
     const { threadId, runId } = state;
     mcp?.endRun(runId);
+    llm.revoke(runId);
     try {
       await repos.runs.update(runId, { status, endedAt: new Date().toISOString(), error });
       if (status === 'completed') {
@@ -447,4 +501,9 @@ function outcomeOf(state: ActiveRun): BotRunOutcome {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** A stable, opaque id for one bot's conversation in one thread. Providers see this, never the raw ids. */
+function conversationId(threadId: string, botId: string): string {
+  return createHash('sha256').update(`${threadId}:${botId}`).digest('base64url').slice(0, 32);
 }

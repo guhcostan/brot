@@ -29,6 +29,7 @@ export interface TestContextOptions {
   computers?: ServiceExtras['computers'];
   mcp?: ServiceExtras['mcp'];
   team?: ServiceExtras['team'];
+  llm?: ServiceExtras['llm'];
   mode?: ServerMode;
 }
 
@@ -59,6 +60,7 @@ export async function createTestContext(options: TestContextOptions = {}): Promi
     computers: options.computers ?? defaultComputers(),
     mcp: options.mcp,
     team: options.team,
+    llm: options.llm,
   });
   const deps = { ...services, config: { host: config.host, port: config.port, mode: config.mode } };
   return {

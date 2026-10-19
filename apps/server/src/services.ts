@@ -5,6 +5,16 @@ import { createEventBus, type EventBus } from './bus';
 import type { ServerConfig } from './config';
 import type { ComputerProvider } from './computers/types';
 import { createHarness, type ComputerProviders, type Harness } from './harness';
+import {
+  createLlmRelay,
+  createProviderRegistry,
+  loadProviderFile,
+  mergeProviders,
+  SEEDED_PROVIDERS,
+  type FetchLike,
+  type LlmRelay,
+  type ProviderSpec,
+} from './llm';
 import type { BrotMcpService, BrotTool } from './mcp/types';
 import { createPairing, type Pairing } from './pairing';
 import { createChainLedger, type ChainLedger } from './rooms/chains';
@@ -27,12 +37,20 @@ export interface McpCore {
   tools: BrotTool[];
 }
 
+/** Model relay options. Providers here override the seeded ones and `providers.json` by id. */
+export interface LlmOptions {
+  providers?: ProviderSpec[];
+  /** Outbound HTTP for the relay. Tests inject a fake upstream. */
+  fetch?: FetchLike;
+}
+
 /** Optional contained-run services. Absent ones leave `computer: 'sandbox'` runs failing and `none` runs without MCP. */
 export interface ServiceExtras {
   computers?: ComputerProviders;
   mcp?: (core: McpCore) => BrotMcpService;
   /** Team tools (`ask_bot`, `delegate_task`, `update_my_task`, `handoff`, `list_team`), registered on the Brot MCP server. */
   team?: (deps: TeamDeps) => BrotTool[];
+  llm?: LlmOptions;
 }
 
 export interface Services {
@@ -48,6 +66,8 @@ export interface Services {
   pairing: Pairing;
   computers: ComputerProviders;
   mcp: BrotMcpService | undefined;
+  /** Relays contained runs' model requests to their providers, adding the key from the vault. */
+  llm: LlmRelay;
   rooms: RoomService;
   tasks: TaskService;
   teamRunner: TeamRunnerService;
@@ -89,6 +109,16 @@ export async function createServices(
       onHandoff: (threadId, toBotId) => rooms.setBaton(threadId, toBotId),
     }) ?? [];
   const mcp = extras.mcp?.({ repos, bus, broker, vault, tools: teamTools });
+  const providers = mergeProviders(
+    SEEDED_PROVIDERS,
+    await loadProviderFile(config.providersFile),
+    extras.llm?.providers ?? [],
+  );
+  const llm = createLlmRelay({
+    vault,
+    providers: createProviderRegistry(providers),
+    ...(extras.llm?.fetch === undefined ? {} : { fetch: extras.llm.fetch }),
+  });
   const harness = createHarness({
     repos,
     bus,
@@ -96,6 +126,7 @@ export async function createServices(
     engines,
     computers,
     mcp,
+    llm,
     mode: config.mode,
     computerImage: config.computerImage,
     loopbackUrl: () => `http://127.0.0.1:${config.port}`,
@@ -133,6 +164,7 @@ export async function createServices(
     pairing,
     computers,
     mcp,
+    llm,
     rooms,
     tasks,
     teamRunner,

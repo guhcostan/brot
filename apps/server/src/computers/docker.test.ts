@@ -99,8 +99,11 @@ describe.skipIf(!imagesBuilt)('docker provider against a real daemon', () => {
     try {
       const handle = await provider.ensure(botFor(botId), { extraHosts: [], onBlocked: (host) => blocked.push(host) });
       expect((await run(handle, ['sh', '-c', 'echo ready'])).trim()).toBe('ready');
-      expect((await run(handle, ['sh', '-c', 'curl -sS --max-time 5 http://1.1.1.1/ >/dev/null 2>&1; echo $?'])).trim()).not.toBe('0');
-      expect((await run(handle, ['sh', '-c', 'curl -sS --max-time 8 https://denied.example/ >/dev/null 2>&1; echo $?'])).trim()).not.toBe('0');
+      // Without the proxy there is no route out at all.
+      expect((await run(handle, ['sh', '-c', 'curl -sS --noproxy "*" --max-time 5 http://1.1.1.1/ >/dev/null 2>&1; echo $?'])).trim()).not.toBe('0');
+      // Through the proxy, an IP literal is refused (curl -f turns the 403 into a failure).
+      expect((await run(handle, ['sh', '-c', 'curl -sSf --max-time 5 http://1.1.1.1/ >/dev/null 2>&1; echo $?'])).trim()).not.toBe('0');
+      expect((await run(handle, ['sh', '-c', 'curl -sSf --max-time 8 https://denied.example/ >/dev/null 2>&1; echo $?'])).trim()).not.toBe('0');
       await waitFor(() => blocked.includes('denied.example'), 15_000);
     } finally {
       await provider.stop(botId);

@@ -70,6 +70,20 @@ export interface ComputerHandle {
   exec(cmd: string[], opts?: ComputerExecOptions): Promise<ComputerProcess>;
 }
 
+/** A provider route as the engine sees it: Brot's relay, never the provider itself. */
+export interface LlmRoute {
+  /** Provider id in the engine's catalog, e.g. `opencode-go`. */
+  provider: string;
+  /** Model id within that provider, e.g. `deepseek-v4.1-flash`. */
+  model: string;
+  /** Wire protocol the relay speaks, matching the provider's (e.g. `openai-completions`). */
+  api: 'openai-completions' | 'openai-responses' | 'anthropic-messages';
+  /** Relay base URL as seen from where the engine runs, e.g. `http://brot-egress:8799/llm/runs/<runId>/v1`. */
+  baseUrl: string;
+  /** Per-run bearer token for the relay. Not a provider key. */
+  token: string;
+}
+
 export interface RunContext {
   runId: string;
   threadId: string;
@@ -88,6 +102,11 @@ export interface RunContext {
   computer?: ComputerHandle;
   /** MCP servers the engine must attach, typically the Brot MCP server that exposes `BrotToolSpec` tools. */
   mcpServers?: McpServerSpec[];
+  /**
+   * Where the engine sends model requests. The Brot server relays them to the provider and adds the real
+   * key from the vault, so the key never reaches the engine or its computer. `token` is bound to this run.
+   */
+  llm?: LlmRoute;
   /** Every risky action must be requested here; the permission broker decides (may block awaiting a human). */
   requestTool(req: ToolRequest): Promise<ToolDecision>;
 }

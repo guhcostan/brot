@@ -4,6 +4,7 @@ import type { ComputerHandle, CanonicalEvent, EngineDriver, EngineEvent, McpServ
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ApprovalScope } from './broker';
 import type { ComputerProvider } from './computers/types';
+import type { ProviderSpec } from './llm';
 import type { BrotMcpService } from './mcp/types';
 import { createTestContext, recordEvents, waitUntil, type TestContext } from './testing';
 
@@ -13,8 +14,25 @@ afterEach(async () => {
   await Promise.all(contexts.splice(0).map((ctx) => ctx.close()));
 });
 
+/** The provider the test DSH bots use. Its key is set on every test context. */
+const FAKE_PROVIDER: ProviderSpec = {
+  id: 'fake',
+  api: 'openai-completions',
+  baseUrl: 'https://fake.example/v1',
+  secretName: 'fake',
+};
+
+/** Tests that never reach a provider get this fetch, so an accidental call fails loudly. */
+async function refuseFetch(): Promise<Response> {
+  throw new Error('the harness tests do not reach a provider');
+}
+
 async function contextWith(options: Parameters<typeof createTestContext>[0] = {}): Promise<TestContext> {
-  const ctx = await createTestContext(options);
+  const ctx = await createTestContext({
+    ...options,
+    llm: { providers: [FAKE_PROVIDER], fetch: refuseFetch, ...options.llm },
+  });
+  await ctx.services.vault.set('fake', 'sk-harness-test');
   contexts.push(ctx);
   return ctx;
 }
@@ -99,13 +117,18 @@ function fakeMcp(): FakeMcp {
   return fake;
 }
 
-async function botAndThread(ctx: TestContext, overrides: { computer?: 'none' | 'sandbox' | 'host'; engine?: string; hostAcknowledged?: boolean } = {}) {
+/** A bot on `dsh` by default, with a model on the fake provider. `model: null` gives a bot with no model. */
+async function botAndThread(
+  ctx: TestContext,
+  overrides: { computer?: 'none' | 'sandbox' | 'host'; engine?: string; hostAcknowledged?: boolean; model?: string | null } = {},
+) {
   const bot = await ctx.services.repos.bots.create({
     name: 'Ada',
     job: 'Testing',
     engine: overrides.engine ?? 'dsh',
     computer: overrides.computer ?? 'none',
     hostAcknowledged: overrides.hostAcknowledged,
+    ...(overrides.model === null ? {} : { model: overrides.model ?? 'fake/model-1' }),
   });
   const thread = await ctx.services.repos.threads.create(bot.id);
   return { bot, threadId: thread.id };
@@ -222,7 +245,7 @@ describe('contained runs: placement', () => {
 });
 
 describe('contained runs: computer state and egress', () => {
-  it('starts a sandbox computer with the DSH model hosts and reports its state', async () => {
+  it('starts a sandbox computer with no model hosts, since the model goes through the relay', async () => {
     const engine = fakeEngine(replies);
     const sandbox = fakeProvider('docker');
     const ctx = await contextWith({
@@ -234,9 +257,7 @@ describe('contained runs: computer state and egress', () => {
     const { terminal, events } = await runToEnd(ctx, threadId);
 
     expect(terminal.type).toBe('run.completed');
-    expect(sandbox.ensures).toEqual([
-      expect.objectContaining({ botId: bot.id, extraHosts: ['api.deepseek.com'] }),
-    ]);
+    expect(sandbox.ensures).toEqual([expect.objectContaining({ botId: bot.id, extraHosts: [] })]);
     expect(engine.contexts[0]?.computer).toEqual(expect.objectContaining({ id: 'docker-computer' }));
     expect(await ctx.services.repos.computers.getByBot(bot.id)).toMatchObject({ state: 'ready', image: 'brot-computer:latest' });
     expect(
@@ -483,3 +504,161 @@ describe('services shutdown', () => {
   });
 });
 
+
+describe('model relay for DSH runs', () => {
+  it('gives a run on a sandbox computer a route through the computer endpoint, bound to the run token', async () => {
+    const engine = fakeEngine(replies);
+    const sandbox = fakeProvider('docker');
+    const ctx = await contextWith({
+      engines: createEngineRegistry([engine.driver]),
+      computers: { sandbox: sandbox.provider },
+    });
+    const { threadId } = await botAndThread(ctx, { computer: 'sandbox' });
+
+    const { runId, terminal } = await runToEnd(ctx, threadId);
+
+    expect(terminal.type).toBe('run.completed');
+    expect(engine.contexts[0]?.llm).toEqual({
+      provider: 'fake',
+      model: 'model-1',
+      api: 'openai-completions',
+      baseUrl: `http://host.docker.internal:8799/llm/runs/${runId}/v1`,
+      token: expect.any(String),
+    });
+  });
+
+  it('routes a computer-less run through the loopback server', async () => {
+    const engine = fakeEngine(replies);
+    const ctx = await contextWith({ engines: createEngineRegistry([engine.driver]) });
+    const { threadId } = await botAndThread(ctx, { computer: 'none' });
+
+    const { runId } = await runToEnd(ctx, threadId);
+
+    expect(engine.contexts[0]?.llm?.baseUrl).toMatch(new RegExp(`^http://127\\.0\\.0\\.1:\\d+/llm/runs/${runId}/v1$`));
+  });
+
+  it('relays the engine model calls, sends the key upstream, and counts their usage as cost', async () => {
+    const upstreamCalls: Array<{ url: string; authorization: string | null }> = [];
+    let ctx!: TestContext;
+    const engine = fakeEngine(async function* (run) {
+      const route = run.llm;
+      if (route === undefined) throw new Error('the run has no llm route');
+      const path = `${new URL(route.baseUrl).pathname}/chat/completions`;
+      const res = await ctx.services.llm.route.request(path, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${route.token}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ model: route.model, messages: [] }),
+      });
+      // Usage is reported when the body ends, so the engine reads it, as a real client does.
+      yield { type: 'text.delta', delta: `${res.status} ${await res.text()}` };
+      // A relayed run is counted from the relay, so this engine usage must not be added.
+      yield { type: 'usage', tokensIn: 999, tokensOut: 999, costUsd: 9 };
+    });
+    ctx = await contextWith({
+      engines: createEngineRegistry([engine.driver]),
+      llm: {
+        providers: [{ ...FAKE_PROVIDER, models: [{ id: 'model-1', cost: { input: 1, output: 2 } }] }],
+        fetch: async (url, init) => {
+          upstreamCalls.push({ url, authorization: new Headers(init.headers).get('authorization') });
+          return Response.json({ usage: { prompt_tokens: 10, completion_tokens: 5 } });
+        },
+      },
+    });
+    const { threadId } = await botAndThread(ctx, { computer: 'none' });
+
+    const { runId, terminal, events } = await runToEnd(ctx, threadId);
+
+    expect(terminal.type).toBe('run.completed');
+    expect(upstreamCalls).toEqual([{ url: 'https://fake.example/v1/chat/completions', authorization: 'Bearer sk-harness-test' }]);
+    const costs = events.filter((event) => event.type === 'cost.updated');
+    expect(costs).toHaveLength(1);
+    expect(costs[0]).toMatchObject({ runId, tokensIn: 10, tokensOut: 5 });
+    expect(costs[0]?.type === 'cost.updated' && costs[0].costUsd).toBeCloseTo(0.00002, 12);
+    expect(await ctx.services.repos.runs.get(runId)).toMatchObject({ tokensIn: 10, tokensOut: 5 });
+  });
+
+  it('accepts the run token while the run is live and refuses it once the run ends', async () => {
+    let ctx!: TestContext;
+    let liveStatus = 0;
+    const engine = fakeEngine(async function* (run) {
+      const route = run.llm;
+      if (route === undefined) throw new Error('the run has no llm route');
+      const res = await ctx.services.llm.route.request(`${new URL(route.baseUrl).pathname}/models`, {
+        headers: { authorization: `Bearer ${route.token}` },
+      });
+      liveStatus = res.status;
+      yield { type: 'text.delta', delta: 'ok' };
+    });
+    ctx = await contextWith({
+      engines: createEngineRegistry([engine.driver]),
+      llm: { fetch: async () => Response.json({ data: [] }) },
+    });
+    const { threadId } = await botAndThread(ctx, { computer: 'none' });
+
+    const { runId } = await runToEnd(ctx, threadId);
+    const token = engine.contexts[0]?.llm?.token ?? '';
+    const after = await ctx.services.llm.route.request(`/llm/runs/${runId}/v1/models`, {
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(liveStatus).toBe(200);
+    expect(after.status).toBe(401);
+  });
+
+  it('serves the relay to a remote caller that presents only the run token', async () => {
+    const ctx = await contextWith({ llm: { fetch: async () => Response.json({ data: [] }) } });
+    const token = ctx.services.llm.issue('run-remote', await ctx.services.llm.resolve('fake/model-1'));
+
+    const served = await ctx.remote.request('/llm/runs/run-remote/v1/models', { headers: { authorization: `Bearer ${token}` } });
+    const refused = await ctx.remote.request('/llm/runs/run-remote/v1/models');
+
+    expect(served.status).toBe(200);
+    expect(refused.status).toBe(401);
+  });
+
+  it('fails the run before any computer starts when the bot has no model', async () => {
+    const engine = fakeEngine(replies);
+    const sandbox = fakeProvider('docker');
+    const ctx = await contextWith({
+      engines: createEngineRegistry([engine.driver]),
+      computers: { sandbox: sandbox.provider },
+    });
+    const { threadId } = await botAndThread(ctx, { computer: 'sandbox', model: null });
+
+    const { terminal } = await runToEnd(ctx, threadId);
+
+    expect(terminal.type === 'run.failed' && terminal.error).toContain('has no model');
+    expect(sandbox.ensures).toEqual([]);
+    expect(engine.contexts).toEqual([]);
+  });
+
+  it('fails the run, naming the secret and how to add it, when the vault lacks the provider key', async () => {
+    const engine = fakeEngine(replies);
+    const sandbox = fakeProvider('docker');
+    const ctx = await contextWith({
+      engines: createEngineRegistry([engine.driver]),
+      computers: { sandbox: sandbox.provider },
+    });
+    await ctx.services.vault.delete('fake');
+    const { threadId } = await botAndThread(ctx, { computer: 'sandbox' });
+
+    const { terminal } = await runToEnd(ctx, threadId);
+
+    expect(terminal.type === 'run.failed' && terminal.error).toContain('secret://fake');
+    expect(terminal.type === 'run.failed' && terminal.error).toContain('PUT /api/secrets/fake');
+    expect(sandbox.ensures).toEqual([]);
+    expect(engine.contexts).toEqual([]);
+  });
+
+  it('fails the run when the model names a provider that is not configured', async () => {
+    const engine = fakeEngine(replies);
+    const ctx = await contextWith({ engines: createEngineRegistry([engine.driver]) });
+    const { bot, threadId } = await botAndThread(ctx, { computer: 'none' });
+    await ctx.services.repos.bots.update(bot.id, { model: 'nope/model-1' });
+
+    const { terminal } = await runToEnd(ctx, threadId);
+
+    expect(terminal.type === 'run.failed' && terminal.error).toContain('Unknown model provider "nope"');
+    expect(engine.contexts).toEqual([]);
+  });
+});

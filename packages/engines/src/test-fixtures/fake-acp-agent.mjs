@@ -131,6 +131,9 @@ async function handlePrompt(id, params) {
     case 'argv':
       say(`argv=${JSON.stringify(process.argv.slice(2))}`);
       return respond(id, { stopReason: 'end_turn' });
+    case 'env':
+      say(`token=${process.env.BROT_LLM_TOKEN ?? 'none'} pid=${process.pid} session=${sessionId}`);
+      return respond(id, { stopReason: 'end_turn' });
     case 'error':
       return fail(id, -32603, 'model unavailable');
     case 'malformed':

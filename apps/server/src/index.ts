@@ -23,6 +23,8 @@ export interface StartOptions extends ConfigOverrides {
   mcp?: ServiceExtras['mcp'];
   /** Team tools for bots in rooms and tasks, registered on the Brot MCP server. Absent: the built-in team tools. */
   team?: ServiceExtras['team'];
+  /** Model relay options: extra providers and the outbound HTTP. Absent: seeded providers and `providers.json`. */
+  llm?: ServiceExtras['llm'];
 }
 
 export interface ServerHandle {
@@ -35,7 +37,7 @@ export interface ServerHandle {
 
 /** Starts the API and the webhook receiver. Pass port 0 to let the OS choose a free port. */
 export async function startServer(options: StartOptions = {}): Promise<ServerHandle> {
-  const { engines: engineOverride, computers, mcp, team, ...overrides } = options;
+  const { engines: engineOverride, computers, mcp, team, llm, ...overrides } = options;
   const config = loadConfig(process.env, overrides);
   const services = await createServices(config, engineOverride ?? createEngineRegistry(defaultEngines()), {
     computers: computers ?? {
@@ -46,6 +48,7 @@ export async function startServer(options: StartOptions = {}): Promise<ServerHan
     },
     mcp: mcp ?? createBrotMcp,
     team: team ?? createTeamTools,
+    llm,
   });
 
   await seedFirstBot(services.repos);

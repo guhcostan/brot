@@ -4,7 +4,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Readable, Writable } from 'node:stream';
-import type { ComputerHandle, ComputerProcess, EngineEvent, McpServerSpec, RunContext } from '@brot/protocol';
+import type {
+  ComputerHandle,
+  ComputerProcess,
+  EngineEvent,
+  LlmRoute,
+  McpServerSpec,
+  RunContext,
+} from '@brot/protocol';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   createDshEngine,
@@ -16,6 +23,7 @@ import {
   type DshEngine,
   type DshEngineOptions,
 } from './dsh';
+import { DIRECT_PROVIDER_ROWS, llmOverlay } from './dsh-llm';
 import { collect, makeContext, type TestContextOptions } from './test-utils';
 
 const FAKE_AGENT = fileURLToPath(new URL('./test-fixtures/fake-acp-agent.mjs', import.meta.url));
@@ -81,7 +89,10 @@ interface FakeComputer {
   kills: string[];
 }
 
-/** A computer whose `dsh` is the fake ACP agent, started as a local process so the stdio is real. */
+/**
+ * A computer whose `dsh` is the fake ACP agent and whose `sh` is the real shell, each started as a local
+ * process so the stdio is real.
+ */
 function fakeComputer(): FakeComputer {
   const execs: FakeComputer['execs'] = [];
   const kills: string[] = [];
@@ -90,8 +101,11 @@ function fakeComputer(): FakeComputer {
     async exec(cmd, opts) {
       execs.push({ cmd, env: opts?.env });
       const [file, ...args] = cmd;
-      if (file !== 'dsh') throw new Error(`unexpected program ${file ?? ''}`);
-      const child = spawn(process.execPath, [FAKE_AGENT, ...args], { stdio: ['pipe', 'pipe', 'pipe'] });
+      if (file !== 'dsh' && file !== 'sh') throw new Error(`unexpected program ${file ?? ''}`);
+      const child =
+        file === 'dsh'
+          ? spawn(process.execPath, [FAKE_AGENT, ...args], { stdio: ['pipe', 'pipe', 'pipe'] })
+          : spawn('sh', args, { stdio: ['pipe', 'pipe', 'pipe'] });
       const proc: ComputerProcess = {
         stdin: Writable.toWeb(child.stdin) as WritableStream<Uint8Array>,
         stdout: Readable.toWeb(child.stdout) as ReadableStream<Uint8Array>,
@@ -561,6 +575,164 @@ describe('dsh engine without a computer', () => {
       );
       const states = rowStates(dump);
       for (const id of NO_TOOL_ROWS) expect(states.get(id), id).toBe('disabled');
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+});
+
+/** A relay route for the fake agent, whose catalog holds `fake/alpha` and `fake/beta`. */
+function routeFor(token: string, model = 'beta'): LlmRoute {
+  return {
+    provider: 'fake',
+    model,
+    api: 'openai-completions',
+    baseUrl: 'http://brot-relay.test/llm/runs/run_1/v1',
+    token,
+  };
+}
+
+/** The route of the pinned DeepSeek profile, which lists the model in its own catalog. */
+const PINNED_ROUTE: LlmRoute = {
+  provider: 'opencode-go',
+  model: 'deepseek-v4.1-flash',
+  api: 'openai-completions',
+  baseUrl: 'http://brot-relay.test/llm/runs/run_1/v1',
+  token: 'relay-token-pinned',
+};
+
+function argvOf(events: EngineEvent[]): string[] {
+  return JSON.parse(/argv=(.*)/.exec(textOf(events))?.[1] ?? 'null') as string[];
+}
+
+/** Parses `token=<token> pid=<pid> session=<id>` from the fake agent's env scenario. */
+function envOf(events: EngineEvent[]): { token: string; pid: string; session: string } {
+  const match = /token=(\S+) pid=(\d+) session=(\S+)/.exec(textOf(events));
+  if (match === null) throw new Error(`no env report in ${JSON.stringify(textOf(events))}`);
+  const [, token = '', pid = '', session = ''] = match;
+  return { token, pid, session };
+}
+
+/** The trimmed lines one `--patch` overlay contributed to a `dsh --dump-config` tree, in every layer. */
+function overlayLines(dump: string, overlay: string): string[] {
+  const lines: string[] = [];
+  let inOverlay = false;
+  for (const line of dump.split('\n')) {
+    if (line.startsWith('# ==')) {
+      inOverlay = line.endsWith(overlay);
+      continue;
+    }
+    if (inOverlay) lines.push(line.trim());
+  }
+  return lines;
+}
+
+describe('dsh engine with a relay route', () => {
+  it('runs locally with the no-tools overlay and the route overlay, and the run token in its env', async () => {
+    const engine = engineFor();
+    const { ctx } = makeContext({ input: 'argv now', llm: routeFor('token-a') });
+    const args = argvOf(await collect(engine.run(ctx)));
+    const routePatch = args[args.lastIndexOf('--patch') + 1] ?? '';
+
+    expect(args.slice(0, 6).filter((arg) => arg === '--patch')).toHaveLength(2);
+    expect(readFileSync(routePatch, 'utf8')).toBe(llmOverlay(routeFor('token-a')));
+    const env = await collect(engine.run(makeContext({ input: 'env now', llm: routeFor('token-a') }).ctx));
+    expect(envOf(env)).toMatchObject({ token: 'token-a' });
+  });
+
+  it('sends the run through the route model whatever model the bot names', async () => {
+    const engine = engineFor();
+    const events = await collect(
+      engine.run(makeContext({ input: 'echo hi', bot: { model: 'fake/alpha' }, llm: routeFor('token-a') }).ctx),
+    );
+
+    expect(echoOf(events).model).toBe('["fake","beta"]');
+  });
+
+  it('fails a routed run whose route model the agent does not offer', async () => {
+    const { ctx } = makeContext({ input: 'echo hi', llm: routeFor('token-a', 'gamma') });
+    await expect(collect(engineFor().run(ctx))).rejects.toThrow('does not offer model fake/gamma');
+  });
+
+  it('restarts the process when the run token changes and resumes the session by id', async () => {
+    const engine = engineFor();
+    const first = await collect(engine.run(makeContext({ input: 'env one', llm: routeFor('token-a') }).ctx));
+    const sessionId = sessionOf(first);
+
+    const second = await collect(
+      engine.run(makeContext({ input: 'env two', engineSessionId: sessionId, llm: routeFor('token-b') }).ctx),
+    );
+    expect(sessionOf(second)).toBeUndefined();
+    expect(envOf(second)).toMatchObject({ token: 'token-b', session: sessionId });
+    expect(envOf(second).pid).not.toBe(envOf(first).pid);
+
+    const third = await collect(
+      engine.run(makeContext({ input: 'env three', engineSessionId: sessionId, llm: routeFor('token-b') }).ctx),
+    );
+    expect(envOf(third)).toMatchObject({ token: 'token-b', pid: envOf(second).pid, session: sessionId });
+  });
+
+  it('restarts without the token when a later run has no route, and keeps the session', async () => {
+    const engine = engineFor();
+    const routed = await collect(engine.run(makeContext({ input: 'env one', llm: routeFor('token-a') }).ctx));
+    const sessionId = sessionOf(routed);
+
+    const plain = await collect(engine.run(makeContext({ input: 'env two', engineSessionId: sessionId }).ctx));
+    expect(envOf(plain)).toMatchObject({ token: 'none', session: sessionId });
+    expect(envOf(plain).pid).not.toBe(envOf(routed).pid);
+  });
+
+  it('starts a routed computer run by writing the overlay into the computer and passing the token', async () => {
+    const computer = fakeComputer();
+    const events = await collect(
+      engineFor().run(makeContext({ input: 'argv inside', computer: computer.handle, llm: routeFor('token-a') }).ctx),
+    );
+    const [writer, launch] = computer.execs;
+    const overlay = argvOf(events).at(-1) ?? '';
+
+    expect(writer?.cmd).toEqual(['sh', '-c', 'umask 077 && cat > "$1"', 'sh', overlay]);
+    expect(launch?.cmd).toEqual(['dsh', '--profile', 'acp', '--patch', overlay]);
+    expect(launch?.env).toEqual({ DSH_TELEMETRY_DISABLED: '1', BROT_LLM_TOKEN: 'token-a' });
+    expect(readFileSync(overlay, 'utf8')).toBe(llmOverlay(routeFor('token-a')));
+    rmSync(overlay, { force: true });
+  });
+
+  it('makes the pinned DeepSeek profile send model requests to the relay and disables direct provider rows', () => {
+    const launcher = pinnedDshCommand();
+    if (launcher === undefined) return;
+    const home = mkdtempSync(join(tmpdir(), 'brot-dsh-llm-profile-'));
+    try {
+      const noTools = join(home, 'no-tools.patch.yml');
+      const overlay = join(home, 'llm.patch.yml');
+      writeFileSync(noTools, NO_TOOLS_PATCH);
+      writeFileSync(overlay, llmOverlay(PINNED_ROUTE));
+      const dump = execFileSync(
+        launcher.file,
+        [...(launcher.args ?? []), '--profile', 'acp', '--patch', noTools, '--patch', overlay, '--dump-config'],
+        {
+          encoding: 'utf8',
+          timeout: 60_000,
+          env: { ...process.env, DSH_HOME: join(home, 'dsh'), DSH_TELEMETRY_DISABLED: '1' },
+        },
+      );
+
+      const lines = overlayLines(dump, overlay);
+      expect(lines).toEqual(
+        expect.arrayContaining([
+          '- id: llm-pi-ai',
+          'providers:',
+          'opencode-go:',
+          'api: openai-completions',
+          `baseURL: ${PINNED_ROUTE.baseUrl}`,
+          'apiKeyEnv: BROT_LLM_TOKEN',
+          '- id: deepseek-v4.1-flash',
+          'provider: opencode-go',
+          'model: deepseek-v4.1-flash',
+        ]),
+      );
+      const states = rowStates(dump);
+      expect(states.get('llm-pi-ai')).toBe('enabled');
+      for (const id of DIRECT_PROVIDER_ROWS) expect(states.get(id), id).toBe('disabled');
     } finally {
       rmSync(home, { recursive: true, force: true });
     }

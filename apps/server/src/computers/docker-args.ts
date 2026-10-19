@@ -150,8 +150,11 @@ export function buildComputerRunArgs(input: {
     '--user',
     COMPUTER_USER,
     '--read-only',
+    // Docker mounts tmpfs noexec by default. DSH's native addon loader (0.2.1-rc.2) copies its .node
+    // bindings into /tmp and dlopens them there, so /tmp must allow exec. The agent already has a shell,
+    // so noexec here was not a boundary; containment is the network, dropped caps and the read-only root.
     '--tmpfs',
-    '/tmp:rw,nosuid,nodev,size=512m,mode=1777',
+    '/tmp:rw,exec,nosuid,nodev,size=512m,mode=1777',
     '--tmpfs',
     `${HOME_PATH}:rw,nosuid,nodev,size=512m,uid=${COMPUTER_UID},gid=${COMPUTER_UID},mode=0700`,
     '--mount',

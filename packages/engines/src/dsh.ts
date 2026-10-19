@@ -1,5 +1,6 @@
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -23,6 +24,7 @@ import type {
   EngineAvailability,
   EngineDriver,
   EngineEvent,
+  LlmRoute,
   McpServerSpec,
   ModelInfo,
   RunContext,
@@ -47,6 +49,7 @@ import {
   updateEvents,
   usageEvents,
 } from './dsh-protocol';
+import { llmLaunchKey, llmOverlay, LLM_TOKEN_ENV, routeModelId } from './dsh-llm';
 import { buildPrompt } from './prompt';
 
 const LABEL = 'DeepSeek Harness';
@@ -62,6 +65,9 @@ const STDERR_SHOWN_CHARS = 500;
 const PATCH_FILE = 'no-tools.patch.yml';
 
 /** Hosts the DeepSeek model route calls. A contained computer must reach them to run DSH at all. */
+/** Where `images/computer` mounts the bot's persistent workspace. */
+const COMPUTER_WORKSPACE = '/workspace';
+
 export const DSH_MODEL_HOSTS: readonly string[] = ['api.deepseek.com'];
 
 /**
@@ -141,7 +147,8 @@ type Placement = { kind: 'local' } | { kind: 'computer'; computer: ComputerHandl
 const LOCAL: Placement = { kind: 'local' };
 
 interface ServerProcess {
-  placement: string;
+  /** Placement and relay route the process was started with. A run with other ones gets a new process. */
+  key: string;
   launched: Launched;
   connection: ClientConnection;
   resumable: boolean;
@@ -215,8 +222,9 @@ export function pinnedDshCommand(): DshCommand | undefined {
  * Drives DeepSeek Harness through its ACP server (`dsh --profile acp`). Each bot in each Brot thread
  * gets its own server process and one DSH session, both kept in memory while the process is alive.
  * A run with a computer executes DSH inside it; a run without one executes DSH locally with every
- * tool row disabled. When a process dies or is stopped, the next run of that bot in that thread
- * starts a new one and resumes the bot's session by its engine session id.
+ * tool row disabled. A run with a `llm` route sends its model requests to Brot's relay, and its process
+ * restarts when the route or its token changes. When a process dies or is stopped, the next run of that
+ * bot in that thread starts a new one and resumes the bot's session by its engine session id.
  */
 export function createDshEngine(opts: DshEngineOptions = {}): DshEngine {
   const command = opts.command ?? pinnedDshCommand();
@@ -312,51 +320,73 @@ export function createDshEngine(opts: DshEngineOptions = {}): DshEngine {
     }
   }
 
-  /** The no-tools overlay is written once per engine, into a private temporary directory. */
-  function noToolsPatchPath(): string {
-    if (patchDir === undefined) {
-      patchDir = mkdtempSync(join(tmpdir(), 'brot-dsh-'));
-      writeFileSync(join(patchDir, PATCH_FILE), NO_TOOLS_PATCH, { mode: 0o600 });
-    }
-    return join(patchDir, PATCH_FILE);
+  /** Overlays are written into one private temporary directory per engine, removed on close. */
+  function overlayDirectory(): string {
+    patchDir ??= mkdtempSync(join(tmpdir(), 'brot-dsh-'));
+    return patchDir;
   }
 
-  async function ensureServer(state: BotThreadState, placement: Placement): Promise<ServerProcess> {
-    const key = placementKey(placement);
+  /** The no-tools overlay is written once per overlay directory. */
+  function noToolsPatchPath(): string {
+    const path = join(overlayDirectory(), PATCH_FILE);
+    if (!existsSync(path)) writeFileSync(path, NO_TOOLS_PATCH, { mode: 0o600 });
+    return path;
+  }
+
+  /** A route's overlay is written for each local process: its route and token belong to that process. */
+  function llmPatchPath(llm: LlmRoute): string {
+    const path = join(overlayDirectory(), `llm-${randomUUID()}.patch.yml`);
+    writeFileSync(path, llmOverlay(llm), { mode: 0o600 });
+    return path;
+  }
+
+  async function ensureServer(
+    state: BotThreadState,
+    placement: Placement,
+    llm: LlmRoute | undefined,
+  ): Promise<ServerProcess> {
+    const key = serverKey(placement, llm);
     const current = state.server;
-    if (current !== undefined && isLive(current) && current.placement === key) return current;
+    if (current !== undefined && isLive(current) && current.key === key) return current;
     if (current !== undefined) {
       state.server = undefined;
       await stopServer(current);
     }
-    const server = await launch(state, placement);
+    const server = await launch(state, placement, llm);
     state.server = server;
     return server;
   }
 
-  async function startProcess(placement: Placement): Promise<Launched> {
+  async function startProcess(placement: Placement, llm: LlmRoute | undefined): Promise<Launched> {
     if (placement.kind === 'computer') {
-      const proc = await placement.computer.exec([COMPUTER_LAUNCHER, '--profile', ACP_PROFILE], {
-        env: computerEnv,
+      const launcher = [COMPUTER_LAUNCHER, '--profile', ACP_PROFILE];
+      if (llm === undefined) {
+        const proc = await placement.computer.exec(launcher, { env: computerEnv });
+        return fromComputer(proc);
+      }
+      const overlay = await writeComputerOverlay(placement.computer, llmOverlay(llm));
+      const proc = await placement.computer.exec([...launcher, '--patch', overlay], {
+        env: { ...computerEnv, [LLM_TOKEN_ENV]: llm.token },
       });
       return fromComputer(proc);
     }
     if (command === undefined) throw new Error(`${LABEL} (@deepseek-ai/dsh) is not installed`);
-    return spawnLocal(
-      {
-        file: command.file,
-        args: [...(command.args ?? []), '--profile', ACP_PROFILE, '--patch', noToolsPatchPath()],
-      },
-      env,
-    );
+    const args = [...(command.args ?? []), '--profile', ACP_PROFILE, '--patch', noToolsPatchPath()];
+    if (llm === undefined) return spawnLocal({ file: command.file, args }, env);
+    args.push('--patch', llmPatchPath(llm));
+    return spawnLocal({ file: command.file, args }, { ...env, [LLM_TOKEN_ENV]: llm.token });
   }
 
-  async function launch(state: BotThreadState, placement: Placement): Promise<ServerProcess> {
-    const launched = await startProcess(placement);
+  async function launch(
+    state: BotThreadState,
+    placement: Placement,
+    llm: LlmRoute | undefined,
+  ): Promise<ServerProcess> {
+    const launched = await startProcess(placement, llm);
     const tail = keepTail(launched.stderr);
     const connection = attach(state).connect(ndJsonStream(launched.stdin, protocolLines(launched.stdout)));
     const server: ServerProcess = {
-      placement: placementKey(placement),
+      key: serverKey(placement, llm),
       launched,
       connection,
       resumable: false,
@@ -403,6 +433,8 @@ export function createDshEngine(opts: DshEngineOptions = {}): DshEngine {
     mcpServers: AcpMcpServer[],
   ): Promise<string> {
     const mcpKey = JSON.stringify(mcpServers);
+    // Inside a computer the host path does not exist; the bot's workspace is the session root.
+    const sessionCwd = ctx.computer ? COMPUTER_WORKSPACE : cwd;
     const wanted = ctx.engineSessionId ?? state.sessionId;
     const open = state.sessionId !== undefined && state.sessionServer === server ? state.sessionId : undefined;
     if (open !== undefined && open === wanted && state.mcpKey === mcpKey) return open;
@@ -414,7 +446,7 @@ export function createDshEngine(opts: DshEngineOptions = {}): DshEngine {
     if (wanted !== undefined && server.resumable) {
       const resumed = await server.connection.agent.request(methods.agent.session.resume, {
         sessionId: wanted,
-        cwd,
+        cwd: sessionCwd,
         mcpServers,
       }).catch(() => undefined);
       if (resumed !== undefined) {
@@ -427,7 +459,7 @@ export function createDshEngine(opts: DshEngineOptions = {}): DshEngine {
       }
     }
 
-    const created = await server.connection.agent.request(methods.agent.session.new, { cwd, mcpServers });
+    const created = await server.connection.agent.request(methods.agent.session.new, { cwd: sessionCwd, mcpServers });
     state.sessionId = created.sessionId;
     state.sessionServer = server;
     state.mcpKey = mcpKey;
@@ -507,7 +539,7 @@ export function createDshEngine(opts: DshEngineOptions = {}): DshEngine {
     try {
       if (ctx.signal.aborted) return;
       const placement: Placement = ctx.computer === undefined ? LOCAL : { kind: 'computer', computer: ctx.computer };
-      const server = await untilAborted(ensureServer(state, placement), ctx.signal);
+      const server = await untilAborted(ensureServer(state, placement, ctx.llm), ctx.signal);
       if (server === undefined) return;
       const mcpServers = (ctx.mcpServers ?? []).map(toAcpMcpServer);
       const sessionId = await untilAborted(ensureSession(state, server, ctx, mcpServers), ctx.signal);
@@ -516,7 +548,9 @@ export function createDshEngine(opts: DshEngineOptions = {}): DshEngine {
 
       const current = startRun(ctx, state, server, sessionId);
       run = current;
-      await untilAborted(applyModel(state, current, ctx.bot.model), ctx.signal);
+      // A routed run uses its route's model: the relay is the only provider the run may reach.
+      const model = ctx.llm === undefined ? ctx.bot.model : routeModelId(ctx.llm);
+      await untilAborted(applyModel(state, current, model), ctx.signal);
       if (ctx.signal.aborted) return;
 
       const text = state.primed ? ctx.input : buildPrompt(ctx);
@@ -591,6 +625,22 @@ function stateKey(threadId: string, botId: string): string {
 
 function placementKey(placement: Placement): string {
   return placement.kind === 'local' ? 'local' : `computer:${placement.computer.id}`;
+}
+
+function serverKey(placement: Placement, llm: LlmRoute | undefined): string {
+  return JSON.stringify([placementKey(placement), llm === undefined ? null : llmLaunchKey(llm)]);
+}
+
+/** Writes the relay overlay into the computer; DSH reads it once, when it boots. Returns its path there. */
+async function writeComputerOverlay(computer: ComputerHandle, overlay: string): Promise<string> {
+  const path = `/tmp/brot-dsh-llm-${randomUUID()}.patch.yml`;
+  const proc = await computer.exec(['sh', '-c', 'umask 077 && cat > "$1"', 'sh', path]);
+  const writer = proc.stdin.getWriter();
+  await writer.write(new TextEncoder().encode(overlay));
+  await writer.close();
+  const exit = await proc.exit;
+  if (exit.code !== 0) throw new Error(`could not write the relay overlay into the computer (${describeExit(exit)})`);
+  return path;
 }
 
 function spawnLocal(cmd: { file: string; args: string[] }, env: NodeJS.ProcessEnv): Launched {

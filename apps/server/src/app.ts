@@ -38,6 +38,7 @@ import type { Harness } from './harness';
 import { PairingError, type Pairing } from './pairing';
 import { cronError, type Scheduler } from './scheduler';
 import type { BrotMcpService } from './mcp/types';
+import type { LlmRelay } from './llm';
 import { RuleViolation } from './rooms/errors';
 import type { RoomService } from './rooms/service';
 import type { TaskService } from './rooms/tasks';
@@ -65,6 +66,8 @@ export interface AppDeps {
   trustLoopback?: boolean;
   /** The Brot MCP server. Its route authenticates each run's own token and is mounted outside `/api/*`. */
   mcp?: Pick<BrotMcpService, 'route'>;
+  /** The model relay. Its route authenticates each run's own token and is mounted outside `/api/*`. */
+  llm?: Pick<LlmRelay, 'route'>;
 }
 
 type Parsed<T> = { ok: true; data: T } | { ok: false; response: Response };
@@ -595,6 +598,7 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
   );
 
   if (deps.mcp) app.route('/', deps.mcp.route);
+  if (deps.llm) app.route('/', deps.llm.route);
 
   return app;
 }
