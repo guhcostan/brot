@@ -4,6 +4,8 @@ import { MAX_ROOM_BOTS, MIN_ROOM_BOTS } from './constants';
 import {
   ApprovalDecision,
   ComputerKind,
+  ComputerState,
+  Takeover,
   DeviceRole,
   IsoDateTime,
   MemoryKind,
@@ -279,3 +281,13 @@ export const SetTakeover = z.object({
   reason: z.string().max(500).optional(),
 });
 export type SetTakeover = z.infer<typeof SetTakeover>;
+
+/** What `GET /api/bots/:id/computer` returns: the computer's state, whether it has a screen, and who drives it. */
+export const ComputerInfo = z.object({
+  state: z.union([ComputerState, z.literal('none')]),
+  desktop: z.boolean(),
+  width: z.number().int().positive(),
+  height: z.number().int().positive(),
+  takeover: Takeover.nullable(),
+});
+export type ComputerInfo = z.infer<typeof ComputerInfo>;
