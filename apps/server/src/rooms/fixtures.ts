@@ -1,12 +1,12 @@
-import { createEngineRegistry } from '@brot/engines';
-import type { Bot, EngineDriver, Message, RunContext, Thread } from '@brot/protocol';
+import { createEngineRegistry, type BrotRunContext } from '@brot/engines';
+import type { Bot, EngineDriver, Message, Thread } from '@brot/protocol';
 import type { ComputerProviders } from '../harness';
 import { call, createTestContext, type TestContext } from '../testing';
 
 export interface Recording {
   driver: EngineDriver;
   /** Every run the engine was asked to play, in start order. */
-  runs: RunContext[];
+  runs: BrotRunContext[];
 }
 
 /**
@@ -15,13 +15,13 @@ export interface Recording {
  * after its session until it is cancelled, and never replies.
  */
 export function recordingEngine(options: { costUsd?: number; holdUntilCancelled?: boolean } = {}): Recording {
-  const runs: RunContext[] = [];
+  const runs: BrotRunContext[] = [];
   const driver: EngineDriver = {
     id: 'mock',
     label: 'Recording',
     detect: async () => ({ available: true }),
     models: async () => [],
-    async *run(ctx) {
+    async *run(ctx: BrotRunContext) {
       runs.push(ctx);
       yield { type: 'engine.session', sessionId: `session:${ctx.bot.name}:${ctx.threadId}` };
       if (options.holdUntilCancelled) {

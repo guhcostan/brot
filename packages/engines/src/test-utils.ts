@@ -5,10 +5,10 @@ import type {
   McpServerSpec,
   Memory,
   Message,
-  RunContext,
   ToolDecision,
   ToolRequest,
 } from '@brot/protocol';
+import type { BrotRunContext, PromptRoom } from './prompt';
 
 const AT = '2026-10-19T12:00:00.000Z';
 
@@ -37,11 +37,13 @@ export interface TestContextOptions {
   computer?: ComputerHandle;
   mcpServers?: McpServerSpec[];
   llm?: LlmRoute;
+  room?: PromptRoom;
+  teamTools?: boolean;
 }
 
-export function makeContext(opts: TestContextOptions = {}): { ctx: RunContext; requests: ToolRequest[] } {
+export function makeContext(opts: TestContextOptions = {}): { ctx: BrotRunContext; requests: ToolRequest[] } {
   const requests: ToolRequest[] = [];
-  const ctx: RunContext = {
+  const ctx: BrotRunContext = {
     runId: 'run_1',
     threadId: opts.threadId ?? 'thread_1',
     bot: { ...testBot, ...opts.bot },
@@ -54,6 +56,8 @@ export function makeContext(opts: TestContextOptions = {}): { ctx: RunContext; r
     computer: opts.computer,
     mcpServers: opts.mcpServers,
     llm: opts.llm,
+    room: opts.room,
+    teamTools: opts.teamTools,
     requestTool: async (req) => {
       requests.push(req);
       return opts.decide ? opts.decide(req) : { allowed: true };

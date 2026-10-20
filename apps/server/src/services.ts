@@ -17,7 +17,7 @@ import {
 } from './llm';
 import type { BrotMcpService, BrotTool } from './mcp/types';
 import { createPairing, type Pairing } from './pairing';
-import { createChainLedger, type ChainLedger } from './rooms/chains';
+import { createChainLedger, readRoomChainBudgetUsd, type ChainLedger } from './rooms/chains';
 import { createRoomService, type RoomService } from './rooms/service';
 import { createTaskService, type TaskService } from './rooms/tasks';
 import { createTeamRunner, type TeamRunnerService } from './rooms/team-runner';
@@ -97,10 +97,10 @@ export async function createServices(
     if (late.harness === undefined) throw new Error('the harness is not ready');
     return late.harness;
   };
-  const chains = createChainLedger();
+  const chains = createChainLedger({ roomBudgetUsd: readRoomChainBudgetUsd(process.env.BROT_TEAM_CHAIN_BUDGET_USD) });
   const rooms = createRoomService({ repos, bus, harness: currentHarness });
-  const tasks = createTaskService({ repos, bus, harness: currentHarness });
   const teamRunner = createTeamRunner({ harness: currentHarness, chains });
+  const tasks = createTaskService({ repos, bus, harness: currentHarness, runner: teamRunner });
   const teamTools =
     extras.team?.({
       repos,
@@ -127,6 +127,7 @@ export async function createServices(
     computers,
     mcp,
     llm,
+    teamTools: teamTools.length > 0,
     mode: config.mode,
     computerImage: config.computerImage,
     loopbackUrl: () => `http://127.0.0.1:${config.port}`,

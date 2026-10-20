@@ -259,6 +259,22 @@ describe('dsh engine runs', () => {
 });
 
 describe('dsh engine sessions', () => {
+  it('reminds a resumed room session which bot it is, and leaves a direct thread input alone', async () => {
+    const engine = engineFor();
+    const room = {
+      title: 'Team',
+      responder: 'lead' as const,
+      members: [{ id: 'bot_1', name: 'Test bot', job: 'Testing' }],
+    };
+    const first = await collect(engine.run(makeContext({ input: 'echo one', room }).ctx));
+    const second = await collect(engine.run(makeContext({ input: 'echo two', room }).ctx));
+    const direct = await collect(engine.run(makeContext({ input: 'echo three' }).ctx));
+
+    expect(echoOf(first).prompt).toBe('full');
+    expect(textOf(second)).toMatch(/prompt=input reminder=yes/);
+    expect(textOf(direct)).toMatch(/prompt=input reminder=no/);
+  });
+
   it('reports the engine session it creates, once, before the prompt runs', async () => {
     const events = await collect(engineFor().run(makeContext({ input: 'echo one' }).ctx));
 

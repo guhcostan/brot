@@ -1,10 +1,10 @@
-import type { Approval } from '@brot/protocol';
+import type { Approval, ApprovalDecision, CanonicalEvent } from '@brot/protocol';
 import type { BrotApi } from './api';
 import { errorMessage, sleep } from './util';
 import type { ApprovalPolicy, ApprovalRecord, ApprovalView, Verdict } from './types';
 
 /** Tools that act only inside Brot: they notify, remember, or pass work between bots. */
-const INTERNAL_TOOLS: ReadonlySet<string> = new Set([
+export const INTERNAL_TOOL_NAMES: readonly string[] = [
   'notify_user',
   'remember',
   'list_team',
@@ -12,7 +12,36 @@ const INTERNAL_TOOLS: ReadonlySet<string> = new Set([
   'delegate_task',
   'update_my_task',
   'handoff',
-]);
+];
+const INTERNAL_TOOLS: ReadonlySet<string> = new Set(INTERNAL_TOOL_NAMES);
+
+/** The tool name without an engine or MCP prefix: `brot.list_team` and `mcp__brot__list_team` both give `list_team`. */
+export function bareToolName(tool: string): string {
+  return tool.replace(/^.*(?:\.|__|\/)/, '');
+}
+
+export function isInternalTool(tool: string): boolean {
+  return INTERNAL_TOOLS.has(bareToolName(tool));
+}
+
+/**
+ * The policies the runner creates for each eval bot, so Brot-internal tools run without an approval card. The
+ * human only sees calls that reach outside Brot.
+ */
+export function internalToolPolicies(): Array<{ tool: string; effect: 'allow' }> {
+  return INTERNAL_TOOL_NAMES.map((tool) => ({ tool, effect: 'allow' as const }));
+}
+
+/** How many times each Brot-internal tool was called, from the tool.call events. */
+export function countInternalCalls(events: readonly CanonicalEvent[]): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const event of events) {
+    if (event.type !== 'tool.call' || !isInternalTool(event.tool)) continue;
+    const name = bareToolName(event.tool);
+    counts[name] = (counts[name] ?? 0) + 1;
+  }
+  return counts;
+}
 
 const READ_METHODS: ReadonlySet<string> = new Set(['GET', 'HEAD']);
 
@@ -72,7 +101,7 @@ export function standardPolicy(options: StandardOptions = {}): ApprovalPolicy {
         }
         return deny(`${http.method} to ${http.host} changes something outside Brot`);
       }
-      if (INTERNAL_TOOLS.has(view.tool)) return allowOnce(`Brot-internal tool ${view.tool}`);
+      if (isInternalTool(view.tool)) return allowOnce(`Brot-internal tool ${bareToolName(view.tool)}`);
       if (view.kind === 'other') return allowOnce(`no external effect by kind (${view.tool})`);
       if (view.kind === 'shell' || view.kind === 'file_write' || view.kind === 'delete') {
         const command = `${view.summary} ${typeof view.args.command === 'string' ? view.args.command : ''}`;
@@ -179,14 +208,16 @@ export class ApprovalDriver {
       timeToAppearMs: Math.max(0, seenAt.getTime() - Date.parse(approval.createdAt)),
       action: verdict.action,
       reason: verdict.reason,
+      decision: null,
     };
     this.records.push(record);
     if (verdict.action === 'hold') return;
 
     try {
-      const decision = verdict.action === 'deny' ? 'deny' : 'allow_once';
+      const sent: ApprovalDecision = verdict.action === 'deny' ? 'deny' : 'allow_once';
       const reply = verdict.action === 'deny' ? `Denied by the eval runner: ${verdict.reason}` : undefined;
-      const resolved = await this.api.resolveApproval(approval.id, decision, reply);
+      const resolved = await this.api.resolveApproval(approval.id, sent, reply);
+      record.decision = resolved.decision ?? sent;
       record.decidedAt = this.now().toISOString();
       record.resolvedStatus = resolved.status;
     } catch (error) {

@@ -3,6 +3,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { CanonicalEvent } from '@brot/protocol';
 import type { BotSpec } from '../context';
+import { standardPolicy } from '../approvals';
 import type { Evidence } from '../types';
 
 /** `fixtures/` at the package root. Fixtures are synthetic; see the README-free layout in apps/evals/fixtures. */
@@ -29,6 +30,12 @@ export const LEFT_PAD = {
   sha: '2fca6157fcca165438e0f9495cf0e5a4e6f71349',
   reproducer: "leftPad('ab', 6, 'xy').length",
 } as const;
+
+/**
+ * The human role for the sim cases, whose sends go to httpbin.org as the fake API. Every other POST is still denied.
+ * The sends are allowed once, and each one raises its own approval.
+ */
+export const FAKE_API_POLICY = standardPolicy({ httpbinSends: true, name: 'standard + httpbin fake API' });
 
 /** Bot personas. Names and species come from docs/USE-CASES.md; colors are design tokens. */
 export const ANIMAL = {
@@ -84,6 +91,8 @@ export interface HttpCall {
   url: string;
   host: string;
   headers: string[];
+  /** The request body as the bot sent it. Empty when the call had none. */
+  body: string;
   at: string;
 }
 
@@ -102,6 +111,7 @@ export function httpCalls(evidence: Evidence): HttpCall[] {
       host = '';
     }
     const headers = event.args.headers && typeof event.args.headers === 'object' ? Object.keys(event.args.headers) : [];
+    const body = typeof event.args.body === 'string' ? event.args.body : '';
     calls.push({
       botKey: keys.get(event.runId ?? '') ?? '(unknown)',
       runId: event.runId ?? '',
@@ -110,6 +120,7 @@ export function httpCalls(evidence: Evidence): HttpCall[] {
       url,
       host,
       headers,
+      body,
       at: event.at,
     });
   }

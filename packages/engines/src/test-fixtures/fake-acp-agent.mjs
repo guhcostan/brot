@@ -55,7 +55,8 @@ function askPermission(sessionId, toolCallId) {
 function currentMessage(prompt) {
   const text = prompt.map((block) => block.text ?? '').join('');
   const at = text.lastIndexOf(CURRENT_MARKER);
-  return at === -1 ? text : text.slice(at + CURRENT_MARKER.length);
+  if (at !== -1) return text.slice(at + CURRENT_MARKER.length);
+  return text.replace(/^\[You are [^\n]*\]\n/, '');
 }
 
 async function handlePrompt(id, params) {
@@ -72,7 +73,7 @@ async function handlePrompt(id, params) {
 
   switch (scenario) {
     case 'echo':
-      say(`session=${sessionId} pid=${process.pid} model=${session.model} prompt=${text.includes('Current message:') ? 'full' : 'input'}`);
+      say(`session=${sessionId} pid=${process.pid} model=${session.model} prompt=${text.includes('Current message:') ? 'full' : 'input'} reminder=${text.startsWith('[You are ') ? 'yes' : 'no'}`);
       return respond(id, { stopReason: 'end_turn' });
     case 'stream':
       for (const word of argument.split(' ')) say(`${word} `);

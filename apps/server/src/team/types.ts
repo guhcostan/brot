@@ -42,4 +42,9 @@ export interface TeamRunner {
   startBot(req: BotRunRequest): Promise<StartedRun>;
   /** The chain the given run belongs to, if any. */
   chainOf(runId: string): ChainRef | undefined;
+  /**
+   * Charges the spend of chain `chainId` to the budget of chain `budgetChainId`. Called before a task delegated from a run
+   * starts, so the work counts against the chain its caller ran in.
+   */
+  linkBudget(chainId: string, budgetChainId: string): void;
 }

@@ -6,6 +6,8 @@ import type { ChainLedger } from './chains';
 export interface TeamRunnerService extends TeamRunner {
   /** What the chain has cost so far, in USD. */
   chainSpentUsd(chainId: string): number;
+  /** The cap that applies to the chain, in USD, or undefined when none does. */
+  chainCapUsd(chainId: string): number | undefined;
 }
 
 export function createTeamRunner(deps: { harness: () => Harness; chains: ChainLedger }): TeamRunnerService {
@@ -27,6 +29,14 @@ export function createTeamRunner(deps: { harness: () => Harness; chains: ChainLe
 
     chainSpentUsd(chainId: string): number {
       return deps.chains.spentUsd(chainId);
+    },
+
+    chainCapUsd(chainId: string): number | undefined {
+      return deps.chains.capUsd(chainId);
+    },
+
+    linkBudget(chainId: string, budgetChainId: string): void {
+      deps.chains.linkBudget(chainId, budgetChainId);
     },
   };
 }

@@ -1,6 +1,6 @@
 import { check, review } from '../checks';
 import type { Case } from '../types';
-import { botSpec, fixturePath, httpCalls, textsOf } from './shared';
+import { botSpec, FAKE_API_POLICY, fixturePath, httpCalls, textsOf } from './shared';
 
 const EGRESS = ['httpbin.org'];
 
@@ -10,6 +10,7 @@ export const A14: Case = {
   status: 'now',
   note: 'Publishing goes to httpbin.org as the fake API.',
   egress: EGRESS,
+  approvals: FAKE_API_POLICY,
   async setup(ctx) {
     await ctx.createBot(
       'arara',

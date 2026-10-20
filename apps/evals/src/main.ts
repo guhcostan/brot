@@ -1,4 +1,5 @@
-import { ArgError, parseArgs, USAGE } from './args';
+import { join } from 'node:path';
+import { ArgError, outputNames, parseArgs, USAGE } from './args';
 import { ALL_CASES, selectCases } from './cases';
 import { runEval, skipReasonFor } from './runner';
 import { errorMessage } from './util';
@@ -37,7 +38,8 @@ async function main(): Promise<number> {
   const counts = new Map<string, number>();
   for (const outcome of results.cases) counts.set(outcome.status, (counts.get(outcome.status) ?? 0) + 1);
   const summary = [...counts.entries()].map(([status, count]) => `${count} ${status}`).join(', ');
-  console.log(`[evals] done: ${summary}. Cost $${results.totals.costUsd.toFixed(4)}. Report: ${options.out}/REPORT.md`);
+  const report = join(options.out, outputNames(options.suffix).report);
+  console.log(`[evals] done: ${summary}. Cost $${results.totals.costUsd.toFixed(4)}. Report: ${report}`);
   const failed = results.cases.some((outcome) => outcome.status === 'fail' || outcome.status === 'error');
   return failed ? 1 : 0;
 }

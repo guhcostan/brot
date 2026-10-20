@@ -3,6 +3,8 @@ import type { ApprovalScope } from '../broker';
 import { inputSchemaOf, invalidArguments } from '../mcp/helpers';
 import type { BrotTool, PreparedCall, ToolResult } from '../mcp/types';
 import { chainBudgetSpent, errorMessage, isTerminal, resolveBot, type TeamDeps } from './context';
+import { watchWork } from './finish';
+import type { StartedRun } from './types';
 
 interface DelegationPlan {
   parent?: Task;
@@ -16,7 +18,7 @@ export function createDelegateTaskTool(deps: TeamDeps): BrotTool {
     spec: {
       name: 'delegate_task',
       description:
-        'Hand a task to another bot. It works the task in the background, in its own thread, and posts the result to this thread when it is done. Returns the task id at once. Give exactly one of botId or botName.',
+        'Hand a task with a clear deliverable to another bot, for work of more than one step. It works the task in the background and posts its result to this thread when it finishes. Returns the task id at once. Give exactly one of botId or botName.',
       inputSchema: inputSchemaOf(DelegateTaskInput),
       risk: 'write',
     },
@@ -124,8 +126,13 @@ async function delegate(
   await bus.publish({ type: 'task.updated', threadId: working.threadId, runId: scope.runId, task: working });
 
   const callerName = (await repos.bots.get(scope.botId))?.name ?? 'another bot';
+  const callerChain = runner.chainOf(scope.runId);
+  if (callerChain !== undefined && callerChain.chainId !== working.chainId) {
+    runner.linkBudget(working.chainId, callerChain.chainId);
+  }
+  let started: StartedRun;
   try {
-    await runner.startBot({
+    started = await runner.startBot({
       botId: target.id,
       threadId: workThread.id,
       input: assignment(callerName, working),
@@ -138,6 +145,8 @@ async function delegate(
     if (failed) await bus.publish({ type: 'task.updated', threadId: failed.threadId, runId: scope.runId, task: failed });
     return { ok: false, output: reason };
   }
+  await repos.tasks.update(task.id, { workRunId: started.runId });
+  watchWork(deps, task.id, started);
 
   return {
     ok: true,
@@ -150,6 +159,6 @@ function assignment(callerName: string, task: Task): string {
   return [
     `${callerName} assigned you a task.`,
     `Task ${task.id}: ${task.title}${details}`,
-    `Work on it in this thread. Report progress by calling update_my_task with taskId "${task.id}" and status "in_progress". When you are finished, call update_my_task with taskId "${task.id}", status "done", and the result in result. If you cannot finish, call it with status "failed" and the reason in result.`,
+    `Work on it in this thread. When you are finished, call update_my_task once with taskId "${task.id}", status "done", and the deliverable in result. If you cannot finish, call it once with status "failed" and the reason in result.`,
   ].join('\n\n');
 }

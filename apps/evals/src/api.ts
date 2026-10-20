@@ -6,9 +6,11 @@ import type {
   CreateRoomInput,
   CreateRoutineInput,
   Memory,
+  Policy,
   Routine,
   Run,
   Task,
+  TaskStatus,
   Thread,
 } from '@brot/protocol';
 
@@ -81,6 +83,11 @@ export class BrotApi {
     return this.request('PATCH', `/api/bots/${id}`, { archived: true });
   }
 
+  /** A policy decides a tool's requests without an approval card. `effect: 'allow'` is what the runner uses for team tools. */
+  createPolicy(botId: string, input: { tool: string; effect: 'allow' | 'deny'; argPattern?: string }): Promise<Policy> {
+    return this.request('POST', `/api/bots/${botId}/policies`, input);
+  }
+
   /** Every thread the bot owns: its DM and the rooms it leads. */
   botThreads(botId: string): Promise<Thread[]> {
     return this.request('GET', `/api/bots/${botId}/threads`);
@@ -115,16 +122,24 @@ export class BrotApi {
   }
 
   /** The whole event log of a thread, oldest first, following the server's pages. */
-  async threadEvents(threadId: string): Promise<CanonicalEvent[]> {
+  threadEvents(threadId: string): Promise<CanonicalEvent[]> {
+    return this.threadEventsAfter(threadId, undefined);
+  }
+
+  /**
+   * The events of a thread that come after `after` (an event id), oldest first. With no cursor, the whole log. Callers
+   * keep the id of the last event they saw and pass it back, so a poll reads only what is new.
+   */
+  async threadEventsAfter(threadId: string, after: string | undefined): Promise<CanonicalEvent[]> {
     const all: CanonicalEvent[] = [];
-    let after: string | undefined;
+    let cursor: string | undefined = after;
     for (;;) {
-      const query = after === undefined ? '' : `?after=${encodeURIComponent(after)}`;
+      const query = cursor === undefined ? '' : `?after=${encodeURIComponent(cursor)}`;
       const page = await this.request<CanonicalEvent[]>('GET', `/api/threads/${threadId}/events${query}`);
       all.push(...page);
       const last = page.at(-1);
       if (page.length < EVENT_PAGE_SIZE || last === undefined) return all;
-      after = last.id;
+      cursor = last.id;
     }
   }
 
@@ -136,6 +151,11 @@ export class BrotApi {
   resolveApproval(id: string, decision: ApprovalDecision, reply?: string): Promise<Approval> {
     const body = reply === undefined ? { decision } : { decision, reply };
     return this.request('POST', `/api/approvals/${id}`, body);
+  }
+
+  /** Sets a task's status. Cancelling a task also stops the run that does its work. */
+  patchTask(id: string, status: TaskStatus): Promise<Task> {
+    return this.request('PATCH', `/api/tasks/${id}`, { status });
   }
 
   listTasks(query: { assigneeBotId?: string; threadId?: string; chainId?: string }): Promise<Task[]> {

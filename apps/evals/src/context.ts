@@ -14,6 +14,7 @@ import {
   WORKSPACE,
   type Exec,
 } from './docker';
+import { internalToolPolicies } from './approvals';
 import { sleep, truncate } from './util';
 import type { BotRef } from './types';
 
@@ -21,6 +22,14 @@ export class CaseTimeoutError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'CaseTimeoutError';
+  }
+}
+
+/** Thrown inside a case once the cost guard has stopped it. The runner reads the reason and skips the checks. */
+export class CaseStoppedError extends Error {
+  constructor(readonly reason: string) {
+    super(`stopped: ${reason}`);
+    this.name = 'CaseStoppedError';
   }
 }
 
@@ -32,6 +41,8 @@ export interface RunSettings {
   /** Epoch ms after which every wait gives up. */
   deadlineAt: number;
   outDir: string;
+  /** Where the case's workspace files and folders are copied for the report. */
+  artifactsDir: string;
   log: (line: string) => void;
 }
 
@@ -76,6 +87,8 @@ export class CaseContext {
   readonly secretNames: string[] = [];
   /** Set by a phase 1 case that stops here so the runner keeps its state for the restart. */
   holdRequested = false;
+  /** Set by the cost guard. Every later call throws `CaseStoppedError`. */
+  stopReason?: string;
   /** Text printed to the operator at the end of a held phase. */
   instructions?: string;
 
@@ -112,7 +125,17 @@ export class CaseContext {
     return this.settings.deadlineAt - Date.now();
   }
 
+  /** Ends the case's waits and posts. The first reason wins. */
+  stop(reason: string): void {
+    this.stopReason ??= reason;
+  }
+
+  throwIfStopped(): void {
+    if (this.stopReason !== undefined) throw new CaseStoppedError(this.stopReason);
+  }
+
   private assertTime(label: string): void {
+    this.throwIfStopped();
     if (this.remainingMs() <= 0) throw new CaseTimeoutError(`timed out while waiting for ${label}`);
   }
 
@@ -130,6 +153,7 @@ export class CaseContext {
       ...(spec.teamBudgetUsd === undefined ? {} : { teamBudgetUsd: spec.teamBudgetUsd }),
     };
     const created = await this.api.createBot(body);
+    for (const policy of internalToolPolicies()) await this.api.createPolicy(created.id, policy);
     const ref: BotRef = {
       key,
       id: created.id,
@@ -173,6 +197,7 @@ export class CaseContext {
 
   /** Posts a user message. Returns the first run's id, or null when a room has nobody to answer. */
   async say(threadKey: string, content: string, mentionKeys?: string[]): Promise<string | null> {
+    this.throwIfStopped();
     const mentions = mentionKeys?.map((key) => this.botRef(key).id);
     return this.api.postMessage(await this.resolveThread(threadKey), content, mentions);
   }
@@ -260,6 +285,7 @@ export class CaseContext {
    * file checks need the container, so every computer helper calls this first.
    */
   async ensureComputer(botKey: string): Promise<string> {
+    this.throwIfStopped();
     const bot = this.botRef(botKey);
     const name = computerName(bot.id);
     if (this.warm.has(botKey) && (await containerState(name)) === 'running') return name;
@@ -304,7 +330,7 @@ export class CaseContext {
   async readWorkspace(botKey: string, path: string): Promise<string | null> {
     const name = computerName(this.botRef(botKey).id);
     if ((await containerState(name)) !== 'running') return null;
-    const local = join(this.settings.outDir, 'artifacts', this.settings.caseId, botKey, path);
+    const local = join(this.settings.artifactsDir, this.settings.caseId, botKey, path);
     await mkdir(dirname(local), { recursive: true });
     const copied = await copyOutOfContainer(name, `${WORKSPACE}/${path}`, local);
     if (!copied) return null;
@@ -338,6 +364,7 @@ export class CaseContext {
   async runRoutine(key: string): Promise<Run> {
     const routine = this.routines.get(key);
     if (routine === undefined) throw new Error(`no routine "${key}" in case ${this.settings.caseId}`);
+    this.throwIfStopped();
     const fired = await this.api.runRoutine(routine.id);
     const botId = this.botRef(routine.botKey).id;
     const thread = (await this.api.botThreads(botId)).find((candidate) => candidate.title === routine.name);

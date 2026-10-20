@@ -9,7 +9,8 @@ import {
 } from '@brot/protocol';
 import type { EventBus } from '../bus';
 import type { Harness } from '../harness';
-import type { BotRunOutcome } from '../team/types';
+import { watchWork } from '../team/finish';
+import type { TeamRunner } from '../team/types';
 import { RuleViolation } from './errors';
 
 export interface TaskDetail extends Task {
@@ -34,15 +35,13 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** How a task ends when its work run does. A failed or cancelled run ends the task with the reason. */
-function endOf(outcome: BotRunOutcome): UpdateTask {
-  if (outcome.status === 'completed') return { status: 'done', result: outcome.text || undefined };
-  if (outcome.status === 'cancelled') return { status: 'cancelled', result: outcome.error ?? 'Run cancelled.' };
-  return { status: 'failed', result: outcome.error ?? 'Run failed.' };
-}
-
 /** The task board. Starting a task runs its assignee in that bot's most recent DM, or in a new one. */
-export function createTaskService(deps: { repos: Repos; bus: EventBus; harness: () => Harness }): TaskService {
+export function createTaskService(deps: {
+  repos: Repos;
+  bus: EventBus;
+  harness: () => Harness;
+  runner: TeamRunner;
+}): TaskService {
   const { repos, bus } = deps;
 
   async function emitUpdated(task: Task): Promise<void> {
@@ -113,13 +112,7 @@ export function createTaskService(deps: { repos: Repos; bus: EventBus; harness: 
       const linked = await repos.tasks.update(task.id, { workRunId: started.runId });
       // A cancel that landed before the run was linked could not see the run, so this run is stopped here.
       if (linked?.status === 'cancelled') await deps.harness().cancelRun(started.runId);
-      void started.settled.then(async (outcome) => {
-        const current = await repos.tasks.get(task.id);
-        if (!current || (current.status !== 'open' && current.status !== 'in_progress')) return;
-        await patch(task.id, endOf(outcome));
-      }).catch((error: unknown) => {
-        console.error(`task ${task.id} could not be finished`, error);
-      });
+      watchWork({ repos, bus, runner: deps.runner }, task.id, started);
       return linked ?? working ?? task;
     } catch (error) {
       return (await patch(task.id, { status: 'failed', result: errorMessage(error) })) ?? task;

@@ -42,6 +42,7 @@ const record = (overrides: Partial<ApprovalRecord>): ApprovalRecord => ({
   timeToAppearMs: 1000,
   action: 'deny',
   reason: 'external',
+  decision: 'deny',
   decidedAt: at(3),
   ...overrides,
 });

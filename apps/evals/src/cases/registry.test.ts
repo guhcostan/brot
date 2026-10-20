@@ -33,6 +33,19 @@ describe('case registry', () => {
     for (const caseDef of ALL_CASES) expect(['now', 'sim', 'later', 'gap', 'covered']).toContain(caseDef.status);
   });
 
+  it('lets the sim cases send to the fake API once, and keeps the others on the default policy', () => {
+    const decideFor = (id: string, summary: string) => {
+      const caseDef = ALL_CASES.find((candidate) => candidate.id === id);
+      const policy = caseDef?.approvals;
+      return policy?.decide({ botId: 'b', runId: 'r', tool: 'http_request', kind: 'send', summary, args: {} }).action;
+    };
+    for (const id of ['A6', 'A8', 'A14']) {
+      expect(decideFor(id, 'POST https://httpbin.org/anything/x/send'), id).toBe('allow_once');
+      expect(decideFor(id, 'POST https://api.github.com/repos/x/y/pulls'), id).toBe('deny');
+    }
+    expect(ALL_CASES.find((candidate) => candidate.id === 'B5')?.approvals).toBeUndefined();
+  });
+
   it('selects cases in the order given and rejects unknown ids', () => {
     expect(selectCases(['c10', 'A1']).map((caseDef) => caseDef.id)).toEqual(['C10', 'A1']);
     expect(() => selectCases(['A99'])).toThrow(/unknown case id/);

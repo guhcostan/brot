@@ -2,9 +2,10 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { CanonicalEvent, type Memory, type Message, type Run, type Task } from '@brot/protocol';
 import { BrotApi } from './api';
-import type { RunOptions } from './args';
-import { ApprovalDriver, standardPolicy } from './approvals';
-import { CaseContext, CaseTimeoutError, type RunSettings } from './context';
+import { outputNames, type RunOptions } from './args';
+import { ApprovalDriver, countInternalCalls, standardPolicy } from './approvals';
+import { startBudgetGuard } from './budget';
+import { CaseContext, CaseStoppedError, CaseTimeoutError, type RunSettings } from './context';
 import {
   computerName,
   containerState,
@@ -107,6 +108,7 @@ export function emptyOutcome(caseDef: Case): CaseOutcome {
     tokensIn: 0,
     tokensOut: 0,
     approvals: [],
+    internalToolCalls: {},
     notableEvents: [],
     finalTexts: [],
   };
@@ -182,6 +184,14 @@ export async function collectEvidence(
 
   const messages: Message[] = events.flatMap((event) => (event.type === 'message.completed' ? [event.message] : []));
 
+  // Every approval on the case's bots should have passed through the runner. One the server resolved on its own was
+  // decided by something other than the runner, and the report must show it.
+  const botIds = new Set(ctx.botIds());
+  const recorded = new Set(records.map((record) => record.approvalId));
+  const unrecordedApprovals = (await api.approvals())
+    .filter((approval) => botIds.has(approval.botId) && !recorded.has(approval.id))
+    .map((approval) => approval.id);
+
   const finalByRun = new Map<string, { botKey: string; runId: string; threadId: string; text: string }>();
   for (const event of events) {
     if (event.type !== 'message.completed' || event.message.role !== 'assistant' || event.runId === undefined) continue;
@@ -207,6 +217,7 @@ export async function collectEvidence(
     tasks: [...tasks.values()],
     memories,
     approvals: [...records],
+    unrecordedApprovals,
     artifacts,
     probes: { ...ctx.probes },
     notes: { ...ctx.notes },
@@ -225,11 +236,11 @@ async function cancelLeftovers(api: BrotApi, ctx: CaseContext): Promise<void> {
 }
 
 /** Copies each bot's out/ folder and any kept folders into the report folder, for a human to read. Best effort. */
-async function keepOutFolders(ctx: CaseContext, outDir: string, caseId: string): Promise<void> {
+async function keepOutFolders(ctx: CaseContext, artifactsDir: string, caseId: string): Promise<void> {
   for (const bot of ctx.bots.values()) {
     const name = computerName(bot.id);
     if ((await containerState(name)) !== 'running') continue;
-    const target = join(outDir, 'artifacts', caseId, bot.key);
+    const target = join(artifactsDir, caseId, bot.key);
     await mkdir(target, { recursive: true });
     const folders = ['out', ...ctx.keptFolders.filter((kept) => kept.botKey === bot.key).map((kept) => kept.path)];
     for (const folder of new Set(folders)) {
@@ -261,6 +272,8 @@ export interface CaseRunInput {
   log: Logger;
   resumeFrom?: HeldState;
   now?: () => Date;
+  /** What the earlier cases of the run spent. The run cap is checked against this plus the case's own cost. */
+  spentBeforeUsd?: number;
 }
 
 /** Runs one case, phase 1 or phase 2, and returns its outcome. Cleanup happens here unless the case is held. */
@@ -275,6 +288,7 @@ export async function runCase(
   if (caseDef.coveredBy !== undefined) outcome.coveredBy = caseDef.coveredBy;
   const timeoutMs = caseDef.timeoutMs ?? options.caseTimeoutMs;
 
+  const artifactsDir = join(options.out, outputNames(options.suffix).artifacts);
   const settings: RunSettings = {
     caseId: caseDef.id,
     engine: options.engine,
@@ -282,6 +296,7 @@ export async function runCase(
     pollMs: options.pollMs,
     deadlineAt: startedMs + timeoutMs,
     outDir: options.out,
+    artifactsDir,
     log,
   };
   const ctx = new CaseContext(api, settings);
@@ -299,6 +314,14 @@ export async function runCase(
     ...(input.now === undefined ? {} : { now: input.now }),
   });
   driver.start();
+  const guard = startBudgetGuard({
+    api,
+    limits: { caseUsd: options.maxCaseUsd, totalUsd: options.maxUsd, spentBeforeUsd: input.spentBeforeUsd ?? 0 },
+    pollMs: options.pollMs,
+    targets: { threadIds: () => ctx.allThreadIds(), botIds: () => ctx.botIds() },
+    onStop: (reason) => ctx.stop(reason),
+    log: (line) => log(`${caseDef.id}: ${line}`),
+  });
 
   let phaseError: string | undefined;
   let timedOut = false;
@@ -314,10 +337,15 @@ export async function runCase(
     if (!ctx.holdRequested && input.resumeFrom === undefined) await ctx.waitIdle();
   } catch (error) {
     if (error instanceof CaseTimeoutError) timedOut = true;
-    phaseError = errorMessage(error);
-    log(`${caseDef.id}: ${phaseError}`);
+    // A stop from the cost guard is a result, not an error. The reason is read below.
+    if (!(error instanceof CaseStoppedError)) {
+      phaseError = errorMessage(error);
+      log(`${caseDef.id}: ${phaseError}`);
+    }
   }
 
+  await guard.stop();
+  if (guard.errors.length > 0) log(`${caseDef.id}: cost guard errors: ${guard.errors.slice(0, 3).join('; ')}`);
   if (!ctx.holdRequested) await cancelLeftovers(api, ctx).catch(() => undefined);
   await driver.stop();
   if (driver.errors.length > 0) log(`${caseDef.id}: approval driver errors: ${driver.errors.slice(0, 3).join('; ')}`);
@@ -349,7 +377,7 @@ export async function runCase(
   evidence.timedOut = timedOut;
   if (phaseError !== undefined) evidence.errorMessage = phaseError;
 
-  await keepOutFolders(ctx, options.out, caseDef.id);
+  await keepOutFolders(ctx, artifactsDir, caseDef.id);
 
   const cost = sumCost(evidence.events);
   outcome.runCount = evidence.runs.length;
@@ -357,6 +385,7 @@ export async function runCase(
   outcome.tokensIn = cost.tokensIn;
   outcome.tokensOut = cost.tokensOut;
   outcome.approvals = [...driver.records];
+  outcome.internalToolCalls = countInternalCalls(evidence.events);
   outcome.notableEvents = notableEventsOf(evidence.events, (id) => ctx.botKeyOf(id) ?? id.slice(0, 8));
   outcome.finalTexts = evidence.finalTexts.map((entry) => ({ bot: entry.botKey, text: truncate(entry.text, 1200) }));
 
@@ -378,22 +407,30 @@ export async function runCase(
     return { outcome, botIds: state.bots ? Object.values(state.bots).map((bot) => bot.id) : [], held: state };
   }
 
-  try {
-    outcome.checks = caseDef.check(evidence);
-  } catch (error) {
-    phaseError = `${phaseError ?? ''} check crashed: ${errorMessage(error)}`.trim();
-    outcome.checks = [];
-  }
-  outcome.needsReview = outcome.checks.some((check) => check.status === 'review');
-  if (phaseError !== undefined) outcome.error = phaseError;
-
-  if (phaseError !== undefined) {
-    outcome.status = 'error';
-  } else if (outcome.checks.length === 0) {
-    outcome.status = 'error';
-    outcome.error = 'the case produced no checks';
+  // A stopped case is partial, so its checks would only report what was cut off. Its approvals and cost stay on record.
+  const stopReason = ctx.stopReason;
+  if (stopReason !== undefined) {
+    outcome.status = 'stopped';
+    outcome.stoppedBy = 'budget';
+    outcome.error = stopReason;
   } else {
-    outcome.status = outcome.checks.some((check) => check.status === 'fail') ? 'fail' : 'pass';
+    try {
+      outcome.checks = caseDef.check(evidence);
+    } catch (error) {
+      phaseError = `${phaseError ?? ''} check crashed: ${errorMessage(error)}`.trim();
+      outcome.checks = [];
+    }
+    outcome.needsReview = outcome.checks.some((check) => check.status === 'review');
+    if (phaseError !== undefined) outcome.error = phaseError;
+
+    if (phaseError !== undefined) {
+      outcome.status = 'error';
+    } else if (outcome.checks.length === 0) {
+      outcome.status = 'error';
+      outcome.error = 'the case produced no checks';
+    } else {
+      outcome.status = outcome.checks.some((check) => check.status === 'fail') ? 'fail' : 'pass';
+    }
   }
 
   const audit = auditDecisions(driver.records, evidence.events);
@@ -436,7 +473,8 @@ export async function runEval(input: RunInput): Promise<ResultsFile> {
   const info = await preflight(api, options);
   log(`server ${info.serverVersion} (protocol ${info.protocol}), docker ${info.dockerServer}, out ${options.out}`);
 
-  const resultsPath = join(options.out, 'results.json');
+  const names = outputNames(options.suffix);
+  const resultsPath = join(options.out, names.results);
   const previous =
     options.resume === undefined
       ? undefined
@@ -466,6 +504,7 @@ export async function runEval(input: RunInput): Promise<ResultsFile> {
       engine: options.engine,
       model: options.model,
       maxUsd: options.maxUsd,
+      maxCaseUsd: options.maxCaseUsd,
       server: { version: info.serverVersion, protocol: info.protocol },
       dockerServer: info.dockerServer,
       totals,
@@ -473,7 +512,7 @@ export async function runEval(input: RunInput): Promise<ResultsFile> {
       leftovers: await leftoversOf([...botIds]),
     };
     await writeJsonAtomic(resultsPath, results);
-    await writeFile(join(options.out, 'REPORT.md'), renderReport(results));
+    await writeFile(join(options.out, names.report), renderReport(results));
   };
 
   for (const caseDef of cases) {
@@ -512,12 +551,14 @@ export async function runEval(input: RunInput): Promise<ResultsFile> {
       api,
       options,
       log,
+      spentBeforeUsd: spent,
       ...(resumeFrom === undefined ? {} : { resumeFrom }),
     });
     for (const id of ids) botIds.add(id);
     outcomes.set(caseDef.id, outcome);
     const review = outcome.status === 'pass' && outcome.needsReview ? ' (needs-review)' : '';
-    log(`${caseDef.id}: ${outcome.status}${review}, $${outcome.costUsd.toFixed(4)}`);
+    const stopped = outcome.stoppedBy === undefined ? '' : ` (${outcome.stoppedBy})`;
+    log(`${caseDef.id}: ${outcome.status}${stopped}${review}, $${outcome.costUsd.toFixed(4)}`);
     await writeResults();
     if (held !== undefined) {
       heldCases.push(caseDef.id);

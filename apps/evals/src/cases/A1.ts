@@ -32,7 +32,9 @@ export const A1: Case = {
         '5. Reply with the exact steps to reproduce, the observed and expected results, and the path of the test file.',
       ].join('\n'),
     );
-    ctx.probes.repro = await ctx.exec('onca', 'cd work/left-pad && node test/repro.js; echo "EXIT=$?"');
+    const repro = await ctx.exec('onca', 'cd work/left-pad && node test/repro.js');
+    ctx.probes.reproExit = repro.code;
+    ctx.probes.reproOutput = `${repro.stdout}${repro.stderr}`.trim().slice(-400);
     ctx.probes.reproExists = (await ctx.exec('onca', 'test -f work/left-pad/test/repro.js && echo yes || echo no')).stdout.trim();
     ctx.probes.pinned = (await ctx.exec('onca', 'cd work/left-pad && git rev-parse HEAD')).stdout.trim();
     ctx.probes.libraryUnchanged = (await ctx.exec('onca', 'cd work/left-pad && git status --porcelain -- index.js')).stdout.trim() === '';
@@ -42,7 +44,7 @@ export const A1: Case = {
   },
   check(evidence) {
     const probe = (key: string): string => String(evidence.probes[key] ?? '');
-    const repro = probe('repro');
+    const reproExit = evidence.probes.reproExit;
     const finalText = textsOf(evidence, 'onca');
     const blocked = evidence.events.filter((event) => event.type === 'network.blocked' && event.botId === evidence.bots.onca?.id);
     return [
@@ -50,8 +52,8 @@ export const A1: Case = {
       check(
         'repro-fails-before-fix',
         'The test fails while the bug exists (non-zero exit)',
-        /EXIT=[1-9]/.test(repro),
-        repro.slice(-400),
+        typeof reproExit === 'number' && reproExit !== 0,
+        `exit ${reproExit === undefined ? 'missing' : String(reproExit)}: ${probe('reproOutput')}`,
       ),
       check(
         'bug-reproduces-at-pinned-commit',
