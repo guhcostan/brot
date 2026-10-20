@@ -18,6 +18,7 @@ Every bot has a job, a model, its own computer, and your apps. Talk to them like
 |---|---|
 | 🍞 **Yours** | Desktop app, `docker compose up`, or Brot Cloud. Same code everywhere |
 | 🧱 **One bot, one sandbox** | Every bot gets its own isolated computer by default |
+| 🖥️ **Watch it work, take the wheel** | Give a bot a desktop: see its screen live, take control for a sign-in or a CAPTCHA, hand it back ([computer use](docs/COMPUTER-USE.md)) |
 | 🔍 **Glass-box memory** | See, edit, delete, and export everything a bot remembers |
 | 🧠 **Any brain** | One runtime, the DeepSeek Harness, with any provider: DeepSeek, Anthropic, OpenAI, OpenRouter, local models |
 | ✋ **You hold the keys** | Payments, posts, and deletions wait for your approval. Secrets never reach the model |
@@ -38,6 +39,16 @@ CLI:
 pnpm brot doctor    # which engines are installed and logged in
 pnpm brot serve     # run the server headless
 ```
+
+Bot computers run in Docker (on macOS, [Colima](https://github.com/abiosoft/colima) works well). Build the images once:
+
+```bash
+docker build -t brot-computer:latest images/computer
+docker build -f images/computer/egress.Dockerfile -t brot-egress:latest apps/server/src/computers
+docker build -t brot-desktop:latest images/desktop   # for bots with a desktop
+```
+
+Then add a model key in **Settings → Model providers** (OpenCode Go and DeepSeek are built in).
 
 Self-host with Docker:
 

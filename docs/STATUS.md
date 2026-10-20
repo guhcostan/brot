@@ -2,7 +2,7 @@
 
 Handoff notes for the next session. Update this file at the end of every wave.
 
-_Last updated: 2026-10-19_
+_Last updated: 2026-10-20_
 
 ## How to resume
 
@@ -71,12 +71,23 @@ Fixes found only by the real run: Docker tmpfs is noexec by default and DSH's na
 
 Setup: `brew install colima && colima start --cpu 4 --memory 8`, `docker build -t brot-computer:latest images/computer`, `docker build -f images/computer/egress.Dockerfile -t brot-egress:latest apps/server/src/computers`, then `PUT /api/secrets/opencode-go`.
 
+## Wave 7: computer use, an alive app, landing (2026-10-20, branch `feat/computer-use`)
+
+Brot was picked over the sibling project guhbot by the use-case benchmark (docs/BENCHMARKS.md); guhbot is retired.
+
+- **Bot desktops** (docs/COMPUTER-USE.md): `desktop: true` bots run `brot-desktop:latest` (Xvfb, openbox, Chromium behind the egress proxy). The server drives it only through `docker exec`: JPEG frames, xdotool input during a takeover, and `brot-browser` (Playwright over CDP) for accessibility snapshots with refs. Brot MCP adds `browser_*`, `computer_screenshot`, `request_takeover`. Read-risk tools no longer ask for approval unless a deny policy matches.
+  **Verified on Colima:** a desktop bot created from the web UI started its computer, the live screen showed Chromium, Take control → click/type/Enter opened duckduckgo.com through the egress proxy, and control went back to the bot. No live model drove the tools yet (OpenCode Go monthly quota exhausted on 2026-10-20).
+- **Web**: create/edit/archive/delete bots (role templates, animal avatar picker, provider-aware model picker, computer + egress + budget), Settings (provider keys, theme, devices, pairing with QR), approvals inbox, room members, live computer panel with takeover and pop-out, live avatar moods, tool timelines, skeletons, en/pt-BR/es.
+- **Mobile**: live computer with takeover, rooms, @mentions, task board, haptics, en/pt-BR/es. Not run on a device.
+- **Site**: OpenBot-style landing (style only; OpenBot is PolyForm Noncommercial) with a live product demo and a takeover demo.
+- **Fixes from the benchmark**: delegated tasks close with their run; eval cases A1, A6, A8, A9, A14, B1, B5, B6 corrected; `CreateTask.chainId` so one run's delegations share a chain.
+
 ## Next
 
-1. Avatars as Brazilian animals (Opus, in progress): DESIGN.md §2.
-2. Mobile team UI (Opus).
-3. SSE id cursor; room member UI; persist the baton; per-run DSH restart (token in the URL) could use a stable per (thread, bot) relay URL.
-4. Relay tests for the session header and user agent; strip provider keys from local DSH env.
+1. Re-run the eval suite on a live model once OpenCode Go has quota (`apps/evals`, `--base` to the server), including B8 and C; the 2026-10-20 results predate the read auto-allow and the fixes above.
+2. A live run of a desktop bot doing a web task end to end (snapshot → click → takeover on sign-in).
+3. Signed desktop builds and a first GitHub release; the site's download links point to releases.
+4. SSE id cursor; persist the baton and takeover state; a per (thread, bot) relay URL.
 
 ## Decision: DeepSeek Harness is the only runtime (2026-10-19)
 

@@ -60,4 +60,6 @@ Brot's failures from this run, to fix:
 - B5: the delegated send.
 - B6: the workspace isolation check.
 
+Note: these results predate commit cfcabab (reads no longer ask for approval) and the fixes in 7fe5542; re-run before comparing.
+
 Decision: continue Brot. Retire guhbot.
