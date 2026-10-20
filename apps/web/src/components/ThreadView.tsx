@@ -1,19 +1,23 @@
 import { useEffect, useRef, type ReactElement, type ReactNode } from 'react';
 import type { ApprovalDecision, Bot } from '@brot/protocol';
-import { BotAvatar, Button, EmptyState, STATUS_MOOD, StatusDot, TypingIndicator, type BotStatus } from '@brot/ui';
+import { BotAvatar, Button, EmptyState, Skeleton, StatusDot, TypingIndicator, type BotStatus } from '@brot/ui';
 import { avatarOf } from '../format';
 import { t } from '../i18n';
 import type { ThreadState } from '../state/thread';
 import { Composer } from './Composer';
 import { botStatusLabel } from './taskLabels';
-import { ChevronLeft } from './icons';
+import { ChevronLeft, Pencil } from './icons';
+import { useLiveMood } from './mood';
 import { Timeline } from './Timeline';
 
 export interface ThreadViewProps {
   bot: Bot;
   thread: ThreadState;
+  /** False until the bot's history has loaded. */
+  loaded: boolean;
   status: BotStatus;
   onSend: (content: string) => Promise<void>;
+  onEdit: () => void;
   onDecide: (approvalId: string, decision: ApprovalDecision, reply?: string) => Promise<void>;
   onOpenBots: () => void;
   onOpenContext: () => void;
@@ -31,14 +35,14 @@ export function useStickToBottom(deps: readonly unknown[]) {
   return ref;
 }
 
-export function ThreadView({ bot, thread, status, onSend, onDecide, onOpenBots, onOpenContext }: ThreadViewProps): ReactElement {
+export function ThreadView({ bot, thread, loaded, status, onSend, onEdit, onDecide, onOpenBots, onOpenContext }: ThreadViewProps): ReactElement {
   const lastItem = thread.items.at(-1);
   const streaming = lastItem?.kind === 'message' && lastItem.streaming;
   const typing = thread.run === 'running' && !streaming;
   const logRef = useStickToBottom([thread.items.length, lastItem, typing]);
 
   const avatar = avatarOf(bot);
-  const mood = STATUS_MOOD[status];
+  const mood = useLiveMood(status);
 
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg">
@@ -48,12 +52,25 @@ export function ThreadView({ bot, thread, status, onSend, onDecide, onOpenBots, 
           <h1 className="m-0 truncate text-md leading-tight font-semibold tracking-[var(--tracking-heading)]">{bot.name}</h1>
           <p className="m-0 truncate text-sm text-ink-2">{bot.job}</p>
         </div>
-        <StatusDot status={status} label={botStatusLabel(status)} className="hidden sm:inline-flex" />
+        <StatusDot key={status} status={status} label={botStatusLabel(status)} className="hidden animate-[brot-fade_var(--dur-base)_linear_both] sm:inline-flex" />
+        <Button variant="ghost" size="sm" onClick={onEdit} aria-label={t('thread.edit', { name: bot.name })} title={t('thread.edit', { name: bot.name })}>
+          <Pencil size={16} />
+        </Button>
       </PaneHeader>
+      {bot.archived ? (
+        <div className="flex flex-none items-center justify-center gap-2 border-b border-line bg-surface-2 px-4 py-2 text-sm text-ink-2">
+          {t('thread.archived', { name: bot.name })}
+          <button type="button" onClick={onEdit} className="font-medium text-ink underline underline-offset-2">
+            {t('thread.manage')}
+          </button>
+        </div>
+      ) : null}
 
       <div ref={logRef} role="log" aria-live="polite" aria-label={t('thread.log', { name: bot.name })} className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex min-h-full w-full max-w-[720px] flex-col gap-6 px-4 py-8 md:px-6">
-          {thread.items.length === 0 ? (
+          {!loaded ? (
+            <ThreadSkeleton />
+          ) : thread.items.length === 0 ? (
             <div className="flex flex-1 items-center justify-center">
               <EmptyState
                 icon={<BotAvatar shape={avatar.shape} color={avatar.color} mood={mood} size="lg" />}
@@ -70,6 +87,27 @@ export function ThreadView({ bot, thread, status, onSend, onDecide, onOpenBots, 
 
       <Composer targetName={bot.name} onSend={(content) => onSend(content)} />
     </section>
+  );
+}
+
+export function ThreadSkeleton(): ReactElement {
+  return (
+    <div className="flex flex-col gap-8" aria-busy="true" aria-label={t('app.loading')}>
+      <div className="flex justify-end">
+        <Skeleton shape="block" width="46%" height={40} />
+      </div>
+      <div className="flex flex-col gap-2">
+        <Skeleton width={90} height={10} />
+        <Skeleton width="92%" />
+        <Skeleton width="80%" />
+        <Skeleton width="54%" />
+      </div>
+      <Skeleton shape="block" height={40} />
+      <div className="flex flex-col gap-2">
+        <Skeleton width="86%" />
+        <Skeleton width="40%" />
+      </div>
+    </div>
   );
 }
 

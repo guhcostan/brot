@@ -1,4 +1,4 @@
-import type { Approval, CanonicalEvent, Memory } from '@brot/protocol';
+import type { Approval, CanonicalEvent, ComputerState, Memory, Takeover } from '@brot/protocol';
 
 /**
  * The thread view is a pure fold over canonical events (docs/ARCHITECTURE.md). Replaying the same
@@ -81,6 +81,10 @@ export interface ThreadState {
   members?: string[];
   /** The bot that answers next after a handoff. */
   baton?: string;
+  /** The latest control change of the bot's desktop seen in this thread. */
+  takeover?: Takeover;
+  /** The bot's computer state after the latest `computer.status` in this thread. */
+  computerState?: ComputerState;
 }
 
 export const emptyThread: ThreadState = {
@@ -292,7 +296,11 @@ export function applyEvent(state: ThreadState, event: CanonicalEvent): ThreadSta
       return { ...state, members: event.botIds };
 
     case 'computer.status':
+      return { ...state, computerState: event.state };
+
     case 'computer.takeover':
+      return { ...state, takeover: event.takeover };
+
     case 'network.blocked':
     case 'task.updated':
       return state;
@@ -357,6 +365,7 @@ export function pendingApprovals(state: ThreadState): ApprovalItem[] {
 /** Maps a thread to the sidebar status. Waiting for a human outranks everything else. */
 export function botStatus(state: ThreadState): BotStatus {
   if (pendingApprovals(state).length > 0 || state.run === 'waiting_approval') return 'waiting';
+  if (state.takeover?.active && state.takeover.requestedBy === 'bot') return 'waiting';
   if (state.run === 'running') return 'working';
   if (state.run === 'failed') return 'error';
   return 'idle';

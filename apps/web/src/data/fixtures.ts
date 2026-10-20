@@ -9,8 +9,10 @@ function bot(
   avatar: string,
   computer: Bot['computer'],
   pinned: boolean,
+  extra: Partial<Bot> = {},
 ): Bot {
   return {
+    ...extra,
     id,
     name,
     job,
@@ -31,9 +33,16 @@ export const DEMO_BOTS: Bot[] = [
   bot('bot_capy', 'Capy', 'Chief of Staff', 'capivara:black', 'sandbox', true),
   bot('bot_onca', 'Onça', 'Bug Fixer', 'onca:orange', 'sandbox', false),
   bot('bot_tuca', 'Tuca', 'Sales follow-up', 'tucano:amber', 'none', true),
-  bot('bot_ara', 'Ara', 'Social and content', 'arara:pink', 'none', false),
+  bot('bot_ara', 'Ara', 'Social and content', 'arara:pink', 'sandbox', false, {
+    desktop: true,
+    egress: { mode: 'allowlist', allow: ['linkedin.com', '*.linkedin.com'] },
+  }),
   bot('bot_tamu', 'Tamu', 'Researcher', 'tamandua:teal', 'sandbox', false),
-  bot('bot_boto', 'Boto', 'Web navigator', 'boto:blue', 'sandbox', false),
+  bot('bot_boto', 'Boto', 'Web operator', 'boto:blue', 'sandbox', false, {
+    desktop: true,
+    egress: { mode: 'allowlist', allow: ['news.ycombinator.com', 'duckduckgo.com', 'github.com'] },
+    teamBudgetUsd: 2,
+  }),
   bot('bot_sol', 'Sol', 'Scheduled routines', 'preguica:violet', 'none', false),
   bot('bot_mico', 'Mico', 'Quick tasks and triage', 'mico:brown', 'none', false),
 ];
@@ -357,6 +366,20 @@ function araDm(): CanonicalEvent[] {
   return s.events;
 }
 
+function botoDm(): CanonicalEvent[] {
+  const thread = dmThreadOf('bot_boto');
+  const s = script(thread, 'seed_b');
+  s.user('08:20:00', 'What is on the front page of Hacker News right now?');
+  s.start('08:20:01', 'run_boto_1', 'bot_boto');
+  s.tool('08:20:03', 'run_boto_1', 'call_b1', 'browser_open', { url: 'https://news.ycombinator.com' }, true, '{"url":"https://news.ycombinator.com/","title":"Hacker News"}');
+  s.tool('08:20:05', 'run_boto_1', 'call_b2', 'browser_snapshot', {}, true, 'Hacker News\n  link "new" [ref=3]\n  link "Show HN: A team of bots in a chat app" [ref=12]\n  link "SQLite in the browser, three years on" [ref=18]\n  link "The quiet craft of good defaults" [ref=24]');
+  s.tool('08:20:08', 'run_boto_1', 'call_b3', 'browser_click', { ref: 12 }, true, '{"url":"https://news.ycombinator.com/item?id=4242","title":"Show HN: A team of bots in a chat app"}');
+  s.say('08:20:12', 'run_boto_1', 'bot_boto', 'Top three right now: "Show HN: A team of bots in a chat app", "SQLite in the browser, three years on", and "The quiet craft of good defaults". I opened the first one on my screen if you want a look.');
+  s.done('08:20:13', 'run_boto_1', 0.0024);
+  s.raw({ id: 'seed_b_status', at: day('08:20:00'), threadId: thread, type: 'computer.status', computerId: 'cmp_boto', botId: 'bot_boto', state: 'ready' });
+  return s.events;
+}
+
 /** Seed history per DM bot. Some bots have none, so the empty states show too. */
 export const DEMO_HISTORY: Record<string, CanonicalEvent[]> = {
   bot_capy: capyDm(),
@@ -364,6 +387,7 @@ export const DEMO_HISTORY: Record<string, CanonicalEvent[]> = {
   bot_tamu: tamuDm(),
   bot_tuca: tucaDm(),
   bot_ara: araDm(),
+  bot_boto: botoDm(),
 };
 
 export const DEMO_ROOM_HISTORY: Record<string, CanonicalEvent[]> = {

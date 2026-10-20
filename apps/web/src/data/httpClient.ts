@@ -2,19 +2,30 @@ import {
   Approval,
   Bot,
   CanonicalEvent,
+  ComputerInput,
+  ComputerState,
+  CreateBot,
   CreateRoom,
   CreateTask,
+  Device,
   Message,
+  PairingStartResponse,
   PostMessage,
   ResolveApproval,
   RoomMember,
   Run,
+  SetTakeover,
+  Takeover,
   Task,
   Thread,
+  UpdateBot,
+  UpdateRoomMembers,
   UpdateTask,
+  DESKTOP_HEIGHT,
+  DESKTOP_WIDTH,
   type CanonicalEventType,
 } from '@brot/protocol';
-import type { BotEvent, BrotClient, Room, TaskFilter } from './client';
+import { ScreenUnavailable, type BotEvent, type BrotClient, type ComputerInfo, type Provider, type Room, type TaskFilter } from './client';
 
 /** The slice of EventSource this client uses. The browser's EventSource satisfies it; tests pass a fake. */
 export interface EventStream {
@@ -95,7 +106,7 @@ export function createHttpClient({
     return schema.parse(await response.json());
   }
 
-  function write(method: 'POST' | 'PATCH', path: string, body: unknown): Promise<Response> {
+  function write(method: 'POST' | 'PATCH' | 'PUT', path: string, body: unknown): Promise<Response> {
     return request(path, {
       method,
       headers: { 'Content-Type': 'application/json' },
@@ -230,11 +241,40 @@ export function createHttpClient({
     return source;
   }
 
+  const botPath = (botId: string) => `/api/bots/${encodeURIComponent(botId)}`;
+
+  async function computerInfo(response: Response): Promise<ComputerInfo> {
+    return parseComputerInfo(await response.json());
+  }
+
   return {
-    async listBots() {
-      const bots = await read('/api/bots', Bot.array());
+    async listBots(options = {}) {
+      const path = options.includeArchived ? '/api/bots?includeArchived=true' : '/api/bots';
+      const bots = await read(path, Bot.array());
       for (const bot of bots) knownBots.add(bot.id);
       return bots;
+    },
+
+    async createBot(input) {
+      const body = CreateBot.parse(input);
+      const response = await write('POST', '/api/bots', body);
+      const bot = Bot.parse(await response.json());
+      knownBots.add(bot.id);
+      return bot;
+    },
+
+    async updateBot(botId, patch) {
+      const body = UpdateBot.parse(patch);
+      const response = await write('PATCH', botPath(botId), body);
+      return Bot.parse(await response.json());
+    },
+
+    async deleteBot(botId) {
+      await request(botPath(botId), { method: 'DELETE' });
+      knownBots.delete(botId);
+      const threadId = threadOfBot.get(botId);
+      threadOfBot.delete(botId);
+      if (threadId !== undefined) botOfThread.delete(threadId);
     },
 
     async history(botId) {
@@ -294,6 +334,12 @@ export function createHttpClient({
       });
     },
 
+    async updateRoomMembers(roomId, change) {
+      const body = UpdateRoomMembers.parse(change);
+      const response = await write('PATCH', `/api/rooms/${encodeURIComponent(roomId)}/members`, body);
+      return RoomMember.array().parse(await response.json()).map((member) => member.botId);
+    },
+
     listTasks(filter: TaskFilter = {}) {
       const query = new URLSearchParams();
       for (const [name, value] of Object.entries(filter)) if (value !== undefined) query.set(name, value);
@@ -318,6 +364,95 @@ export function createHttpClient({
       const response = await write('PATCH', `/api/tasks/${encodeURIComponent(taskId)}`, body);
       return Task.parse(await response.json());
     },
+
+    async listProviders() {
+      const response = await request('/api/providers', { headers: { Accept: 'application/json' } });
+      return parseProviders(await response.json());
+    },
+
+    async setSecret(name, value) {
+      await write('PUT', `/api/secrets/${encodeURIComponent(name)}`, { value });
+    },
+
+    listDevices() {
+      return read('/api/devices', Device.array());
+    },
+
+    async removeDevice(deviceId) {
+      await request(`/api/devices/${encodeURIComponent(deviceId)}`, { method: 'DELETE' });
+    },
+
+    async startPairing() {
+      const response = await write('POST', '/api/pairing/start', {});
+      return PairingStartResponse.parse(await response.json());
+    },
+
+    async getComputer(botId) {
+      return computerInfo(await request(`${botPath(botId)}/computer`, { headers: { Accept: 'application/json' } }));
+    },
+
+    async startComputer(botId) {
+      return computerInfo(await write('POST', `${botPath(botId)}/computer/start`, {}));
+    },
+
+    async computerScreen(botId, signal) {
+      const response = await fetch(`${root}${botPath(botId)}/computer/screen`, {
+        headers: { Accept: 'image/jpeg' },
+        cache: 'no-store',
+        ...(signal ? { signal } : {}),
+      });
+      if (response.status === 404 || response.status === 409) throw new ScreenUnavailable(response.status);
+      if (!response.ok) throw new Error(`GET ${botPath(botId)}/computer/screen failed: ${await describeFailure(response)}`);
+      return response.blob();
+    },
+
+    async computerInput(botId, input) {
+      await write('POST', `${botPath(botId)}/computer/input`, ComputerInput.parse(input));
+    },
+
+    async setTakeover(botId, input) {
+      const response = await write('POST', `${botPath(botId)}/computer/takeover`, SetTakeover.parse(input));
+      return Takeover.parse(await response.json());
+    },
+  };
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
+const textField = (value: unknown, field: string): string => {
+  if (typeof value !== 'string') throw new Error(`Expected ${field} to be a string`);
+  return value;
+};
+
+/** Validates `GET /api/providers`. The shape lives in docs/COMPUTER-USE.md, not yet in @brot/protocol. */
+export function parseProviders(value: unknown): Provider[] {
+  if (!Array.isArray(value)) throw new Error('Expected a list of providers');
+  return value.map((entry, index) => {
+    if (!isRecord(entry)) throw new Error(`Provider ${index} is not an object`);
+    const models = Array.isArray(entry.models) ? entry.models : [];
+    return {
+      id: textField(entry.id, 'provider.id'),
+      label: textField(entry.label, 'provider.label'),
+      configured: entry.configured === true,
+      secretName: textField(entry.secretName, 'provider.secretName'),
+      models: models.map((model) => {
+        if (!isRecord(model)) throw new Error('A provider model is not an object');
+        return { id: textField(model.id, 'model.id'), label: textField(model.label ?? model.id, 'model.label') };
+      }),
+    };
+  });
+}
+
+/** Validates `GET /api/bots/:id/computer`. */
+export function parseComputerInfo(value: unknown): ComputerInfo {
+  if (!isRecord(value)) throw new Error('Expected a computer object');
+  const state = value.state === 'none' ? 'none' : ComputerState.parse(value.state);
+  const size = (raw: unknown, fallback: number) => (typeof raw === 'number' && raw > 0 ? raw : fallback);
+  return {
+    state,
+    desktop: value.desktop === true,
+    width: size(value.width, DESKTOP_WIDTH),
+    height: size(value.height, DESKTOP_HEIGHT),
+    takeover: value.takeover == null ? null : Takeover.parse(value.takeover),
   };
 }
 

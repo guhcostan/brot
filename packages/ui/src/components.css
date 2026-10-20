@@ -750,3 +750,258 @@
     }
   }
 }
+
+@layer components {
+  /* ToolTimeline: a run of tool calls on a rail. The spinner is the one loop chrome is allowed, while work runs. */
+  .brot-steps {
+    border: 1px solid var(--line);
+    border-radius: var(--r-lg);
+    background: var(--surface);
+    overflow: hidden;
+    animation: brot-enter var(--dur-base) var(--ease) both;
+  }
+  .brot-steps > summary {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    min-width: 0;
+    min-height: 40px;
+    padding: 0 var(--space-3);
+    cursor: pointer;
+    list-style: none;
+    font-size: var(--fs-sm);
+    transition: background-color var(--dur-fast) var(--ease);
+  }
+  .brot-steps > summary::-webkit-details-marker {
+    display: none;
+  }
+  .brot-steps > summary:hover {
+    background: var(--surface-2);
+  }
+  .brot-steps__icons {
+    display: inline-flex;
+    flex: none;
+  }
+  .brot-steps__icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    margin-left: -6px;
+    border: 1.5px solid var(--surface);
+    border-radius: var(--r-full);
+    background: var(--surface-2);
+    color: var(--ink-2);
+  }
+  .brot-steps__icon:first-child {
+    margin-left: 0;
+  }
+  .brot-steps__headline {
+    display: flex;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+  }
+  .brot-steps__current {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-2);
+    min-width: 0;
+    animation: brot-enter var(--dur-base) var(--ease) both;
+  }
+  .brot-steps__title {
+    flex: none;
+    font-weight: 500;
+    color: var(--ink);
+  }
+  .brot-steps__summary,
+  .brot-step__summary {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--font-code);
+    font-size: var(--fs-xs);
+    color: var(--ink-2);
+  }
+  .brot-steps__count {
+    flex: none;
+    font-size: var(--fs-xs);
+    color: var(--ink-3);
+    font-variant-numeric: tabular-nums;
+  }
+  .brot-steps__state,
+  .brot-step__status {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    color: var(--ink-2);
+  }
+  .brot-steps__state[data-status="error"],
+  .brot-step__status[data-status="error"] {
+    color: var(--attention);
+  }
+  .brot-steps > summary::after {
+    content: "";
+    flex: none;
+    width: 5px;
+    height: 5px;
+    margin: 0 2px 2px;
+    border-right: 1.5px solid var(--ink-3);
+    border-bottom: 1.5px solid var(--ink-3);
+    transform: rotate(45deg);
+    transition: transform var(--dur-fast) var(--ease);
+  }
+  .brot-steps[open] > summary::after {
+    margin-bottom: -2px;
+    transform: rotate(-135deg);
+  }
+  .brot-steps__spinner {
+    width: 12px;
+    height: 12px;
+    border: 1.5px solid var(--line);
+    border-top-color: var(--ink);
+    border-radius: var(--r-full);
+    animation: brot-spin 0.8s linear infinite;
+  }
+  .brot-steps__list {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    margin: 0;
+    padding: var(--space-2) var(--space-3) var(--space-3);
+    list-style: none;
+    border-top: 1px solid var(--line);
+  }
+  .brot-step {
+    position: relative;
+    display: flex;
+    gap: var(--space-3);
+    padding: var(--space-1) 0;
+    animation: brot-enter var(--dur-base) var(--ease) both;
+  }
+  .brot-step:not(:last-child)::before {
+    content: "";
+    position: absolute;
+    top: 30px;
+    bottom: -6px;
+    left: 11px;
+    width: 1px;
+    background: var(--line);
+  }
+  .brot-step__node {
+    position: relative;
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    width: 23px;
+    height: 23px;
+    border: 1px solid var(--line);
+    border-radius: var(--r-full);
+    background: var(--surface);
+    color: var(--ink-2);
+  }
+  .brot-step[data-status="running"] .brot-step__node {
+    border-color: var(--ink);
+    color: var(--ink);
+  }
+  .brot-step[data-status="error"] .brot-step__node {
+    border-color: var(--attention);
+    color: var(--attention-text);
+  }
+  .brot-step__main {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: var(--space-1);
+    min-width: 0;
+    padding-top: 2px;
+  }
+  .brot-step__line {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-2);
+    min-width: 0;
+    font-size: var(--fs-sm);
+  }
+  .brot-step__title {
+    flex: none;
+    font-weight: 500;
+  }
+  .brot-step__line .brot-step__summary {
+    flex: 1;
+  }
+  .brot-step__status {
+    align-self: center;
+    margin-left: auto;
+  }
+  .brot-step__details > summary {
+    width: fit-content;
+    padding: 2px 6px;
+    margin-left: -6px;
+    border-radius: var(--r-sm);
+    font-size: var(--fs-xs);
+    color: var(--ink-3);
+    cursor: pointer;
+    list-style: none;
+  }
+  .brot-step__details > summary::-webkit-details-marker {
+    display: none;
+  }
+  .brot-step__details > summary:hover {
+    background: var(--surface-2);
+    color: var(--ink-2);
+  }
+  .brot-step__details[open] {
+    display: grid;
+    gap: var(--space-2);
+  }
+
+  /* Skeleton */
+  .brot-skeleton {
+    display: block;
+    height: 12px;
+    border-radius: var(--r-sm);
+    background: var(--surface-2);
+    animation: brot-pulse 1.4s ease-in-out infinite;
+  }
+  .brot-skeleton[data-shape="block"] {
+    border-radius: var(--r-lg);
+  }
+  .brot-skeleton[data-shape="circle"] {
+    border-radius: var(--r-full);
+  }
+
+  @keyframes brot-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+  @keyframes brot-pulse {
+    50% {
+      opacity: 0.45;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .brot-steps,
+    .brot-step,
+    .brot-steps__current {
+      animation-name: brot-fade;
+    }
+    .brot-steps__spinner {
+      animation: none;
+    }
+    .brot-skeleton {
+      animation: none;
+    }
+    .brot-steps > summary::after {
+      transition: none;
+    }
+  }
+}

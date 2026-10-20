@@ -141,6 +141,9 @@ body,
   box-shadow: var(--shadow-float);
   overflow: hidden;
 }
+.brot-dialog[data-size="lg"] {
+  max-height: calc(100dvh - 48px);
+}
 .brot-dialog[open] {
   animation: brot-rise 200ms var(--ease) both;
 }
@@ -167,10 +170,53 @@ body,
   accent-color: var(--ink);
 }
 
+/* Switching views: the main pane settles in with a short fade and rise. */
+.pane-enter > * {
+  animation: brot-enter var(--dur-base) var(--ease) both;
+}
+
+/* Below xl the context panel is an overlay that slides in from the right edge. */
+@media (max-width: 1279px) {
+  .context-panel.fixed {
+    animation: brot-slide-in 200ms var(--ease) both;
+  }
+}
+
+/* The live screen while the person drives it: an attention ring, because the bot is paused for them. */
+.computer-screen[data-control="you"] {
+  border-color: var(--attention);
+  box-shadow: 0 0 0 2px var(--attention);
+}
+.computer-screen:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+@keyframes brot-slide-in {
+  from {
+    opacity: 0;
+    transform: translateX(24px);
+  }
+}
+@keyframes brot-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  60% {
+    transform: scale(1.12);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .exchange,
-  .brot-dialog[open] {
+  .brot-dialog[open],
+  .pane-enter > *,
+  .context-panel.fixed {
     animation-name: brot-fade;
+  }
+  [class*="animate-"] {
+    animation-name: brot-fade !important;
   }
   .exchange > summary::after {
     transition: none;

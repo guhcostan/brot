@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, type ReactElement, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type ReactElement, type ReactNode } from 'react';
 import { Button } from '@brot/ui';
 import { t } from '../i18n';
 import { Close } from './icons';
@@ -9,8 +9,8 @@ export interface DialogProps {
   description?: string;
   onClose: () => void;
   children: ReactNode;
-  /** Wider layout for detail views. */
-  size?: 'sm' | 'md';
+  /** Wider layouts for forms and the pop-out screen. */
+  size?: 'sm' | 'md' | 'lg';
 }
 
 /**
@@ -42,7 +42,8 @@ export function Dialog({ open, title, description, onClose, children, size = 'sm
       onClick={(event) => {
         if (event.target === ref.current) onClose();
       }}
-      className={`brot-dialog ${size === 'md' ? 'max-w-[560px]' : 'max-w-[440px]'}`}
+      data-size={size}
+      className={`brot-dialog ${size === 'lg' ? 'max-w-[1080px]' : size === 'md' ? 'max-w-[600px]' : 'max-w-[440px]'}`}
     >
       {open ? (
         <div className="flex max-h-[inherit] flex-col">
@@ -65,5 +66,55 @@ export function Dialog({ open, title, description, onClose, children, size = 'sm
         </div>
       ) : null}
     </dialog>
+  );
+}
+
+export interface ConfirmDialogProps {
+  open: boolean;
+  title: string;
+  description: string;
+  confirmLabel: string;
+  /** `danger` uses the attention outline, for deletes. */
+  tone?: 'primary' | 'danger';
+  onConfirm: () => Promise<unknown>;
+  onClose: () => void;
+}
+
+/** Asks before an action that is hard to undo. Stays open with the error if the action fails. */
+export function ConfirmDialog({ open, title, description, confirmLabel, tone = 'primary', onConfirm, onClose }: ConfirmDialogProps): ReactElement {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const confirm = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await onConfirm();
+      onClose();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} title={title} description={description} onClose={onClose}>
+      <div className="flex flex-col gap-4 px-5 pt-4 pb-5">
+        {error ? (
+          <p role="alert" className="m-0 text-sm text-attention-text">
+            {error}
+          </p>
+        ) : null}
+        <div className="flex justify-end gap-2">
+          <Button variant="secondary" onClick={onClose} autoFocus>
+            {t('dialog.cancel')}
+          </Button>
+          <Button variant={tone} disabled={busy} onClick={() => void confirm()}>
+            {confirmLabel}
+          </Button>
+        </div>
+      </div>
+    </Dialog>
   );
 }

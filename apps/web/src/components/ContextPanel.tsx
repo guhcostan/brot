@@ -1,13 +1,14 @@
 import { useId, useState, type ReactElement } from 'react';
-import type { Bot, Task } from '@brot/protocol';
+import { MAX_ROOM_BOTS, MIN_ROOM_BOTS, type Bot, type Task } from '@brot/protocol';
 import { Badge, BotAvatar, Button, Card, EmptyState, cx } from '@brot/ui';
 import type { Room } from '../data/client';
 import { avatarOf, formatCount, formatTime, formatUsd } from '../format';
 import { t, type TranslationKey } from '../i18n';
 import { botActivity, sumCost, type ThreadState } from '../state/thread';
-import { Plus } from './icons';
+import { ComputerSection } from './ComputerPanel';
+import { Close, Plus } from './icons';
 import { TaskList } from './Tasks';
-import { moodOf } from './team';
+import { moodOf, useTeam } from './team';
 
 const BOT_TABS = ['memory', 'tasks', 'skills', 'apps', 'routines', 'cost'] as const;
 const ROOM_TABS = ['tasks', 'cost'] as const;
@@ -30,6 +31,7 @@ export interface ContextPanelProps {
   /** Tasks for this bot or room, newest first. */
   tasks: Task[];
   onNewTask: () => void;
+  onUpdateMembers: (roomId: string, change: { add?: string[]; remove?: string[] }) => Promise<unknown>;
   onClose: () => void;
   className?: string;
 }
@@ -38,14 +40,14 @@ export interface ContextPanelProps {
  * A bot's computer on top, or a room's members, then text tabs with an underline (DESIGN.md
  * section 7).
  */
-export function ContextPanel({ subject, thread, tasks, onNewTask, onClose, className }: ContextPanelProps): ReactElement {
+export function ContextPanel({ subject, thread, tasks, onNewTask, onUpdateMembers, onClose, className }: ContextPanelProps): ReactElement {
   const tabs: readonly TabId[] = subject.kind === 'bot' ? BOT_TABS : ROOM_TABS;
   const [chosen, setTab] = useState<TabId>(subject.kind === 'bot' ? 'memory' : 'tasks');
   const tab = tabs.includes(chosen) ? chosen : tabs[0]!;
   const idBase = useId();
 
   return (
-    <aside className={cx('flex min-h-0 flex-col bg-surface md:border-l md:border-line', className)}>
+    <aside className={cx('context-panel flex min-h-0 flex-col bg-surface md:border-l md:border-line', className)}>
       <div className="titlebar flex h-14 flex-none items-center justify-between gap-2 border-b border-line px-4 mac-shell:pl-20 md:mac-shell:pl-4">
         <h2 className="m-0 text-base font-semibold tracking-[var(--tracking-heading)]">
           {subject.kind === 'bot' ? t('context.computer') : t('context.members')}
@@ -56,7 +58,11 @@ export function ContextPanel({ subject, thread, tasks, onNewTask, onClose, class
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {subject.kind === 'bot' ? <Computer bot={subject.bot} /> : <Members room={subject.room} members={subject.members} thread={thread} />}
+        {subject.kind === 'bot' ? (
+          <ComputerSection bot={subject.bot} thread={thread} />
+        ) : (
+          <Members room={subject.room} members={subject.members} thread={thread} onUpdate={(change) => onUpdateMembers(subject.room.thread.id, change)} />
+        )}
 
         <div
           role="tablist"
@@ -105,48 +111,111 @@ export function ContextPanel({ subject, thread, tasks, onNewTask, onClose, class
   );
 }
 
-function Computer({ bot }: { bot: Bot }): ReactElement {
-  const name = bot.name;
-  const avatar = avatarOf(bot);
-  if (bot.computer === 'none') {
-    return (
-      <div className="flex flex-col gap-1 border-b border-line p-4">
-        <p className="m-0 text-base font-medium">{t('context.noComputerTitle')}</p>
-        <p className="m-0 text-sm text-ink-2">{t('context.noComputerBody', { name })}</p>
-      </div>
-    );
-  }
-  return (
-    <div className="flex flex-col gap-3 border-b border-line p-4">
-      <div className="flex aspect-[16/10] flex-col items-center justify-center gap-3 rounded-lg border border-line bg-surface-2 p-4 text-center">
-        <BotAvatar shape={avatar.shape} color={avatar.color} mood="sleeping" size="md" />
-        <p className="m-0 max-w-[30ch] text-sm text-ink-2">{t('context.computerBody', { name })}</p>
-      </div>
-      <p className="m-0 text-sm font-medium">{t('context.computerTitle')}</p>
-    </div>
-  );
+interface MembersProps {
+  room: Room;
+  members: Bot[];
+  thread: ThreadState;
+  onUpdate: (change: { add?: string[]; remove?: string[] }) => Promise<unknown>;
 }
 
-function Members({ room, members, thread }: { room: Room; members: Bot[]; thread: ThreadState }): ReactElement {
+/** Room members with their live activity. Members can be added and removed; the lead stays. */
+function Members({ room, members, thread, onUpdate }: MembersProps): ReactElement {
+  const { bots } = useTeam();
+  const [adding, setAdding] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const selectId = useId();
+  const lead = room.thread.leadBotId ?? room.thread.botId;
+  const candidates = Object.values(bots).filter((bot) => !bot.archived && !members.some((member) => member.id === bot.id));
+  const canRemove = members.length > MIN_ROOM_BOTS;
+  const canAdd = members.length < MAX_ROOM_BOTS && candidates.length > 0;
+
+  const change = async (key: string, input: { add?: string[]; remove?: string[] }) => {
+    setBusy(key);
+    setError(null);
+    try {
+      await onUpdate(input);
+      setAdding(false);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(null);
+    }
+  };
+
   return (
     <div className="flex flex-col gap-1 border-b border-line p-3">
       <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
         {members.map((bot) => {
           const avatar = avatarOf(bot);
           const activity = botActivity(thread, bot.id);
+          const removable = canRemove && bot.id !== lead;
           return (
-            <li key={bot.id} data-avatar-zone className="flex items-center gap-3 rounded-md px-1 py-1.5">
+            <li key={bot.id} data-avatar-zone className="group flex animate-[brot-enter_var(--dur-base)_var(--ease)_both] items-center gap-3 rounded-md px-1 py-1.5">
               <BotAvatar shape={avatar.shape} color={avatar.color} mood={moodOf(activity)} size="md" />
               <span className="flex min-w-0 flex-1 flex-col">
                 <span className="truncate text-sm font-medium">{bot.name}</span>
                 <span className="truncate text-xs text-ink-2">{activity === 'idle' ? bot.job : t(activity === 'waiting' ? 'status.waiting' : 'status.working')}</span>
               </span>
-              {bot.id === room.thread.leadBotId ? <Badge>{t('room.lead')}</Badge> : null}
-              {bot.id === thread.baton && bot.id !== room.thread.leadBotId ? <Badge>{t('room.next')}</Badge> : null}
+              {bot.id === lead ? <Badge>{t('room.lead')}</Badge> : null}
+              {bot.id === thread.baton && bot.id !== lead ? <Badge>{t('room.next')}</Badge> : null}
+              {removable ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  disabled={busy !== null}
+                  onClick={() => void change(bot.id, { remove: [bot.id] })}
+                  aria-label={t('members.remove', { name: bot.name })}
+                  title={t('members.remove', { name: bot.name })}
+                  className="!min-h-7 !px-1.5 text-ink-3 opacity-100 group-hover:text-ink md:opacity-0 md:group-focus-within:opacity-100 md:group-hover:opacity-100"
+                >
+                  <Close size={14} />
+                </Button>
+              ) : null}
             </li>
           );
         })}
       </ul>
+      {adding ? (
+        <div className="flex animate-[brot-enter_var(--dur-base)_var(--ease)_both] flex-col gap-1.5 px-1 pt-1">
+          <label htmlFor={selectId} className="text-xs font-medium text-ink-2">
+            {t('members.addLabel')}
+          </label>
+          <div className="flex gap-2">
+            <select
+              id={selectId}
+              className="brot-input min-w-0 flex-1"
+              defaultValue=""
+              disabled={busy !== null}
+              onChange={(event) => {
+                if (event.target.value) void change('add', { add: [event.target.value] });
+              }}
+            >
+              <option value="" disabled>
+                {t('members.pick')}
+              </option>
+              {candidates.map((bot) => (
+                <option key={bot.id} value={bot.id}>
+                  {bot.name} · {bot.job}
+                </option>
+              ))}
+            </select>
+            <Button variant="ghost" size="sm" onClick={() => setAdding(false)}>
+              {t('dialog.cancel')}
+            </Button>
+          </div>
+        </div>
+      ) : canAdd ? (
+        <Button variant="ghost" size="sm" className="self-start text-ink-2" onClick={() => setAdding(true)}>
+          <Plus size={14} />
+          {t('members.add')}
+        </Button>
+      ) : null}
+      {error ? (
+        <p role="alert" className="m-0 px-1 text-xs text-attention-text">
+          {error}
+        </p>
+      ) : null}
       <p className="m-0 px-1 pt-1 text-xs text-ink-2">
         {room.thread.responder === 'mention' ? t('room.ruleMention') : t('room.ruleLeadShort')}
       </p>

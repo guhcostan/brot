@@ -1,7 +1,7 @@
 import type { ReactElement, ReactNode } from 'react';
 import type { ApprovalDecision } from '@brot/protocol';
-import { ApprovalCard, MessageBubble, StatusDot, TaskStatusLabel, ToolCallCard, TypingIndicator } from '@brot/ui';
-import { formatTime, summarizeArgs } from '../format';
+import { ApprovalCard, MessageBubble, StatusDot, TaskStatusLabel, ToolTimeline, TypingIndicator } from '@brot/ui';
+import { formatTime } from '../format';
 import { t } from '../i18n';
 import { splitMentions, type Mentionable } from '../mentions';
 import {
@@ -13,7 +13,10 @@ import {
   type TaskRefItem,
   type ThreadState,
   type TimelineItem,
+  type ToolItem,
 } from '../state/thread';
+import { approvalLabels } from './approvalLabels';
+import { timelineLabels, toStep } from './toolLabels';
 import { taskStatusLabel } from './taskLabels';
 import { ArrowRight, Baton } from './icons';
 import { TeamAvatar, moodOf, useBotName, useTeam } from './team';
@@ -31,9 +34,13 @@ export interface TimelineProps {
 
 type Block =
   | { kind: 'turn'; botId: string | undefined; messages: MessageItem[] }
+  | { kind: 'tools'; items: ToolItem[] }
   | { kind: 'item'; item: TimelineItem };
 
-/** Consecutive assistant messages by the same bot form one turn, so the name and avatar show once. */
+/**
+ * Consecutive assistant messages by the same bot form one turn, so the name and avatar show once.
+ * Consecutive tool calls form one step timeline.
+ */
 export function toBlocks(items: readonly TimelineItem[], defaultBotId?: string): Block[] {
   const blocks: Block[] = [];
   for (const item of items) {
@@ -47,6 +54,15 @@ export function toBlocks(items: readonly TimelineItem[], defaultBotId?: string):
       blocks.push({ kind: 'turn', botId, messages: [item] });
       continue;
     }
+    if (item.kind === 'tool') {
+      const last = blocks.at(-1);
+      if (last?.kind === 'tools') {
+        last.items.push(item);
+        continue;
+      }
+      blocks.push({ kind: 'tools', items: [item] });
+      continue;
+    }
     blocks.push({ kind: 'item', item });
   }
   return blocks;
@@ -54,6 +70,7 @@ export function toBlocks(items: readonly TimelineItem[], defaultBotId?: string):
 
 function blockKey(block: Block): string {
   if (block.kind === 'turn') return `turn:${block.messages[0]?.id ?? ''}`;
+  if (block.kind === 'tools') return `tools:${block.items[0]?.callId ?? ''}`;
   const { item } = block;
   switch (item.kind) {
     case 'message':
@@ -74,6 +91,8 @@ function blockKey(block: Block): string {
 export function Timeline({ thread, mode, defaultBotId, members, onDecide }: TimelineProps): ReactElement {
   const renderText = (text: string): ReactNode => <MentionText text={text} members={members} />;
   const gazes = gazeTargets(thread);
+  const stepLabels = timelineLabels();
+  const cardLabels = approvalLabels();
   return (
     <>
       {toBlocks(thread.items, defaultBotId).map((block) => {
@@ -81,6 +100,7 @@ export function Timeline({ thread, mode, defaultBotId, members, onDecide }: Time
         if (block.kind === 'turn') {
           return <BotTurn key={key} botId={block.botId} messages={block.messages} mode={mode} renderText={renderText} thread={thread} />;
         }
+        if (block.kind === 'tools') return <ToolTimeline key={key} steps={block.items.map(toStep)} labels={stepLabels} />;
         const { item } = block;
         switch (item.kind) {
           case 'message':
@@ -96,21 +116,13 @@ export function Timeline({ thread, mode, defaultBotId, members, onDecide }: Time
               />
             );
           case 'tool':
-            return (
-              <ToolCallCard
-                key={key}
-                tool={item.tool}
-                status={item.status}
-                summary={summarizeArgs(item.args) || undefined}
-                args={item.args}
-                output={item.output}
-              />
-            );
+            return <ToolTimeline key={key} steps={[toStep(item)]} labels={stepLabels} />;
           case 'approval':
             return (
               <ApprovalCard
                 key={key}
                 approval={item.approval}
+                labels={cardLabels}
                 onDecide={(decision, reply) => {
                   void onDecide(item.approval.id, decision, reply);
                 }}

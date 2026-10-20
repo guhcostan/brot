@@ -1,4 +1,4 @@
-import type { Bot, CanonicalEvent, Task } from '@brot/protocol';
+import type { Approval, Bot, CanonicalEvent, Task } from '@brot/protocol';
 import type { Room } from '../data/client';
 import {
   applyEvent,
@@ -6,13 +6,19 @@ import {
   botStatus,
   emptyThread,
   foldEvents,
+  pendingApprovals,
   pendingAsks,
   type BotStatus,
   type ThreadState,
 } from './thread';
 
 /** What the main pane shows. */
-export type Selection = { kind: 'bot'; id: string } | { kind: 'room'; id: string } | { kind: 'tasks' };
+export type Selection =
+  | { kind: 'bot'; id: string }
+  | { kind: 'room'; id: string }
+  | { kind: 'tasks' }
+  | { kind: 'approvals' }
+  | { kind: 'settings' };
 
 export interface AppState {
   bots: Bot[];
@@ -47,6 +53,9 @@ export type AppAction =
   | { type: 'history-loaded'; botId: string; events: CanonicalEvent[] }
   | { type: 'room-history-loaded'; roomId: string; events: CanonicalEvent[] }
   | { type: 'event'; botId?: string; roomId?: string; event: CanonicalEvent }
+  | { type: 'bot-saved'; bot: Bot }
+  | { type: 'bot-removed'; botId: string }
+  | { type: 'room-members'; roomId: string; memberIds: string[] }
   | { type: 'select'; selection: Selection }
   | { type: 'failed'; message: string };
 
@@ -64,7 +73,8 @@ function withMembers(rooms: Room[], roomId: string, memberIds: string[]): Room[]
 export function appReducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
     case 'bots-loaded': {
-      const preferred = action.bots.find((bot) => bot.pinned) ?? action.bots[0];
+      const active = action.bots.filter((bot) => !bot.archived);
+      const preferred = active.find((bot) => bot.pinned) ?? active[0];
       return {
         ...state,
         bots: action.bots,
@@ -105,6 +115,35 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       }
       return next;
     }
+    case 'bot-saved': {
+      const exists = state.bots.some((bot) => bot.id === action.bot.id);
+      return {
+        ...state,
+        bots: exists ? state.bots.map((bot) => (bot.id === action.bot.id ? action.bot : bot)) : [...state.bots, action.bot],
+        threads: state.threads[action.bot.id] ? state.threads : { ...state.threads, [action.bot.id]: emptyThread },
+      };
+    }
+    case 'bot-removed': {
+      const { [action.botId]: _gone, ...threads } = state.threads;
+      const bots = state.bots.filter((bot) => bot.id !== action.botId);
+      const selected = state.selection?.kind === 'bot' && state.selection.id === action.botId;
+      const fallback = bots.find((bot) => !bot.archived);
+      return {
+        ...state,
+        bots,
+        threads,
+        rooms: state.rooms.map((room) => ({ ...room, memberIds: room.memberIds.filter((id) => id !== action.botId) })),
+        selection: selected ? (fallback ? { kind: 'bot', id: fallback.id } : null) : state.selection,
+      };
+    }
+    case 'room-members': {
+      const thread = state.roomThreads[action.roomId];
+      return {
+        ...state,
+        rooms: withMembers(state.rooms, action.roomId, action.memberIds),
+        roomThreads: thread ? { ...state.roomThreads, [action.roomId]: { ...thread, members: action.memberIds } } : state.roomThreads,
+      };
+    }
     case 'select':
       return { ...state, selection: action.selection };
     case 'failed':
@@ -141,4 +180,22 @@ export function membersOf(state: AppState, roomId: string): string[] {
 
 export function taskList(state: AppState): Task[] {
   return Object.values(state.tasks).sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+}
+
+export interface InboxEntry {
+  approval: Approval;
+  /** The room the approval was asked in. Absent for a DM. */
+  roomId?: string;
+}
+
+/** Every pending approval across DMs and rooms, newest first, each listed once. */
+export function inbox(state: AppState): InboxEntry[] {
+  const seen = new Map<string, InboxEntry>();
+  for (const thread of Object.values(state.threads)) {
+    for (const item of pendingApprovals(thread)) seen.set(item.approval.id, { approval: item.approval });
+  }
+  for (const [roomId, thread] of Object.entries(state.roomThreads)) {
+    for (const item of pendingApprovals(thread)) if (!seen.has(item.approval.id)) seen.set(item.approval.id, { approval: item.approval, roomId });
+  }
+  return [...seen.values()].sort((a, b) => Date.parse(b.approval.createdAt) - Date.parse(a.approval.createdAt));
 }

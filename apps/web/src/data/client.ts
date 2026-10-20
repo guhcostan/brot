@@ -1,12 +1,21 @@
 import type {
   Bot,
   CanonicalEvent,
+  ComputerInput,
+  ComputerState,
+  CreateBotInput,
+  Device,
+  PairingStartResponse,
   PostMessage,
   ResolveApproval,
   ResponderMode,
+  SetTakeover,
+  Takeover,
   Task,
   TaskStatus,
   Thread,
+  UpdateBot,
+  UpdateRoomMembers,
 } from '@brot/protocol';
 
 /**
@@ -52,6 +61,41 @@ export interface TaskFilter {
   threadId?: string;
 }
 
+export interface ProviderModel {
+  id: string;
+  label: string;
+}
+
+/** A model provider from `GET /api/providers`. `configured` means the vault holds `secretName`. */
+export interface Provider {
+  id: string;
+  label: string;
+  models: ProviderModel[];
+  configured: boolean;
+  secretName: string;
+}
+
+/** A bot's computer from `GET /api/bots/:id/computer` (docs/COMPUTER-USE.md). */
+export interface ComputerInfo {
+  state: ComputerState | 'none';
+  desktop: boolean;
+  width: number;
+  height: number;
+  takeover: Takeover | null;
+}
+
+/** The screen could not be read: 404 when the bot has no desktop, 409 when the computer is not running. */
+export class ScreenUnavailable extends Error {
+  constructor(readonly status: number) {
+    super(`Screen unavailable (${status})`);
+    this.name = 'ScreenUnavailable';
+  }
+}
+
+export interface ListBotsOptions {
+  includeArchived?: boolean;
+}
+
 /**
  * What the web app needs from the Brot server. Posting returns before the run finishes; the run
  * arrives as canonical events through onEvent, the same way the server's SSE stream delivers them.
@@ -59,7 +103,10 @@ export interface TaskFilter {
  * (httpClient.ts), which maps each bot to its DM thread on the server (docs/TEAM-API.md).
  */
 export interface BrotClient {
-  listBots(): Promise<Bot[]>;
+  listBots(options?: ListBotsOptions): Promise<Bot[]>;
+  createBot(input: CreateBotInput): Promise<Bot>;
+  updateBot(botId: string, patch: UpdateBot): Promise<Bot>;
+  deleteBot(botId: string): Promise<void>;
   history(botId: string): Promise<CanonicalEvent[]>;
   onEvent(listener: (event: BotEvent) => void): () => void;
   postMessage(botId: string, input: PostMessage): Promise<void>;
@@ -69,8 +116,24 @@ export interface BrotClient {
   createRoom(input: NewRoom): Promise<Room>;
   roomHistory(roomId: string): Promise<CanonicalEvent[]>;
   postRoomMessage(roomId: string, input: RoomMessage): Promise<void>;
+  /** Returns the member bot ids after the change. */
+  updateRoomMembers(roomId: string, change: UpdateRoomMembers): Promise<string[]>;
 
   listTasks(filter?: TaskFilter): Promise<Task[]>;
   createTask(input: NewTask): Promise<Task>;
   cancelTask(taskId: string): Promise<Task>;
+
+  listProviders(): Promise<Provider[]>;
+  /** Stores a secret in the vault. The value is never read back. */
+  setSecret(name: string, value: string): Promise<void>;
+  listDevices(): Promise<Device[]>;
+  removeDevice(deviceId: string): Promise<void>;
+  startPairing(): Promise<PairingStartResponse>;
+
+  getComputer(botId: string): Promise<ComputerInfo>;
+  startComputer(botId: string): Promise<ComputerInfo>;
+  /** The current frame. Throws ScreenUnavailable for 404 and 409. */
+  computerScreen(botId: string, signal?: AbortSignal): Promise<Blob>;
+  computerInput(botId: string, input: ComputerInput): Promise<void>;
+  setTakeover(botId: string, input: SetTakeover): Promise<Takeover>;
 }

@@ -58,3 +58,81 @@ export const ArrowRight = ({ size = 12 }: { size?: number }) => (
     <path d="M4 10h11M11 6l4 4-4 4" />
   </Icon>
 );
+
+export const Gear = ({ size }: { size?: number }) => (
+  <Icon size={size}>
+    <circle cx="10" cy="10" r="2.5" />
+    <path d="M10 2.75v1.9M10 15.35v1.9M17.25 10h-1.9M4.65 10h-1.9M15.13 4.87l-1.35 1.35M6.22 13.78l-1.35 1.35M15.13 15.13l-1.35-1.35M6.22 6.22 4.87 4.87" />
+  </Icon>
+);
+
+/** A tray: the approvals inbox. */
+export const Inbox = ({ size }: { size?: number }) => (
+  <Icon size={size}>
+    <path d="M3 11.5 5 4.75h10l2 6.75v3.75a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z" />
+    <path d="M3 11.5h4l1 2h4l1-2h4" />
+  </Icon>
+);
+
+export const Pencil = ({ size }: { size?: number }) => (
+  <Icon size={size}>
+    <path d="m12.5 4.5 3 3-8.25 8.25-3.75.75.75-3.75z" />
+  </Icon>
+);
+
+export const Archive = ({ size }: { size?: number }) => (
+  <Icon size={size}>
+    <rect x="3" y="4" width="14" height="3.5" rx="1" />
+    <path d="M4.25 7.5v7.75a1 1 0 0 0 1 1h9.5a1 1 0 0 0 1-1V7.5M8.25 10.5h3.5" />
+  </Icon>
+);
+
+export const Trash = ({ size }: { size?: number }) => (
+  <Icon size={size}>
+    <path d="M4 5.5h12M8 5.5V4h4v1.5M5.5 5.5l.75 10.75h7.5l.75-10.75" />
+  </Icon>
+);
+
+export const Expand = ({ size }: { size?: number }) => (
+  <Icon size={size}>
+    <path d="M11.5 3.5h5v5M8.5 16.5h-5v-5M16.5 3.5 11 9M3.5 16.5 9 11" />
+  </Icon>
+);
+
+export const Hand = ({ size }: { size?: number }) => (
+  <Icon size={size}>
+    <path d="M7 10.5V5.25a1.25 1.25 0 0 1 2.5 0V9.5m0-1.25V4.25a1.25 1.25 0 0 1 2.5 0V9.5m0-3.25a1.25 1.25 0 0 1 2.5 0v5.25A5.25 5.25 0 0 1 9.25 16.75 4.5 4.5 0 0 1 5.4 14.6L3.9 12a1.2 1.2 0 0 1 2-1.35L7 12" />
+  </Icon>
+);
+
+export const Play = ({ size }: { size?: number }) => (
+  <Icon size={size}>
+    <path d="M6.5 4.5v11l9-5.5z" />
+  </Icon>
+);
+
+export const Monitor = ({ size }: { size?: number }) => (
+  <Icon size={size}>
+    <rect x="2.75" y="3.75" width="14.5" height="10" rx="1.75" />
+    <path d="M7 16.75h6M10 13.75v3" />
+  </Icon>
+);
+
+export const Check = ({ size }: { size?: number }) => (
+  <Icon size={size}>
+    <path d="m4.5 10.5 3.5 3.5 7.5-8" />
+  </Icon>
+);
+
+export const Phone = ({ size }: { size?: number }) => (
+  <Icon size={size}>
+    <rect x="5.75" y="2.75" width="8.5" height="14.5" rx="2" />
+    <path d="M9 14.5h2" />
+  </Icon>
+);
+
+export const Sparkle = ({ size }: { size?: number }) => (
+  <Icon size={size}>
+    <path d="M10 3.5c.5 3.2 1.8 4.5 5 5-3.2.5-4.5 1.8-5 5-.5-3.2-1.8-4.5-5-5 3.2-.5 4.5-1.8 5-5Z" />
+  </Icon>
+);

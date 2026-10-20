@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useReducer } from 'react';
-import type { ApprovalDecision } from '@brot/protocol';
+import type { ApprovalDecision, CreateBotInput, UpdateBot } from '@brot/protocol';
 import type { BrotClient, NewRoom, NewTask, RoomMessage } from '../data/client';
 import { appReducer, initialAppState, type Selection } from './store';
 
@@ -15,7 +15,7 @@ export function useChat(client: BrotClient) {
       if (active) dispatch({ type: 'event', botId, roomId, event });
     });
 
-    const loadBots = client.listBots().then(async (bots) => {
+    const loadBots = client.listBots({ includeArchived: true }).then(async (bots) => {
       if (!active) return;
       dispatch({ type: 'bots-loaded', bots });
       await Promise.all(
@@ -99,5 +99,54 @@ export function useChat(client: BrotClient) {
     [client],
   );
 
-  return { state, select, send, sendToRoom, decide, createRoom, createTask, cancelTask };
+  const createBot = useCallback(
+    async (input: CreateBotInput) => {
+      const bot = await client.createBot(input);
+      dispatch({ type: 'bot-saved', bot });
+      dispatch({ type: 'select', selection: { kind: 'bot', id: bot.id } });
+      return bot;
+    },
+    [client],
+  );
+
+  const updateBot = useCallback(
+    async (botId: string, patch: UpdateBot) => {
+      const bot = await client.updateBot(botId, patch);
+      dispatch({ type: 'bot-saved', bot });
+      return bot;
+    },
+    [client],
+  );
+
+  const deleteBot = useCallback(
+    async (botId: string) => {
+      await client.deleteBot(botId);
+      dispatch({ type: 'bot-removed', botId });
+    },
+    [client],
+  );
+
+  const updateRoomMembers = useCallback(
+    async (roomId: string, change: { add?: string[]; remove?: string[] }) => {
+      const memberIds = await client.updateRoomMembers(roomId, change);
+      dispatch({ type: 'room-members', roomId, memberIds });
+      return memberIds;
+    },
+    [client],
+  );
+
+  return {
+    state,
+    select,
+    send,
+    sendToRoom,
+    decide,
+    createRoom,
+    createTask,
+    cancelTask,
+    createBot,
+    updateBot,
+    deleteBot,
+    updateRoomMembers,
+  };
 }
