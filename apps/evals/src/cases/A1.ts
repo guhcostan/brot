@@ -1,6 +1,6 @@
 import { check, info } from '../checks';
 import type { Case } from '../types';
-import { botSpec, containsAny, httpCalls, LEFT_PAD, textsOf } from './shared';
+import { botSpec, containsAny, httpCalls, LEFT_PAD, outputOf, textsOf } from './shared';
 
 const EGRESS = ['github.com', '*.githubusercontent.com', 'registry.npmjs.org'];
 
@@ -32,7 +32,7 @@ export const A1: Case = {
         '5. Reply with the exact steps to reproduce, the observed and expected results, and the path of the test file.',
       ].join('\n'),
     );
-    ctx.probes.repro = await ctx.exec('onca', 'cd work/left-pad && node test/repro.js; echo "EXIT=$?"');
+    ctx.probes.repro = outputOf(await ctx.exec('onca', 'cd work/left-pad && node test/repro.js; echo "EXIT=$?"'));
     ctx.probes.reproExists = (await ctx.exec('onca', 'test -f work/left-pad/test/repro.js && echo yes || echo no')).stdout.trim();
     ctx.probes.pinned = (await ctx.exec('onca', 'cd work/left-pad && git rev-parse HEAD')).stdout.trim();
     ctx.probes.libraryUnchanged = (await ctx.exec('onca', 'cd work/left-pad && git status --porcelain -- index.js')).stdout.trim() === '';

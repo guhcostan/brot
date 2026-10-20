@@ -245,6 +245,29 @@ describe('contained runs: placement', () => {
 });
 
 describe('contained runs: computer state and egress', () => {
+  it('records the desktop image, not the plain computer image, for a desktop bot', async () => {
+    const engine = fakeEngine(replies);
+    const sandbox = fakeProvider('docker');
+    const ctx = await contextWith({
+      engines: createEngineRegistry([engine.driver]),
+      computers: { sandbox: sandbox.provider },
+    });
+    const bot = await ctx.services.repos.bots.create({
+      name: 'Ada',
+      job: 'Testing',
+      engine: 'dsh',
+      computer: 'sandbox',
+      desktop: true,
+      model: 'fake/model-1',
+    });
+    const thread = await ctx.services.repos.threads.create(bot.id);
+
+    const { terminal } = await runToEnd(ctx, thread.id);
+
+    expect(terminal.type).toBe('run.completed');
+    expect(await ctx.services.repos.computers.getByBot(bot.id)).toMatchObject({ state: 'ready', image: 'brot-desktop:latest' });
+  });
+
   it('starts a sandbox computer with no model hosts, since the model goes through the relay', async () => {
     const engine = fakeEngine(replies);
     const sandbox = fakeProvider('docker');

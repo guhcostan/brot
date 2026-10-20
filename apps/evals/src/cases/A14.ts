@@ -1,3 +1,4 @@
+import { standardPolicy } from '../approvals';
 import { check, review } from '../checks';
 import type { Case } from '../types';
 import { botSpec, fixturePath, httpCalls, textsOf } from './shared';
@@ -10,6 +11,7 @@ export const A14: Case = {
   status: 'now',
   note: 'Publishing goes to httpbin.org as the fake API.',
   egress: EGRESS,
+  approvals: standardPolicy({ httpbinSends: true }),
   async setup(ctx) {
     await ctx.createBot(
       'arara',

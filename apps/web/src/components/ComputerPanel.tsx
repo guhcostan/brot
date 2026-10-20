@@ -128,7 +128,9 @@ export function ComputerSection({ bot, thread }: ComputerSectionProps): ReactEle
       void refresh();
     });
 
-  const state = info?.state ?? (thread.computerState ?? null);
+  // A computer that was never started has no record yet; the server reports it as `none`.
+  const reported = info?.state ?? (thread.computerState ?? null);
+  const state = reported === 'none' ? 'stopped' : reported;
   const desktop = info?.desktop ?? bot.desktop === true;
   const width = info?.width ?? 1280;
   const height = info?.height ?? 800;
@@ -498,7 +500,7 @@ function ScreenView({ bot, state, width, height, interactive, paused, busy, onSt
         ) : null}
 
         {interactive ? (
-          <span className="pointer-events-none absolute top-2 left-2 inline-flex animate-[brot-enter_var(--dur-base)_var(--ease)_both] items-center gap-1.5 rounded-full bg-attention px-2 py-0.5 text-xs font-medium text-[var(--primary-ink)] shadow-float">
+          <span className="pointer-events-none absolute bottom-2 left-2 inline-flex animate-[brot-enter_var(--dur-base)_var(--ease)_both] items-center gap-1.5 rounded-full bg-attention px-2 py-0.5 text-xs font-medium text-[var(--primary-ink)] shadow-float">
             <Hand size={12} />
             {t('computer.youDrive')}
           </span>

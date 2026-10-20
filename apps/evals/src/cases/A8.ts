@@ -1,3 +1,4 @@
+import { standardPolicy } from '../approvals';
 import { check, review } from '../checks';
 import type { Case } from '../types';
 import { botSpec, fixturePath, httpCalls, readFixtureJson, textsOf } from './shared';
@@ -10,6 +11,7 @@ export const A8: Case = {
   status: 'sim',
   note: 'Simulated: invoices are a fixture and sends go to httpbin.org as the fake API.',
   egress: EGRESS,
+  approvals: standardPolicy({ httpbinSends: true }),
   async setup(ctx) {
     await ctx.createBot(
       'tuca',

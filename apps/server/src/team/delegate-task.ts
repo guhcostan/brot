@@ -3,6 +3,8 @@ import type { ApprovalScope } from '../broker';
 import { inputSchemaOf, invalidArguments } from '../mcp/helpers';
 import type { BrotTool, PreparedCall, ToolResult } from '../mcp/types';
 import { chainBudgetSpent, errorMessage, isTerminal, resolveBot, type TeamDeps } from './context';
+import { finishTask } from './update-my-task';
+import type { BotRunOutcome } from './types';
 
 interface DelegationPlan {
   parent?: Task;
@@ -125,13 +127,17 @@ async function delegate(
 
   const callerName = (await repos.bots.get(scope.botId))?.name ?? 'another bot';
   try {
-    await runner.startBot({
+    const started = await runner.startBot({
       botId: target.id,
       threadId: workThread.id,
       input: assignment(callerName, working),
       fromBotId: scope.botId,
       chain: { chainId: working.chainId, depth: working.depth, askHops: plan.askHops },
     });
+    const workScope: ApprovalScope = { botId: target.id, threadId: workThread.id, runId: started.runId };
+    void started.settled
+      .then((outcome) => closeAbandonedTask(deps, task.id, workScope, outcome))
+      .catch((error: unknown) => console.error(`team: task ${task.id} could not be closed after its run ended`, error));
   } catch (error) {
     const reason = `Could not start ${target.name}: ${errorMessage(error)}`;
     const failed = await repos.tasks.update(task.id, { status: 'failed', result: reason });
@@ -143,6 +149,22 @@ async function delegate(
     ok: true,
     output: `Delegated task ${task.id} to ${target.name}. It runs in the background; its result is posted to this thread when it finishes.`,
   };
+}
+
+/**
+ * A work run that ends while its task is still open closes the task with the run's outcome. A completed run
+ * finishes the task with its final text; a failed or cancelled run fails it with the reason. This is the same
+ * rule the rooms task board applies to tasks it starts, so a task never waits on a run that is gone.
+ */
+async function closeAbandonedTask(deps: TeamDeps, taskId: string, scope: ApprovalScope, outcome: BotRunOutcome): Promise<void> {
+  const current = await deps.repos.tasks.get(taskId);
+  if (!current || isTerminal(current.status)) return;
+  if (outcome.status === 'completed') {
+    await finishTask(deps, scope, taskId, 'done', outcome.text || undefined);
+    return;
+  }
+  const reason = outcome.error ?? (outcome.status === 'cancelled' ? 'Run cancelled.' : 'Run failed.');
+  await finishTask(deps, scope, taskId, 'failed', reason);
 }
 
 function assignment(callerName: string, task: Task): string {

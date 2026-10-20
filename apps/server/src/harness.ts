@@ -17,6 +17,7 @@ import type {
 } from '@brot/protocol';
 import type { Broker } from './broker';
 import type { EventBus } from './bus';
+import { DESKTOP_IMAGE } from './computers/docker-args';
 import type { ComputerProvider } from './computers/types';
 import type { ServerMode } from './config';
 import type { LlmRelay, ResolvedRoute, RunUsage } from './llm';
@@ -358,7 +359,7 @@ export function createHarness(deps: HarnessDeps): Harness {
     kind: Exclude<ComputerKind, 'none'>,
     extraHosts: string[],
   ): Promise<{ computer: ComputerHandle; brotBaseUrl: string }> {
-    const image = kind === 'host' ? 'host' : computerImage;
+    const image = kind === 'host' ? 'host' : bot.desktop === true ? DESKTOP_IMAGE : computerImage;
     const scope = { threadId: state.threadId, runId: state.runId };
     try {
       if (kind === 'host' && mode !== 'desktop') {

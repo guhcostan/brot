@@ -1,6 +1,6 @@
 import { check, keyOf, review } from '../checks';
 import type { Case } from '../types';
-import { allTexts, botSpec, eventsOfType } from './shared';
+import { allTexts, botSpec, eventsOfType, fixturePath } from './shared';
 
 const MEMBERS = ['capy', 'onca', 'tuca', 'tamu'] as const;
 
@@ -11,10 +11,13 @@ export const B1: Case = {
   note: 'Team tools: delegate_task, ask_bot, task board, results flowing back.',
   async setup(ctx) {
     await ctx.createBot('capy', botSpec('capy', 'Chief of Staff, leads the team', 'You lead the room. Split the request into tasks with delegate_task, one per piece of work, and send questions with ask_bot. Reply to the user with a short plan and the status.', []));
-    await ctx.createBot('onca', botSpec('onca', 'Bug fixer', 'You fix bugs that other bots delegate to you. Report the result in one short paragraph.', []));
+    await ctx.createBot('onca', botSpec('onca', 'Bug fixer', 'You fix bugs that other bots delegate to you. The invoice export code is in /workspace/repo: run `node invoice-export.test.js` there. Report the result in one short paragraph.', []));
     await ctx.createBot('tuca', botSpec('tuca', 'Sales follow-ups', 'You draft customer follow-up emails. Never send them; drafts only.', []));
     await ctx.createBot('tamu', botSpec('tamu', 'Researcher', 'You answer one question at a time with sources. Keep it short.', []));
     await ctx.room('room', { title: 'Acme renewal', members: [...MEMBERS], lead: 'capy' });
+    // The fixtures are CommonJS sources (.cjs here, so the eval package stays ESM). The computer runs them as .js.
+    await ctx.copyIn('onca', fixturePath('b1/invoice-export.cjs'), 'repo/invoice-export.js');
+    await ctx.copyIn('onca', fixturePath('b1/invoice-export.test.cjs'), 'repo/invoice-export.test.js');
   },
   async run(ctx) {
     await ctx.sayAndWait(

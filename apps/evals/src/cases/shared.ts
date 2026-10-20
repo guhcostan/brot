@@ -20,6 +20,11 @@ export function readFixtureJson<T>(relative: string): T {
   return JSON.parse(readFixture(relative)) as T;
 }
 
+/** The text a command printed, stdout first, then stderr. Checks that read an exit code need both streams. */
+export function outputOf(result: { stdout: string; stderr: string }): string {
+  return [result.stdout, result.stderr].filter((part) => part !== '').join('\n');
+}
+
 /**
  * The public repo the repo cases use. It is pinned to a commit, and the commit already has the bug that A1 reports:
  * `leftPad('ab', 6, 'xy')` returns 10 characters.

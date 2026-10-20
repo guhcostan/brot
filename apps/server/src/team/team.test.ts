@@ -24,12 +24,18 @@ interface FakeRunner extends TeamRunner {
   failStart?: Error;
   /** How the run started by `startBot` ends. Defaults to a completed run. */
   startOutcome?: Omit<BotRunOutcome, 'runId'>;
+  /** When set, runs started by `startBot` stay open until `finish` ends them. */
+  holdRuns?: boolean;
+  /** The run id the next `startBot` returns, for tests whose events must reference a stored run. */
+  nextRunId?: string;
+  finish(runId: string, outcome: Omit<BotRunOutcome, 'runId'>): void;
 }
 
 function createFakeRunner(spentUsd?: (chainId: string) => number): FakeRunner {
   const runs: BotRunRequest[] = [];
   const starts: BotRunRequest[] = [];
   const chains = new Map<string, ChainRef>();
+  const held = new Map<string, (outcome: BotRunOutcome) => void>();
   const runner: FakeRunner = {
     runs,
     starts,
@@ -42,9 +48,15 @@ function createFakeRunner(spentUsd?: (chainId: string) => number): FakeRunner {
     async startBot(req) {
       starts.push(req);
       if (runner.failStart) throw runner.failStart;
-      const runId = `started-${starts.length}`;
+      const runId = runner.nextRunId ?? `started-${starts.length}`;
+      if (runner.holdRuns) {
+        return { runId, settled: new Promise<BotRunOutcome>((resolve) => held.set(runId, resolve)) };
+      }
       const outcome = { runId, status: 'completed' as const, text: 'Ok', ...runner.startOutcome };
       return { runId, settled: Promise.resolve(outcome) };
+    },
+    finish(runId, outcome) {
+      held.get(runId)?.({ runId, ...outcome });
     },
     chainOf(runId) {
       return chains.get(runId);
@@ -297,6 +309,7 @@ describe('ask_bot', () => {
 describe('delegate_task', () => {
   it('creates the task, starts it in the assignee DM thread, and returns the task id', async () => {
     const f = await setup();
+    f.runner.holdRuns = true;
     const ada = await f.bot('Ada');
     const bo = await f.bot('Bo');
     const thread = await f.thread(ada);
@@ -441,6 +454,63 @@ async function eventually<T>(read: () => Promise<T | undefined>): Promise<T> {
   }
   throw new Error('timed out waiting for condition');
 }
+
+describe('a delegated task ends with its work run', () => {
+  /** Delegates a task from Ada to Bo. Bo's work run stays open until the test ends it. */
+  async function delegateHeld() {
+    const f = await setup();
+    f.runner.holdRuns = true;
+    const ada = await f.bot('Ada');
+    const bo = await f.bot('Bo');
+    const thread = await f.thread(ada);
+    const workRun = await f.repos.runs.create({ threadId: (await f.thread(bo)).id, botId: bo.id, engine: 'mock' });
+    f.runner.nextRunId = workRun.id;
+    await invoke(f.tool('delegate_task'), await f.scope(ada, thread), { botName: 'Bo', title: 'Draft copy' });
+    const [task] = await f.repos.tasks.list({ assigneeBotId: bo.id });
+    if (!task) throw new Error('no task was created');
+    return { f, bo, thread, task, workRunId: workRun.id };
+  }
+
+  it('fails the task with the reason when the work run fails without the assignee closing it', async () => {
+    const { f, task, workRunId } = await delegateHeld();
+
+    f.runner.finish(workRunId, { status: 'failed', text: '', error: 'model down' });
+
+    const closed = await eventually(async () => {
+      const current = await f.repos.tasks.get(task.id);
+      return current?.status === 'failed' ? current : undefined;
+    });
+    expect(closed.result).toBe('model down');
+  });
+
+  it('completes the task with the run text, posts it to the origin thread, and notifies the delegator once', async () => {
+    const { f, thread, task, workRunId } = await delegateHeld();
+
+    f.runner.finish(workRunId, { status: 'completed', text: 'Two paragraphs ready' });
+
+    const closed = await eventually(async () => {
+      const current = await f.repos.tasks.get(task.id);
+      return current?.status === 'done' ? current : undefined;
+    });
+    expect(closed.result).toBe('Two paragraphs ready');
+    await eventually(async () => ((await f.repos.messages.listByThread(thread.id)).some((m) => m.content.includes('Two paragraphs ready')) ? true : undefined));
+    expect(f.runner.starts.filter((start) => start.botId !== task.assigneeBotId)).toHaveLength(1);
+  });
+
+  it('leaves a task alone when the assignee closed it before the work run ended', async () => {
+    const { f, bo, thread, task, workRunId } = await delegateHeld();
+    const boScope = await f.scope(bo, await f.thread(bo), { chainId: task.chainId, depth: task.depth, askHops: 0 });
+    await invoke(f.tool('update_my_task'), boScope, { taskId: task.id, status: 'done', result: 'Mine' });
+
+    f.runner.finish(workRunId, { status: 'completed', text: 'Late text' });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+
+    expect((await f.repos.tasks.get(task.id))?.result).toBe('Mine');
+    const posted = (await f.repos.messages.listByThread(thread.id)).map((message) => message.content);
+    expect(posted.filter((content) => content.includes('Mine'))).toHaveLength(1);
+    expect(posted.some((content) => content.includes('Late text'))).toBe(false);
+  });
+});
 
 describe('update_my_task', () => {
   async function delegatedTask() {

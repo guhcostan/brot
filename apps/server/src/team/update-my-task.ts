@@ -27,7 +27,7 @@ export function createUpdateMyTaskTool(deps: TeamDeps): BrotTool {
         kind: 'other',
         summary: `Task "${loaded.title}" is now ${status}`.slice(0, 300),
         async run() {
-          return finish(deps, scope, taskId, status, result);
+          return finishTask(deps, scope, taskId, status, result);
         },
       };
     },
@@ -43,7 +43,12 @@ async function loadAssigned(deps: TeamDeps, botId: string, taskId: string): Prom
   return task;
 }
 
-async function finish(
+/**
+ * Records the assignee's status on its task, posts a finished result back to the requesting thread, and tells the
+ * delegator. The harness also calls it when a work run ends without the assignee closing the task, so no task stays
+ * open once nothing works on it.
+ */
+export async function finishTask(
   deps: TeamDeps,
   scope: ApprovalScope,
   taskId: string,
