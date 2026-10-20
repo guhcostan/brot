@@ -53,6 +53,10 @@ const ogImage = new URL('/og.png', site).href;
     <slot />
     <script>
       const targets = document.querySelectorAll<HTMLElement>('[data-reveal]');
+      // What is already on screen enters at once, so the hero never waits on the observer's first callback.
+      for (const el of targets) {
+        if (el.getBoundingClientRect().top < window.innerHeight) el.classList.add('is-in');
+      }
       if ('IntersectionObserver' in window) {
         const observer = new IntersectionObserver(
           (entries) => {
