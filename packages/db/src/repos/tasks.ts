@@ -91,7 +91,13 @@ export function createTaskRepo(db: Db) {
       const timestamp = nowIso();
       return db.transaction(async (tx) => {
         let depth = data.createdByBotId === undefined ? 0 : 1;
-        let chainId = id;
+        let chainId = data.chainId ?? id;
+        if (data.parentTaskId === undefined && data.chainId !== undefined) {
+          const [tally] = await tx.select({ total: count() }).from(tasks).where(eq(tasks.chainId, chainId));
+          if ((tally?.total ?? 0) >= TEAM_MAX_TASKS_PER_CHAIN) {
+            throw new Error(`chain ${chainId} already holds ${TEAM_MAX_TASKS_PER_CHAIN} tasks`);
+          }
+        }
         if (data.parentTaskId !== undefined) {
           const [parent] = await tx.select().from(tasks).where(eq(tasks.id, data.parentTaskId)).limit(1);
           if (!parent) throw new Error(`parent task ${data.parentTaskId} does not exist`);

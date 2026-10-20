@@ -715,6 +715,19 @@ describe('team tasks', () => {
     expect(loose.parentTaskId).toBeUndefined();
   });
 
+  it('joins sibling delegations to one chain when the caller names it', async () => {
+    const { onca, capy, room } = await seedChain();
+    const first = await repos.tasks.create({ title: 'Fix the bug', assigneeBotId: capy.id, createdByBotId: onca.id, threadId: room.id });
+    const second = await repos.tasks.create({
+      title: 'Write the email',
+      assigneeBotId: capy.id,
+      createdByBotId: onca.id,
+      threadId: room.id,
+      chainId: first.chainId,
+    });
+    expect(second).toMatchObject({ chainId: first.chainId, depth: 1 });
+  });
+
   it('refuses a delegation below the deepest allowed level', async () => {
     const { onca, capy, room, root } = await seedChain();
     let parent = root;

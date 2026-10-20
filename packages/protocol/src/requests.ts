@@ -144,8 +144,16 @@ export const CreateTask = z
     threadId: z.string().min(1),
     createdByBotId: z.string().min(1).optional(),
     parentTaskId: z.string().min(1).optional(),
+    /**
+     * Joins a bot-created root task to an existing chain, so every delegation one run makes shares a chain
+     * and its limits. Ignored when `parentTaskId` is given (the parent's chain wins).
+     */
+    chainId: z.string().min(1).optional(),
   })
   .superRefine((value, ctx) => {
+    if (value.chainId !== undefined && value.createdByBotId === undefined) {
+      ctx.addIssue({ code: 'custom', path: ['chainId'], message: 'only a delegation joins an existing chain' });
+    }
     if (value.parentTaskId !== undefined && value.createdByBotId === undefined) {
       ctx.addIssue({
         code: 'custom',
