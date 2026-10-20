@@ -1,8 +1,7 @@
 import type { LiveStatus } from './api/liveEvents';
+import { t } from './i18n';
 
 const pad = (n: number) => String(n).padStart(2, '0');
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 /** "14:02" today, "Mon 14:02" this week, "12 Mar" otherwise. Uses the device's local time. */
 export function shortTime(iso: string, now: Date = new Date()): string {
@@ -12,23 +11,23 @@ export function shortTime(iso: string, now: Date = new Date()): string {
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   if (date.getTime() >= startOfToday) return clock;
   if (now.getTime() - date.getTime() < 6 * 86_400_000) {
-    return `${WEEKDAYS[date.getDay()]} ${clock}`;
+    return `${t('date.weekdays').split(',')[date.getDay()] ?? ''} ${clock}`;
   }
-  return `${date.getDate()} ${MONTHS[date.getMonth()]}`;
+  return t('date.dayMonth', { day: date.getDate(), month: t('date.months').split(',')[date.getMonth()] ?? '' });
 }
 
 /** Honest connection copy for the inbox header (DESIGN.md section 8). */
 export function connectionLabel(status: LiveStatus, lastSeenAt: string | undefined, now: Date = new Date()): string {
   switch (status) {
     case 'live':
-      return 'Connected';
+      return t('connection.live');
     case 'idle':
     case 'connecting':
-      return 'Connecting…';
+      return t('connection.connecting');
     case 'reconnecting':
-      return lastSeenAt ? `Oven off · last seen ${shortTime(lastSeenAt, now)}` : 'Can’t reach your computer';
+      return lastSeenAt ? t('connection.lastSeen', { time: shortTime(lastSeenAt, now) }) : t('connection.unreachable');
     case 'unauthorized':
-      return 'This phone was unpaired';
+      return t('connection.unpaired');
   }
 }
 

@@ -1,6 +1,6 @@
 import type { ReactElement } from 'react';
 import { StyleSheet, View } from 'react-native';
-import { BOT_STATUS_LABELS, type BotStatus } from '../state/inbox';
+import { botStatusLabel, type BotStatus } from '../state/inbox';
 import { useTheme } from '../theme/ThemeProvider';
 import { Text } from './Text';
 
@@ -24,7 +24,7 @@ export function StatusDot({ status, label }: StatusDotProps): ReactElement {
     <View style={styles.row}>
       <View style={[styles.dot, dot]} />
       <Text variant="caption" tone={urgent ? 'attentionText' : 'ink2'} numberOfLines={1}>
-        {label ?? BOT_STATUS_LABELS[status]}
+        {label ?? botStatusLabel(status)}
       </Text>
     </View>
   );

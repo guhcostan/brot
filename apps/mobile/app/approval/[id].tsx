@@ -9,7 +9,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { describeError, usePaired } from '../../src/core/BrotProvider';
 import { BotAvatar } from '../../src/avatar/BotAvatar';
 import { prettyJson, shortTime } from '../../src/format';
-import { APPROVAL_KIND_LABELS, DECISION_LABELS, allowsAlways, needsBiometric, visibleArgs } from '../../src/state/approvals';
+import { t } from '../../src/i18n';
+import { allowsAlways, approvalKindLabel, decisionLabel, needsBiometric, visibleArgs } from '../../src/state/approvals';
 import { botName } from '../../src/state/inbox';
 import { useTheme } from '../../src/theme/ThemeProvider';
 import { Button } from '../../src/ui/Button';
@@ -17,12 +18,13 @@ import { Field } from '../../src/ui/Field';
 import { Icon } from '../../src/ui/Icon';
 import { IconButton } from '../../src/ui/Screen';
 import { Text } from '../../src/ui/Text';
+import { useLocale } from '../../src/i18n/useLocale';
 
 /** Asks for Face ID, Touch ID or the device passcode. A phone with no lock set up cannot be asked, so it passes. */
 async function confirmWithBiometrics(summary: string): Promise<boolean> {
   const [hardware, enrolled] = await Promise.all([LocalAuthentication.hasHardwareAsync(), LocalAuthentication.isEnrolledAsync()]);
   if (!hardware || !enrolled) return true;
-  const result = await LocalAuthentication.authenticateAsync({ promptMessage: summary, cancelLabel: 'Cancel' });
+  const result = await LocalAuthentication.authenticateAsync({ promptMessage: summary, cancelLabel: t('common.cancel') });
   return result.success;
 }
 
@@ -44,7 +46,7 @@ function useApproval(id: string): { approval?: Approval; loading: boolean; error
         if (cancelled) return;
         const found = all.find((candidate) => candidate.id === id);
         setFetched(found);
-        if (!found) setError('This approval is gone.');
+        if (!found) setError(t('approval.gone'));
       })
       .catch((cause: unknown) => {
         if (!cancelled) setError(describeError(cause));
@@ -81,6 +83,7 @@ function Args({ args }: { args: Record<string, unknown> }): ReactElement | null 
 }
 
 export default function ApprovalSheet(): ReactElement | null {
+  useLocale();
   const { id } = useLocalSearchParams<{ id: string }>();
   const paired = usePaired();
   const theme = useTheme();
@@ -96,8 +99,8 @@ export default function ApprovalSheet(): ReactElement | null {
   if (!approval) {
     return (
       <View style={[styles.sheet, { padding: theme.space[6], gap: theme.space[4], backgroundColor: theme.color.surface }]}>
-        {loading ? <ActivityIndicator color={theme.color.ink3} /> : <Text tone="ink2">{error ?? 'This approval is gone.'}</Text>}
-        {!loading ? <Button label="Close" variant="secondary" onPress={close} /> : null}
+        {loading ? <ActivityIndicator color={theme.color.ink3} /> : <Text tone="ink2">{error ?? t('approval.gone')}</Text>}
+        {!loading ? <Button label={t('common.close')} variant="secondary" onPress={close} /> : null}
       </View>
     );
   }
@@ -112,9 +115,10 @@ export default function ApprovalSheet(): ReactElement | null {
   const decide = async (decision: ApprovalDecision) => {
     setFailure(undefined);
     setBusy(decision);
+    void Haptics.impactAsync(decision === 'deny' ? Haptics.ImpactFeedbackStyle.Medium : Haptics.ImpactFeedbackStyle.Light);
     try {
       if (needsBiometric(approval.kind, decision) && !(await confirmWithBiometrics(approval.summary))) {
-        setFailure('Not allowed. The check was cancelled.');
+        setFailure(t('approval.biometricCancelled'));
         return;
       }
       const trimmed = reply.trim();
@@ -145,12 +149,12 @@ export default function ApprovalSheet(): ReactElement | null {
             {shortTime(approval.createdAt)}
           </Text>
         </View>
-        <IconButton icon="close" label="Close" onPress={close} tone="ink2" />
+        <IconButton icon="close" label={t('common.close')} onPress={close} tone="ink2" />
       </View>
 
       <View
         accessible
-        accessibilityLabel={`${pending ? 'Approval needed' : DECISION_LABELS[approval.decision ?? 'deny']}: ${approval.summary}`}
+        accessibilityLabel={`${pending ? t('approval.needed') : decisionLabel(approval.decision ?? 'deny')}: ${approval.summary}`}
         style={{
           borderWidth: 1,
           borderColor: pending ? theme.color.attention : theme.color.line,
@@ -163,7 +167,7 @@ export default function ApprovalSheet(): ReactElement | null {
         <View style={[styles.row, { gap: theme.space[2] }]}>
           {pending ? <View style={[styles.dot, { backgroundColor: theme.color.attention }]} /> : null}
           <Text variant="caption" tone={pending ? 'attentionText' : 'ink2'}>
-            {pending ? APPROVAL_KIND_LABELS[approval.kind] : `${APPROVAL_KIND_LABELS[approval.kind]} · ${approval.decision ? DECISION_LABELS[approval.decision] : approval.status}`}
+            {pending ? approvalKindLabel(approval.kind) : `${approvalKindLabel(approval.kind)} · ${approval.decision ? decisionLabel(approval.decision) : approval.status === 'denied' ? t('approval.denied') : t('approval.allowed')}`}
           </Text>
         </View>
         <Text variant="title" accessibilityRole="header">
@@ -179,19 +183,19 @@ export default function ApprovalSheet(): ReactElement | null {
       {canAnswer ? (
         <>
           <Field
-            label="Reply to the bot"
-            hint="Optional. The bot reads it with your decision."
+            label={t('approval.replyLabel')}
+            hint={t('approval.replyHint')}
             value={reply}
             onChangeText={setReply}
             multiline
             editable={busy === undefined}
-            placeholder="e.g. Use the work address instead"
+            placeholder={t('approval.replyPlaceholder')}
           />
           {gated ? (
             <View style={[styles.row, { gap: theme.space[2] }]}>
               <Icon name="lock" size={16} tone="ink2" />
               <Text variant="meta" tone="ink2" style={styles.flex}>
-                Allowing asks for Face ID or your passcode first.
+                {t('approval.biometricNote')}
               </Text>
             </View>
           ) : null}
@@ -200,25 +204,25 @@ export default function ApprovalSheet(): ReactElement | null {
               {failure}
             </Text>
           ) : null}
-          <View style={{ gap: theme.space[2] }} accessibilityRole="none" accessibilityLabel="Decide">
-            <Button label="Allow once" onPress={() => void decide('allow_once')} busy={busy === 'allow_once'} disabled={busy !== undefined} />
+          <View style={{ gap: theme.space[2] }} accessibilityRole="none" accessibilityLabel={t('approval.decide')}>
+            <Button label={t('approval.allowOnce')} onPress={() => void decide('allow_once')} busy={busy === 'allow_once'} disabled={busy !== undefined} />
             <View style={[styles.row, { gap: theme.space[2] }]}>
               {allowsAlways(approval.kind) ? (
                 <Button
-                  label="Allow always"
+                  label={t('approval.allowAlways')}
                   variant="secondary"
-                  accessibilityHint={`Lets ${name} use ${approval.tool} without asking again`}
+                  accessibilityHint={t('approval.allowAlwaysHint', { name, tool: approval.tool })}
                   onPress={() => void decide('allow_always')}
                   busy={busy === 'allow_always'}
                   disabled={busy !== undefined}
                   style={styles.flex}
                 />
               ) : null}
-              <Button label="Deny" variant="danger" onPress={() => void decide('deny')} busy={busy === 'deny'} disabled={busy !== undefined} style={styles.flex} />
+              <Button label={t('approval.deny')} variant="danger" onPress={() => void decide('deny')} busy={busy === 'deny'} disabled={busy !== undefined} style={styles.flex} />
             </View>
             {!allowsAlways(approval.kind) ? (
               <Text variant="meta" tone="ink3">
-                {APPROVAL_KIND_LABELS[approval.kind]} actions are approved one at a time.
+                {t('approval.oneAtATime', { kind: approvalKindLabel(approval.kind) })}
               </Text>
             ) : null}
           </View>
@@ -227,17 +231,17 @@ export default function ApprovalSheet(): ReactElement | null {
         <View style={[styles.row, { gap: theme.space[2], alignItems: 'flex-start' }]}>
           <Icon name="lock" size={16} tone="ink2" />
           <Text variant="small" tone="ink2" style={styles.flex}>
-            This phone can view approvals but not answer them. Answer on your computer, or pair a phone as Approver or Full.
+            {t('approval.viewOnly')}
           </Text>
         </View>
       ) : (
         <>
           {approval.reply ? (
             <Text variant="small" tone="ink2">
-              Reply: {approval.reply}
+              {t('approval.reply', { reply: approval.reply })}
             </Text>
           ) : null}
-          <Button label="Close" variant="secondary" onPress={close} />
+          <Button label={t('common.close')} variant="secondary" onPress={close} />
         </>
       )}
     </ScrollView>

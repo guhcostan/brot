@@ -1,22 +1,15 @@
 import type { Approval, ApprovalDecision, ApprovalKind } from '@brot/protocol';
 
-/** Same wording as APPROVAL_KIND_LABELS in @brot/ui, whose module is a DOM component and not importable here. */
-export const APPROVAL_KIND_LABELS: Record<ApprovalKind, string> = {
-  shell: 'Shell command',
-  file_write: 'File write',
-  send: 'Send',
-  publish: 'Publish',
-  delete: 'Delete',
-  purchase: 'Purchase',
-  permission: 'Permission change',
-  other: 'Other action',
-};
+import { t } from '../i18n';
 
-export const DECISION_LABELS: Record<ApprovalDecision, string> = {
-  allow_once: 'Allowed once',
-  allow_always: 'Allowed always',
-  deny: 'Denied',
-};
+/** Same wording as APPROVAL_KIND_LABELS in @brot/ui, whose module is a DOM component and not importable here. */
+export function approvalKindLabel(kind: ApprovalKind): string {
+  return t(`approval.kind.${kind}`);
+}
+
+export function decisionLabel(decision: ApprovalDecision): string {
+  return t(`approval.decision.${decision}`);
+}
 
 /**
  * Kinds that move money, destroy data, change who can do what, or speak publicly as the user.

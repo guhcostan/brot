@@ -9,7 +9,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { describeError, useBrot } from '../src/core/BrotProvider';
 import { BotAvatar, BrandMark } from '../src/avatar/BotAvatar';
 import { normalizeServerUrl, parsePairingCode, type PairingTarget } from '../src/pairing/payload';
-import { ROLE_LABELS } from '../src/state/roles';
+import { t } from '../src/i18n';
+import { roleLabel } from '../src/state/roles';
 import { riseIn } from '../src/theme/motion';
 import { useTheme } from '../src/theme/ThemeProvider';
 import { Button } from '../src/ui/Button';
@@ -17,6 +18,7 @@ import { Field } from '../src/ui/Field';
 import { Icon } from '../src/ui/Icon';
 import { Screen } from '../src/ui/Screen';
 import { Text } from '../src/ui/Text';
+import { useLocale } from '../src/i18n/useLocale';
 
 type Step = { kind: 'scan' } | { kind: 'code' } | { kind: 'confirm'; target: PairingTarget };
 
@@ -43,10 +45,10 @@ function Scanner({ onCode, onManual }: { onCode: (raw: string) => void; onManual
       <View style={[frame, styles.frameCenter, { padding: theme.space[6], gap: theme.space[4] }]}>
         <Icon name="scan" size={32} tone="ink2" />
         <Text variant="small" tone="ink2" style={styles.center}>
-          {permission.canAskAgain ? 'Brot needs the camera to scan the pairing code.' : 'Camera access is off. Turn it on in Settings, or enter the code instead.'}
+          {permission.canAskAgain ? t('pair.cameraNeeded') : t('pair.cameraOff')}
         </Text>
-        {permission.canAskAgain ? <Button label="Allow camera" size="sm" onPress={() => void requestPermission()} /> : null}
-        <Button label="Enter code instead" size="sm" variant="ghost" onPress={onManual} />
+        {permission.canAskAgain ? <Button label={t('pair.allowCamera')} size="sm" onPress={() => void requestPermission()} /> : null}
+        <Button label={t('pair.enterCode')} size="sm" variant="ghost" onPress={onManual} />
       </View>
     );
   }
@@ -58,7 +60,7 @@ function Scanner({ onCode, onManual }: { onCode: (raw: string) => void; onManual
         facing="back"
         barcodeScannerSettings={{ barcodeTypes: ['qr'] }}
         onBarcodeScanned={onScanned}
-        accessibilityLabel="Camera viewfinder. Point it at the pairing code on your computer."
+        accessibilityLabel={t('pair.viewfinder')}
       />
     </View>
   );
@@ -67,7 +69,7 @@ function Scanner({ onCode, onManual }: { onCode: (raw: string) => void; onManual
 function RoleOption({ role, selected, onSelect }: { role: DeviceRole; selected: boolean; onSelect: () => void }): ReactElement {
   const theme = useTheme();
   const c = theme.color;
-  const label = ROLE_LABELS[role];
+  const label = roleLabel(role);
   return (
     <Pressable
       onPress={onSelect}
@@ -97,6 +99,7 @@ function RoleOption({ role, selected, onSelect }: { role: DeviceRole; selected: 
 }
 
 export default function PairScreen(): ReactElement {
+  useLocale();
   const theme = useTheme();
   const reduced = useReducedMotion();
   const insets = useSafeAreaInsets();
@@ -106,7 +109,7 @@ export default function PairScreen(): ReactElement {
   const [code, setCode] = useState('');
   const [address, setAddress] = useState('');
   const [addressError, setAddressError] = useState<string>();
-  const [deviceName, setDeviceName] = useState(Device.deviceName ?? Device.modelName ?? 'Phone');
+  const [deviceName, setDeviceName] = useState(Device.deviceName ?? Device.modelName ?? t('pair.defaultName'));
   const [role, setRole] = useState<DeviceRole>('full');
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string>();
@@ -134,11 +137,11 @@ export default function PairScreen(): ReactElement {
     setFailure(undefined);
     setBusy(true);
     try {
-      await pair({ serverUrl: url.value, token: target.token, deviceName: deviceName.trim() || 'Phone', role });
+      await pair({ serverUrl: url.value, token: target.token, deviceName: deviceName.trim() || t('pair.defaultName'), role });
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (cause) {
       const message = describeError(cause);
-      setFailure(/expired|invalid/i.test(message) ? 'That code has expired. Show a new one on your computer and scan again.' : message);
+      setFailure(/expired|invalid/i.test(message) ? t('pair.expired') : message);
     } finally {
       setBusy(false);
     }
@@ -157,10 +160,10 @@ export default function PairScreen(): ReactElement {
               <BotAvatar shape="drop" color="amber" mood="idle" size={32} />
             </View>
             <Text variant="display" accessibilityRole="header">
-              Pair this phone
+              {t('pair.title')}
             </Text>
             <Text variant="body" tone="ink2">
-              On your computer, open Settings → Devices → Pair phone. The code works for two minutes.
+              {t('pair.intro')}
             </Text>
           </View>
 
@@ -172,15 +175,15 @@ export default function PairScreen(): ReactElement {
                   {scanError}
                 </Text>
               ) : null}
-              <Button label="Enter code instead" variant="secondary" icon="keyboard" onPress={() => setStep({ kind: 'code' })} />
+              <Button label={t('pair.enterCode')} variant="secondary" icon="keyboard" onPress={() => setStep({ kind: 'code' })} />
             </Animated.View>
           ) : null}
 
           {step.kind === 'code' ? (
             <Animated.View key="code" entering={riseIn(reduced)} style={{ gap: theme.space[4] }}>
               <Field
-                label="Pairing code"
-                hint="Paste the pairing text copied from your computer."
+                label={t('pair.codeLabel')}
+                hint={t('pair.codeHint')}
                 value={code}
                 onChangeText={setCode}
                 autoCapitalize="none"
@@ -188,8 +191,8 @@ export default function PairScreen(): ReactElement {
                 mono
                 error={scanError}
               />
-              <Button label="Continue" onPress={() => accept(code)} disabled={code.trim() === ''} />
-              <Button label="Scan instead" variant="ghost" icon="scan" onPress={() => setStep({ kind: 'scan' })} />
+              <Button label={t('pair.continue')} onPress={() => accept(code)} disabled={code.trim() === ''} />
+              <Button label={t('pair.scanInstead')} variant="ghost" icon="scan" onPress={() => setStep({ kind: 'scan' })} />
             </Animated.View>
           ) : null}
 
@@ -197,8 +200,8 @@ export default function PairScreen(): ReactElement {
             <Animated.View key="confirm" entering={riseIn(reduced)} style={{ gap: theme.space[6] }}>
               <View style={{ gap: theme.space[4] }}>
                 <Field
-                  label="Computer address"
-                  hint={step.target.serverUrl ? 'From the code. Change it if your computer has another address on this network.' : 'The code names this computer only as “localhost”. Enter its address on your network, like 192.168.1.20.'}
+                  label={t('pair.addressLabel')}
+                  hint={step.target.serverUrl ? t('pair.addressFromCode') : t('pair.addressLocal')}
                   value={address}
                   onChangeText={setAddress}
                   placeholder={`192.168.1.20:${step.target.port}`}
@@ -208,10 +211,10 @@ export default function PairScreen(): ReactElement {
                   mono
                   error={addressError}
                 />
-                <Field label="Name for this phone" value={deviceName} onChangeText={setDeviceName} hint="Shown in Settings → Devices on your computer." />
+                <Field label={t('pair.nameLabel')} value={deviceName} onChangeText={setDeviceName} hint={t('pair.nameHint')} />
               </View>
-              <View style={{ gap: theme.space[2] }} accessibilityRole="radiogroup" accessibilityLabel="What this phone can do">
-                <Text variant="label">What this phone can do</Text>
+              <View style={{ gap: theme.space[2] }} accessibilityRole="radiogroup" accessibilityLabel={t('pair.roleLabel')}>
+                <Text variant="label">{t('pair.roleLabel')}</Text>
                 {DeviceRole.options.map((option) => (
                   <RoleOption key={option} role={option} selected={role === option} onSelect={() => setRole(option)} />
                 ))}
@@ -222,8 +225,8 @@ export default function PairScreen(): ReactElement {
                 </Text>
               ) : null}
               <View style={{ gap: theme.space[2] }}>
-                <Button label="Pair" onPress={() => void submit(step.target)} busy={busy} />
-                <Button label="Scan another code" variant="ghost" onPress={() => setStep({ kind: 'scan' })} disabled={busy} />
+                <Button label={t('pair.pair')} onPress={() => void submit(step.target)} busy={busy} />
+                <Button label={t('pair.scanAnother')} variant="ghost" onPress={() => setStep({ kind: 'scan' })} disabled={busy} />
               </View>
             </Animated.View>
           ) : null}

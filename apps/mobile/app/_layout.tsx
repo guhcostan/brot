@@ -7,10 +7,13 @@ import { useFonts } from 'expo-font';
 import { SplashScreen, Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as SystemUI from 'expo-system-ui';
-import { useEffect, type ReactElement } from 'react';
+import { useEffect, useState, type ReactElement } from 'react';
 import { useReducedMotion } from 'react-native-reanimated';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { BrotProvider, useBrot } from '../src/core/BrotProvider';
+import { applyLocalePreference, loadLocalePreference } from '../src/i18n/preference';
+import { useLocale } from '../src/i18n/useLocale';
+import { secureStorage } from '../src/session/secureStorage';
 import { ThemeProvider, useTheme } from '../src/theme/ThemeProvider';
 
 void SplashScreen.preventAutoHideAsync();
@@ -19,7 +22,15 @@ function Navigator({ fontsReady }: { fontsReady: boolean }): ReactElement | null
   const theme = useTheme();
   const reduced = useReducedMotion();
   const { phase } = useBrot();
-  const ready = fontsReady && phase !== 'loading';
+  const [localeReady, setLocaleReady] = useState(false);
+  useLocale();
+  const ready = fontsReady && localeReady && phase !== 'loading';
+
+  useEffect(() => {
+    void loadLocalePreference(secureStorage)
+      .then(applyLocalePreference)
+      .finally(() => setLocaleReady(true));
+  }, []);
 
   useEffect(() => {
     void SystemUI.setBackgroundColorAsync(theme.color.bg);
@@ -45,6 +56,9 @@ function Navigator({ fontsReady }: { fontsReady: boolean }): ReactElement | null
           <Stack.Screen name="index" />
           <Stack.Screen name="thread/[botId]" />
           <Stack.Screen name="settings" />
+          <Stack.Screen name="room/[threadId]" />
+          <Stack.Screen name="tasks" />
+          <Stack.Screen name="computer/[botId]" options={{ presentation: 'fullScreenModal', animation: reduced ? 'fade' : 'slide_from_bottom' }} />
           <Stack.Screen
             name="approval/[id]"
             options={{

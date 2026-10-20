@@ -1,5 +1,6 @@
 import { DEFAULT_SERVER_PORT } from '@brot/protocol';
 import { z } from 'zod';
+import { t } from '../i18n';
 
 /**
  * What the desktop's pairing QR encodes: `JSON.stringify({ v: 1, host, port, token })`, built by
@@ -42,22 +43,22 @@ export function serverUrlFrom(host: string, port: number): string {
 /** Reads a scanned QR. A raw token (pasted by hand) is accepted too; the server address then comes from the user. */
 export function parsePairingCode(raw: string): ParseResult<PairingTarget> {
   const text = raw.trim();
-  if (text === '') return { ok: false, error: 'The code is empty.' };
+  if (text === '') return { ok: false, error: t('pair.error.empty') };
 
   if (text.startsWith('{')) {
     let json: unknown;
     try {
       json = JSON.parse(text);
     } catch {
-      return { ok: false, error: 'That is not a Brot pairing code.' };
+      return { ok: false, error: t('pair.error.notBrot') };
     }
     const parsed = PairingQr.safeParse(json);
     if (!parsed.success) {
       const version = typeof json === 'object' && json !== null && 'v' in json ? json.v : undefined;
       if (typeof version === 'number' && version !== 1) {
-        return { ok: false, error: 'This code comes from a newer Brot. Update the app and try again.' };
+        return { ok: false, error: t('pair.error.newer') };
       }
-      return { ok: false, error: 'That is not a Brot pairing code.' };
+      return { ok: false, error: t('pair.error.notBrot') };
     }
     const { host, port, token } = parsed.data;
     return {
@@ -69,7 +70,7 @@ export function parsePairingCode(raw: string): ParseResult<PairingTarget> {
   if (/^[A-Za-z0-9_-]{16,}$/.test(text)) {
     return { ok: true, value: { token: text, port: DEFAULT_SERVER_PORT, serverUrl: undefined } };
   }
-  return { ok: false, error: 'That is not a Brot pairing code.' };
+  return { ok: false, error: t('pair.error.notBrot') };
 }
 
 /**
@@ -78,19 +79,19 @@ export function parsePairingCode(raw: string): ParseResult<PairingTarget> {
  */
 export function normalizeServerUrl(input: string, defaultPort: number = DEFAULT_SERVER_PORT): ParseResult<string> {
   const text = input.trim();
-  if (text === '') return { ok: false, error: 'Enter your computer’s address.' };
+  if (text === '') return { ok: false, error: t('pair.error.noAddress') };
   const hasScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(text);
   let url: URL;
   try {
     url = new URL(hasScheme ? text : `http://${text}`);
   } catch {
-    return { ok: false, error: 'That address doesn’t look right.' };
+    return { ok: false, error: t('pair.error.badAddress') };
   }
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-    return { ok: false, error: 'Use an http or https address.' };
+    return { ok: false, error: t('pair.error.scheme') };
   }
-  if (url.username || url.password) return { ok: false, error: 'Leave the user name and password out of the address.' };
-  if (!url.hostname) return { ok: false, error: 'That address doesn’t look right.' };
+  if (url.username || url.password) return { ok: false, error: t('pair.error.credentials') };
+  if (!url.hostname) return { ok: false, error: t('pair.error.badAddress') };
   const explicitPort = /^[a-z][a-z0-9+.-]*:\/\/[^/]*:\d+/i.test(hasScheme ? text : `http://${text}`);
   const port = explicitPort || hasScheme ? url.port : String(defaultPort);
   const path = url.pathname.replace(/\/+$/, '');

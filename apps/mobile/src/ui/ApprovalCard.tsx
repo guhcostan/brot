@@ -3,7 +3,8 @@ import type { AvatarSpec } from '@brot/ui/avatar';
 import type { ReactElement } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { BotAvatar } from '../avatar/BotAvatar';
-import { APPROVAL_KIND_LABELS, DECISION_LABELS, approvalSource } from '../state/approvals';
+import { t } from '../i18n';
+import { approvalKindLabel, approvalSource, decisionLabel } from '../state/approvals';
 import { useTheme } from '../theme/ThemeProvider';
 import { Icon } from './Icon';
 import { PressScale } from './Pressable';
@@ -25,15 +26,15 @@ export function ApprovalCard({ approval, botName, avatar, canApprove, onPress }:
   const theme = useTheme();
   const c = theme.color;
   const pending = approval.status === 'pending';
-  const outcome = approval.decision ? DECISION_LABELS[approval.decision] : approval.status === 'denied' ? 'Denied' : 'Allowed';
+  const outcome = approval.decision ? decisionLabel(approval.decision) : approval.status === 'denied' ? t('approval.denied') : t('approval.allowed');
 
   return (
     <PressScale
       pressedScale={0.98}
       onPress={onPress}
       accessibilityRole="button"
-      accessibilityLabel={pending ? `Approval needed from ${botName}: ${approval.summary}` : `${outcome}: ${approval.summary}`}
-      accessibilityHint={pending ? (canApprove ? 'Opens the approval to allow or deny it' : 'Opens the approval. This phone can only view it.') : undefined}
+      accessibilityLabel={pending ? t('approval.neededFrom', { name: botName, summary: approval.summary }) : `${outcome}: ${approval.summary}`}
+      accessibilityHint={pending ? (canApprove ? t('approval.openHint') : t('approval.openHintViewOnly')) : undefined}
       style={[
         styles.card,
         {
@@ -48,7 +49,7 @@ export function ApprovalCard({ approval, botName, avatar, canApprove, onPress }:
       <BotAvatar shape={avatar.shape} color={avatar.color} mood={pending ? 'approval' : 'idle'} size="md" animated={pending} />
       <View style={styles.body}>
         <Text variant="caption" tone={pending ? 'attentionText' : 'ink2'}>
-          {pending ? APPROVAL_KIND_LABELS[approval.kind] : `${APPROVAL_KIND_LABELS[approval.kind]} · ${outcome}`}
+          {pending ? approvalKindLabel(approval.kind) : `${approvalKindLabel(approval.kind)} · ${outcome}`}
         </Text>
         <Text variant="subheading" tone={pending ? 'ink' : 'ink2'} numberOfLines={2}>
           {approval.summary}

@@ -1,10 +1,10 @@
 import { ApprovalKind } from '@brot/protocol';
 import { describe, expect, it } from 'vitest';
-import { APPROVAL_KIND_LABELS, allowsAlways, needsBiometric, visibleArgs } from './approvals';
+import { approvalKindLabel, allowsAlways, needsBiometric, visibleArgs } from './approvals';
 
 describe('approval rules', () => {
   it('labels every kind', () => {
-    for (const kind of ApprovalKind.options) expect(APPROVAL_KIND_LABELS[kind]).toBeTruthy();
+    for (const kind of ApprovalKind.options) expect(approvalKindLabel(kind)).toBeTruthy();
   });
 
   it('asks for biometrics only when allowing a sensitive action', () => {

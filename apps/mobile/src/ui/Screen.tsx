@@ -1,6 +1,7 @@
 import type { ReactElement, ReactNode } from 'react';
 import { StyleSheet, View, type StyleProp, type ViewStyle } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { t } from '../i18n';
 import { useTheme } from '../theme/ThemeProvider';
 import { Icon, type IconName } from './Icon';
 import { PressScale } from './Pressable';
@@ -54,7 +55,7 @@ export function Header({ title, center, onBack, right, bordered = false }: Heade
         { paddingHorizontal: theme.space[2], borderBottomColor: bordered ? theme.color.line : 'transparent' },
       ]}
     >
-      {onBack ? <IconButton icon="chevronLeft" label="Back" onPress={onBack} /> : <View style={styles.side} />}
+      {onBack ? <IconButton icon="chevronLeft" label={t('common.back')} onPress={onBack} /> : <View style={styles.side} />}
       <View style={styles.center}>
         {center ?? (
           <Text variant="subheading" numberOfLines={1} accessibilityRole="header">

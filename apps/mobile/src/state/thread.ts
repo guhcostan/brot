@@ -1,4 +1,4 @@
-import type { Approval, CanonicalEvent, Message, Run } from '@brot/protocol';
+import type { Approval, CanonicalEvent, Message, Run, Task } from '@brot/protocol';
 
 export interface Draft {
   id: string;
@@ -18,10 +18,32 @@ export interface ToolCall {
 
 export interface RunInfo {
   id: string;
+  /** The bot doing the run. In a room this tells the responders apart. */
+  botId?: string;
   status: Run['status'];
   startedAt: string;
   error?: string;
   endedAt?: string;
+}
+
+/** A question one bot asked another, and the answer once it arrives. */
+export interface Ask {
+  askId: string;
+  fromBotId: string;
+  toBotId: string;
+  question: string;
+  at: string;
+  answer?: string;
+  answeredAt?: string;
+}
+
+/** A room baton pass. */
+export interface Handoff {
+  id: string;
+  fromBotId: string;
+  toBotId: string;
+  note?: string;
+  at: string;
 }
 
 export interface ThreadState {
@@ -31,6 +53,10 @@ export interface ThreadState {
   tools: Record<string, ToolCall>;
   runs: Record<string, RunInfo>;
   approvals: Record<string, Approval>;
+  asks: Record<string, Ask>;
+  handoffs: Handoff[];
+  /** Tasks requested in this thread, by id. */
+  tasks: Record<string, Task>;
   /** Ids of events already applied, so a replayed event is a no-op. */
   applied: Record<string, true>;
 }
@@ -40,7 +66,10 @@ export type TimelineItem =
   | { kind: 'draft'; key: string; at: string; draft: Draft }
   | { kind: 'tool'; key: string; at: string; call: ToolCall }
   | { kind: 'approval'; key: string; at: string; approval: Approval }
-  | { kind: 'error'; key: string; at: string; run: RunInfo };
+  | { kind: 'error'; key: string; at: string; run: RunInfo }
+  | { kind: 'ask'; key: string; at: string; ask: Ask }
+  | { kind: 'handoff'; key: string; at: string; handoff: Handoff }
+  | { kind: 'task'; key: string; at: string; task: Task };
 
 const ts = (iso: string) => Date.parse(iso);
 
@@ -56,7 +85,7 @@ export function initThread(
 ): ThreadState {
   const runs: Record<string, RunInfo> = {};
   for (const run of records.runs ?? []) {
-    runs[run.id] = { id: run.id, status: run.status, startedAt: run.startedAt, error: run.error, endedAt: run.endedAt };
+    runs[run.id] = { id: run.id, botId: run.botId, status: run.status, startedAt: run.startedAt, error: run.error, endedAt: run.endedAt };
   }
   const approvals: Record<string, Approval> = {};
   for (const approval of records.approvals ?? []) {
@@ -69,8 +98,21 @@ export function initThread(
     tools: {},
     runs,
     approvals,
+    asks: {},
+    handoffs: [],
+    tasks: {},
     applied: {},
   };
+}
+
+/** Event kinds a thread's stored log adds beyond its messages and runs: the team activity. */
+const TEAM_EVENTS = new Set<CanonicalEvent['type']>(['bot.asked', 'bot.answered', 'handoff', 'task.created', 'task.updated']);
+
+/** Folds the team events of a thread's stored log into a freshly loaded thread. */
+export function withHistory(state: ThreadState, events: readonly CanonicalEvent[]): ThreadState {
+  let next = state;
+  for (const event of events) if (TEAM_EVENTS.has(event.type)) next = applyThreadEvent(next, event);
+  return next;
 }
 
 function setRun(state: ThreadState, runId: string | undefined, patch: Partial<RunInfo>, at: string): Record<string, RunInfo> {
@@ -96,7 +138,7 @@ export function applyThreadEvent(state: ThreadState, event: CanonicalEvent): Thr
 
   switch (event.type) {
     case 'run.started':
-      return { ...base, runs: setRun(state, event.runId, { status: 'running', startedAt: event.at }, event.at) };
+      return { ...base, runs: setRun(state, event.runId, { status: 'running', startedAt: event.at, botId: event.botId }, event.at) };
     case 'message.delta': {
       const current = state.drafts[event.messageId];
       const draft: Draft = current
@@ -149,16 +191,34 @@ export function applyThreadEvent(state: ThreadState, event: CanonicalEvent): Thr
         runs: setRun(state, event.runId, { status: 'failed', error: event.error, endedAt: event.at }, event.at),
         drafts: event.runId ? dropRunDrafts(state.drafts, '', event.runId) : state.drafts,
       };
+    case 'bot.asked':
+      return {
+        ...base,
+        asks: {
+          ...state.asks,
+          [event.askId]: { ...state.asks[event.askId], askId: event.askId, fromBotId: event.fromBotId, toBotId: event.toBotId, question: event.question, at: event.at },
+        },
+      };
+    case 'bot.answered': {
+      const asked = state.asks[event.askId];
+      const ask: Ask = asked
+        ? { ...asked, answer: event.answer, answeredAt: event.at }
+        : { askId: event.askId, fromBotId: event.toBotId, toBotId: event.fromBotId, question: '', at: event.at, answer: event.answer, answeredAt: event.at };
+      return { ...base, asks: { ...state.asks, [event.askId]: ask } };
+    }
+    case 'handoff':
+      return {
+        ...base,
+        handoffs: [...state.handoffs, { id: event.id, fromBotId: event.fromBotId, toBotId: event.toBotId, note: event.note, at: event.at }],
+      };
+    case 'task.created':
+    case 'task.updated':
+      return { ...base, tasks: { ...state.tasks, [event.task.id]: event.task } };
     case 'memory.written':
     case 'cost.updated':
     case 'computer.status':
     case 'computer.takeover':
     case 'network.blocked':
-    case 'task.created':
-    case 'task.updated':
-    case 'handoff':
-    case 'bot.asked':
-    case 'bot.answered':
     case 'room.members':
       return base;
   }
@@ -176,6 +236,29 @@ export function showTyping(state: ThreadState): boolean {
   const run = activeRun(state);
   if (!run || run.status !== 'running') return false;
   return !Object.values(state.drafts).some((draft) => draft.runId === run.id && draft.content.length > 0);
+}
+
+/** Bots whose run is working with nothing streaming yet, oldest run first: who to show as typing in a room. */
+export function typingBots(state: ThreadState): string[] {
+  const out: string[] = [];
+  const runs = Object.values(state.runs)
+    .filter((run) => run.status === 'running' && run.botId)
+    .sort((a, b) => ts(a.startedAt) - ts(b.startedAt));
+  for (const run of runs) {
+    const streaming = Object.values(state.drafts).some((draft) => draft.runId === run.id && draft.content.length > 0);
+    if (!streaming && !out.includes(run.botId!)) out.push(run.botId!);
+  }
+  return out;
+}
+
+/** The bot holding the room's baton: the target of the latest handoff. */
+export function batonHolder(state: ThreadState): string | undefined {
+  return state.handoffs.at(-1)?.toBotId;
+}
+
+/** The bot writing a streaming draft, from its run. */
+export function draftAuthor(state: ThreadState, draft: Draft): string | undefined {
+  return draft.runId ? state.runs[draft.runId]?.botId : undefined;
 }
 
 export function pendingApprovals(state: ThreadState): Approval[] {
@@ -196,6 +279,9 @@ export function timeline(state: ThreadState): TimelineItem[] {
     ...Object.values(state.runs)
       .filter((run) => run.status === 'failed' && run.error)
       .map((run): TimelineItem => ({ kind: 'error', key: `e:${run.id}`, at: run.endedAt ?? run.startedAt, run })),
+    ...Object.values(state.asks).map((ask): TimelineItem => ({ kind: 'ask', key: `q:${ask.askId}`, at: ask.at, ask })),
+    ...state.handoffs.map((handoff): TimelineItem => ({ kind: 'handoff', key: `h:${handoff.id}`, at: handoff.at, handoff })),
+    ...Object.values(state.tasks).map((task): TimelineItem => ({ kind: 'task', key: `k:${task.id}`, at: task.createdAt, task })),
   ];
   return items.sort((a, b) => ts(a.at) - ts(b.at));
 }

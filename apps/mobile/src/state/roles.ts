@@ -1,4 +1,5 @@
 import type { DeviceRole } from '@brot/protocol';
+import { t } from '../i18n';
 
 export interface Capabilities {
   /** Send messages and start threads. */
@@ -9,22 +10,29 @@ export interface Capabilities {
   cancel: boolean;
   /** Revoke this device on the server when unpairing. */
   revokeSelf: boolean;
+  /** Take control of a bot's desktop and send input to it. */
+  takeover: boolean;
 }
 
 /** Mirrors roleAllows in apps/server/src/auth.ts: viewers read, approvers also answer approvals, full does everything. */
 export function capabilitiesFor(role: DeviceRole): Capabilities {
   switch (role) {
     case 'full':
-      return { chat: true, approve: true, cancel: true, revokeSelf: true };
+      return { chat: true, approve: true, cancel: true, revokeSelf: true, takeover: true };
     case 'approver':
-      return { chat: false, approve: true, cancel: false, revokeSelf: false };
+      return { chat: false, approve: true, cancel: false, revokeSelf: false, takeover: false };
     case 'viewer':
-      return { chat: false, approve: false, cancel: false, revokeSelf: false };
+      return { chat: false, approve: false, cancel: false, revokeSelf: false, takeover: false };
   }
 }
 
-export const ROLE_LABELS: Record<DeviceRole, { title: string; detail: string }> = {
-  full: { title: 'Full', detail: 'Chat, approve actions and stop runs.' },
-  approver: { title: 'Approver', detail: 'Read threads and answer approvals.' },
-  viewer: { title: 'Viewer', detail: 'Read only.' },
-};
+export function roleLabel(role: DeviceRole): { title: string; detail: string } {
+  switch (role) {
+    case 'full':
+      return { title: t('role.full'), detail: t('role.fullDetail') };
+    case 'approver':
+      return { title: t('role.approver'), detail: t('role.approverDetail') };
+    case 'viewer':
+      return { title: t('role.viewer'), detail: t('role.viewerDetail') };
+  }
+}

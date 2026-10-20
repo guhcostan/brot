@@ -2,6 +2,7 @@ import { useState, type ReactElement } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import Animated, { useReducedMotion } from 'react-native-reanimated';
 import { prettyJson } from '../format';
+import { t } from '../i18n';
 import type { ToolCall } from '../state/thread';
 import { riseIn } from '../theme/motion';
 import { useTheme } from '../theme/ThemeProvider';
@@ -35,7 +36,7 @@ export function ToolCallCard({ call }: { call: ToolCall }): ReactElement {
   const theme = useTheme();
   const reduced = useReducedMotion();
   const [open, setOpen] = useState(false);
-  const state = call.result ? (call.result.ok ? 'Done' : 'Failed') : 'Running';
+  const state = call.result ? (call.result.ok ? t('tool.done') : t('tool.failed')) : t('tool.running');
 
   return (
     <View style={[styles.card, { borderColor: theme.color.line, backgroundColor: theme.color.surface, borderRadius: theme.radius.md }]}>
@@ -43,7 +44,7 @@ export function ToolCallCard({ call }: { call: ToolCall }): ReactElement {
         onPress={() => setOpen((value) => !value)}
         accessibilityRole="button"
         accessibilityState={{ expanded: open }}
-        accessibilityLabel={`Tool call ${call.tool}, ${state}`}
+        accessibilityLabel={t('tool.call', { tool: call.tool, state })}
         style={({ pressed }) => [styles.summary, { paddingHorizontal: theme.space[3], gap: theme.space[2] }, pressed ? { backgroundColor: theme.color.surface2 } : null]}
       >
         <Icon name={open ? 'chevronDown' : 'chevronRight'} size={14} tone="ink3" />
@@ -56,8 +57,8 @@ export function ToolCallCard({ call }: { call: ToolCall }): ReactElement {
       </Pressable>
       {open ? (
         <Animated.View entering={riseIn(reduced, 4)} style={{ paddingHorizontal: theme.space[3], paddingBottom: theme.space[3], gap: theme.space[2] }}>
-          <CodeBlock label="Arguments" text={prettyJson(call.args)} />
-          {call.result ? <CodeBlock label={call.result.ok ? 'Output' : 'Error'} text={clip(call.result.output || '(empty)')} /> : null}
+          <CodeBlock label={t('tool.arguments')} text={prettyJson(call.args)} />
+          {call.result ? <CodeBlock label={call.result.ok ? t('tool.output') : t('tool.error')} text={clip(call.result.output || t('tool.empty'))} /> : null}
         </Animated.View>
       ) : null}
     </View>

@@ -1,5 +1,6 @@
-import type { Approval, ApprovalDecision, CanonicalEvent } from '@brot/protocol';
+import type { Approval, ApprovalDecision, Bot, CanonicalEvent, Takeover } from '@brot/protocol';
 import * as Crypto from 'expo-crypto';
+import * as Haptics from 'expo-haptics';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from 'react';
 import { AppState } from 'react-native';
 import { ApiError, createClient, type BrotClient } from '../api/client';
@@ -7,7 +8,8 @@ import { createLiveEvents, type LiveEvents, type LiveStatus } from '../api/liveE
 import { createXhrStream } from '../api/sse';
 import { secureStorage } from '../session/secureStorage';
 import { loadSession, pairDevice, saveSession, unpairDevice, SESSION_KEY, type PairInput, type StoredSession } from '../session/session';
-import { applyInboxEvent, initInbox, rememberThread, type InboxState } from '../state/inbox';
+import { t } from '../i18n';
+import { applyInboxEvent, initInbox, rememberThread, withComputer, withRooms, type InboxState } from '../state/inbox';
 import { capabilitiesFor, type Capabilities } from '../state/roles';
 
 export type Phase = 'loading' | 'unpaired' | 'paired';
@@ -34,11 +36,18 @@ export interface BrotContextValue {
   /** Points the session at a new address after checking that the token still works there. */
   changeServerUrl(serverUrl: string): Promise<void>;
   resolveApproval(approval: Approval, decision: ApprovalDecision, reply?: string): Promise<Approval>;
+  /** Takes or hands back control of a bot's desktop. */
+  setTakeover(botId: string, active: boolean): Promise<Takeover>;
   noteThread(threadId: string, botId: string): void;
   subscribe(listener: (event: CanonicalEvent) => void): () => void;
 }
 
-const NO_CAPABILITIES: Capabilities = { chat: false, approve: false, cancel: false, revokeSelf: false };
+const NO_CAPABILITIES: Capabilities = { chat: false, approve: false, cancel: false, revokeSelf: false, takeover: false };
+
+/** A bot whose computer has a screen to watch (docs/COMPUTER-USE.md). */
+export function hasDesktop(bot: Pick<Bot, 'computer' | 'desktop'> | undefined): boolean {
+  return bot?.computer === 'sandbox' && bot.desktop === true;
+}
 const EMPTY_INBOX: InboxState = initInbox([], []);
 
 const BrotContext = createContext<BrotContextValue | null>(null);
@@ -46,12 +55,12 @@ const BrotContext = createContext<BrotContextValue | null>(null);
 /** Plain-language reason for a failed request (DESIGN.md section 8: honest about state). */
 export function describeError(error: unknown): string {
   if (error instanceof ApiError) {
-    if (error.status === 0) return 'Can’t reach your computer. Check that Brot is running and this phone is on the same network.';
-    if (error.unauthorized) return 'This phone is no longer paired.';
-    if (error.forbidden) return 'This phone’s role doesn’t allow that.';
+    if (error.status === 0) return t('error.unreachable');
+    if (error.unauthorized) return t('error.unpaired');
+    if (error.forbidden) return t('error.forbidden');
     return error.message;
   }
-  return error instanceof Error ? error.message : 'Something went wrong.';
+  return error instanceof Error ? error.message : t('error.generic');
 }
 
 export function BrotProvider({ children }: { children: ReactNode }): ReactElement {
@@ -83,19 +92,46 @@ export function BrotProvider({ children }: { children: ReactNode }): ReactElemen
     [session],
   );
 
+  const knownRooms = useRef(new Set<string>());
+
+  const loadRooms = useCallback(async () => {
+    if (!client) return;
+    try {
+      const rooms = await client.listRooms();
+      const lists = await Promise.all(rooms.map((room) => client.listRoomMembers(room.id).catch(() => undefined)));
+      const members: Record<string, string[]> = {};
+      rooms.forEach((room, index) => {
+        const list = lists[index];
+        if (list) members[room.id] = list.map((member) => member.botId);
+      });
+      knownRooms.current = new Set(rooms.map((room) => room.id));
+      setInbox((state) => withRooms(state, rooms, members));
+    } catch {
+      // A server without rooms: the inbox shows bots only.
+    }
+  }, [client]);
+
   const refresh = useCallback(async () => {
     if (!client) return;
     try {
       const [bots, approvals] = await Promise.all([client.listBots(), client.listApprovals('pending')]);
       setInbox((previous) => initInbox(bots, approvals, previous));
       setInboxError(undefined);
+      // Rooms and desktops are extras: an older server without them still shows the bots.
+      void loadRooms();
+      for (const bot of bots.filter((candidate) => hasDesktop(candidate) && !candidate.archived)) {
+        void client
+          .getComputer(bot.id)
+          .then((computer) => setInbox((state) => withComputer(state, bot.id, computer)))
+          .catch(() => undefined);
+      }
     } catch (error) {
       if (error instanceof ApiError && error.unauthorized) setRevoked(true);
       setInboxError(describeError(error));
     } finally {
       setInboxLoading(false);
     }
-  }, [client]);
+  }, [client, loadRooms]);
 
   // One live stream per session, shared by every screen. It resumes from the last event on reconnect.
   useEffect(() => {
@@ -109,10 +145,15 @@ export function BrotProvider({ children }: { children: ReactNode }): ReactElemen
     const offEvents = live.subscribe((event) => {
       setLastEventAt(event.at);
       setInbox((state) => applyInboxEvent(state, event));
+      if (event.type === 'computer.takeover' && event.takeover.active && event.takeover.requestedBy === 'bot') {
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+      }
+      if (event.type === 'room.members' && !knownRooms.current.has(event.threadId)) void loadRooms();
       for (const listener of [...listeners.current]) listener(event);
     });
     live.start();
     void refresh();
+
 
     const appState = AppState.addEventListener('change', (state) => {
       if (state === 'active') {
@@ -131,7 +172,7 @@ export function BrotProvider({ children }: { children: ReactNode }): ReactElemen
       live.stop();
       liveRef.current = undefined;
     };
-  }, [client, refresh]);
+  }, [client, refresh, loadRooms]);
 
   const reset = useCallback(() => {
     setSession(undefined);
@@ -179,7 +220,7 @@ export function BrotProvider({ children }: { children: ReactNode }): ReactElemen
 
   const resolveApproval = useCallback(
     async (approval: Approval, decision: ApprovalDecision, reply?: string) => {
-      if (!client) throw new Error('Not paired');
+      if (!client) throw new Error(t('error.notPaired'));
       const resolved = await client.resolveApproval(approval.id, decision, reply);
       setInbox((state) => {
         if (!state.approvals[approval.id]) return state;
@@ -188,6 +229,16 @@ export function BrotProvider({ children }: { children: ReactNode }): ReactElemen
         return { ...state, approvals };
       });
       return resolved;
+    },
+    [client],
+  );
+
+  const setTakeover = useCallback(
+    async (botId: string, active: boolean) => {
+      if (!client) throw new Error(t('error.notPaired'));
+      const takeover = await client.setTakeover(botId, { active });
+      setInbox((state) => ({ ...state, takeovers: { ...state.takeovers, [botId]: takeover } }));
+      return takeover;
     },
     [client],
   );
@@ -221,10 +272,11 @@ export function BrotProvider({ children }: { children: ReactNode }): ReactElemen
       forget,
       changeServerUrl,
       resolveApproval,
+      setTakeover,
       noteThread,
       subscribe,
     }),
-    [phase, session, client, liveStatus, lastEventAt, inbox, inboxLoading, inboxError, revoked, refresh, pair, unpair, forget, changeServerUrl, resolveApproval, noteThread, subscribe],
+    [phase, session, client, liveStatus, lastEventAt, inbox, inboxLoading, inboxError, revoked, refresh, pair, unpair, forget, changeServerUrl, resolveApproval, setTakeover, noteThread, subscribe],
   );
 
   return <BrotContext.Provider value={value}>{children}</BrotContext.Provider>;
