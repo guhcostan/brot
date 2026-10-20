@@ -8,6 +8,10 @@ export const EGRESS_IMAGE = 'brot-egress:latest';
 export const BUILD_COMPUTER_IMAGE = 'docker build -t brot-computer:latest images/computer';
 export const BUILD_EGRESS_IMAGE =
   'docker build -f images/computer/egress.Dockerfile -t brot-egress:latest apps/server/src/computers';
+export const DESKTOP_IMAGE = 'brot-desktop:latest';
+export const BUILD_DESKTOP_IMAGE = 'docker build -t brot-desktop:latest images/desktop';
+/** A desktop computer starts its screen with its own command, then keeps running the way `sleep infinity` does. */
+export const DESKTOP_COMMAND = ['sh', '-c', 'brot-desktop-start && exec sleep infinity'];
 
 export const COMPUTER_UID = 1000;
 export const COMPUTER_USER = `${COMPUTER_UID}:${COMPUTER_UID}`;
@@ -135,6 +139,7 @@ export function buildComputerRunArgs(input: {
   network: string;
   resources: ComputerResources;
   fingerprint: string;
+  desktop?: boolean;
 }): string[] {
   const botId = assertBotId(input.botId);
   const { resources } = input;
@@ -179,8 +184,7 @@ export function buildComputerRunArgs(input: {
     ...LOG_ARGS,
     ...env,
     input.image,
-    'sleep',
-    'infinity',
+    ...(input.desktop === true ? DESKTOP_COMMAND : ['sleep', 'infinity']),
   ];
 }
 

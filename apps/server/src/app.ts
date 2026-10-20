@@ -38,7 +38,8 @@ import type { Harness } from './harness';
 import { PairingError, type Pairing } from './pairing';
 import { cronError, type Scheduler } from './scheduler';
 import type { BrotMcpService } from './mcp/types';
-import type { LlmRelay } from './llm';
+import type { LlmRelay, ProviderSpec } from './llm';
+import { mountDesktopRoutes, type DesktopService } from './desktop';
 import { RuleViolation } from './rooms/errors';
 import type { RoomService } from './rooms/service';
 import type { TaskService } from './rooms/tasks';
@@ -68,6 +69,10 @@ export interface AppDeps {
   mcp?: Pick<BrotMcpService, 'route'>;
   /** The model relay. Its route authenticates each run's own token and is mounted outside `/api/*`. */
   llm?: Pick<LlmRelay, 'route'>;
+  /** The bot desktop service. Absent when no sandbox computer provider is configured: the desktop routes are then not mounted. */
+  desktop?: DesktopService;
+  /** The model providers the relay knows (seeded plus providers.json). Listed by GET /api/providers. */
+  providers?: readonly ProviderSpec[];
 }
 
 type Parsed<T> = { ok: true; data: T } | { ok: false; response: Response };
@@ -596,6 +601,21 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
   app.delete('/api/devices/:id', async (c) =>
     (await repos.devices.remove(c.req.param('id'))) ? c.body(null, 204) : notFound(c, 'Device'),
   );
+
+  app.get('/api/providers', async (c) => {
+    const listed = await Promise.all(
+      (deps.providers ?? []).map(async (spec) => ({
+        id: spec.id,
+        label: spec.id,
+        models: (spec.models ?? []).map((model) => ({ id: model.id, label: model.id })),
+        configured: await vault.has(spec.secretName),
+        secretName: spec.secretName,
+      })),
+    );
+    return c.json(listed);
+  });
+
+  if (deps.desktop) mountDesktopRoutes(app, { repos, desktop: deps.desktop });
 
   if (deps.mcp) app.route('/', deps.mcp.route);
   if (deps.llm) app.route('/', deps.llm.route);

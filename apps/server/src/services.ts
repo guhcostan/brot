@@ -4,6 +4,7 @@ import { createBroker, type Broker } from './broker';
 import { createEventBus, type EventBus } from './bus';
 import type { ServerConfig } from './config';
 import type { ComputerProvider } from './computers/types';
+import { createDesktopService, createDesktopTools, createTakeoverState, type DesktopOptions, type DesktopService } from './desktop';
 import { createHarness, type ComputerProviders, type Harness } from './harness';
 import {
   createLlmRelay,
@@ -51,6 +52,8 @@ export interface ServiceExtras {
   /** Team tools (`ask_bot`, `delegate_task`, `update_my_task`, `handoff`, `list_team`), registered on the Brot MCP server. */
   team?: (deps: TeamDeps) => BrotTool[];
   llm?: LlmOptions;
+  /** Bot desktop options. Tests inject a fake runner here. Only used when a sandbox computer provider exists. */
+  desktop?: DesktopOptions;
 }
 
 export interface Services {
@@ -66,6 +69,10 @@ export interface Services {
   pairing: Pairing;
   computers: ComputerProviders;
   mcp: BrotMcpService | undefined;
+  /** Bot desktops. Absent without a sandbox computer provider. */
+  desktop: DesktopService | undefined;
+  /** The providers the model relay knows, listed by GET /api/providers. */
+  providers: ProviderSpec[];
   /** Relays contained runs' model requests to their providers, adding the key from the vault. */
   llm: LlmRelay;
   rooms: RoomService;
@@ -108,7 +115,17 @@ export async function createServices(
       runner: teamRunner,
       onHandoff: (threadId, toBotId) => rooms.setBaton(threadId, toBotId),
     }) ?? [];
-  const mcp = extras.mcp?.({ repos, bus, broker, vault, tools: teamTools });
+  const desktop = computers.sandbox
+    ? createDesktopService({
+        provider: computers.sandbox,
+        repos,
+        bus,
+        takeovers: createTakeoverState(),
+        ...(extras.desktop ?? {}),
+      })
+    : undefined;
+  const desktopTools = desktop ? createDesktopTools({ repos, desktop, takeovers: desktop.takeovers, takeoverWaitMs: extras.desktop?.takeoverWaitMs }) : [];
+  const mcp = extras.mcp?.({ repos, bus, broker, vault, tools: [...teamTools, ...desktopTools] });
   const providers = mergeProviders(
     SEEDED_PROVIDERS,
     await loadProviderFile(config.providersFile),
@@ -164,6 +181,8 @@ export async function createServices(
     pairing,
     computers,
     mcp,
+    desktop,
+    providers,
     llm,
     rooms,
     tasks,

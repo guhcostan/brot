@@ -10,6 +10,8 @@ import type { HttpOptions } from './http-request';
 export interface ToolResult {
   ok: boolean;
   output: string;
+  /** An image returned as an MCP image block, for vision models. Base64 data, never redacted text. */
+  image?: { mimeType: 'image/jpeg' | 'image/png'; data: string };
 }
 
 /** A call that passed argument validation and is ready for the broker. Nothing has run yet. */
@@ -26,6 +28,8 @@ export interface PreparedCall {
 
 export interface BrotTool {
   spec: BrotToolSpec;
+  /** Whether this tool is offered to the run. Absent: offered to every run. Hidden tools are neither listed nor callable. */
+  enabledFor?(scope: ApprovalScope): Promise<boolean>;
   /**
    * Validates the raw arguments and describes the call, before any approval is requested. An error here
    * is returned to the engine and the user is never asked about an invalid call.

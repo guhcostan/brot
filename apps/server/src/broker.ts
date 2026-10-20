@@ -55,7 +55,8 @@ export function createBroker(deps: { repos: Repos; bus: EventBus }): Broker {
 
   async function request(scope: ApprovalScope, req: ToolRequest): Promise<ToolDecision> {
     const verdict = await decide(scope.botId, req);
-    if (verdict === 'allow') return { allowed: true };
+    // A read changes nothing outside the computer, and the egress allowlist still bounds where it reaches.
+    if (verdict === 'allow' || (verdict === 'ask' && req.risk === 'read')) return { allowed: true };
     if (verdict === 'deny') return { allowed: false, reply: 'Denied by policy.' };
 
     const approval = await repos.approvals.create({

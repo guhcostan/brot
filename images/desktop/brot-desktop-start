@@ -1,0 +1,58 @@
+#!/bin/sh
+# Starts the bot desktop: Xvfb on :1, openbox, and Chromium with remote debugging on 127.0.0.1:9222.
+# Idempotent: each part is started only when it is not already answering, so a second run changes nothing.
+set -eu
+
+export DISPLAY=:1
+WIDTH="${DESKTOP_WIDTH:-1280}"
+HEIGHT="${DESKTOP_HEIGHT:-800}"
+PROXY="${HTTPS_PROXY:-http://brot-egress:3128}"
+PROFILE="${HOME}/.brot-browser"
+
+mkdir -p /tmp/.X11-unix
+chmod 1777 /tmp/.X11-unix
+
+if ! xdotool getdisplaygeometry >/dev/null 2>&1; then
+  rm -f /tmp/.X1-lock
+  Xvfb "$DISPLAY" -screen 0 "${WIDTH}x${HEIGHT}x24" -nolisten tcp >/tmp/brot-xvfb.log 2>&1 &
+  i=0
+  until xdotool getdisplaygeometry >/dev/null 2>&1; do
+    i=$((i + 1))
+    if [ "$i" -ge 50 ]; then echo "Xvfb did not start" >&2; exit 1; fi
+    sleep 0.2
+  done
+fi
+
+if ! { [ -f /tmp/brot-openbox.pid ] && kill -0 "$(cat /tmp/brot-openbox.pid)" 2>/dev/null; }; then
+  openbox >/tmp/brot-openbox.log 2>&1 &
+  echo $! >/tmp/brot-openbox.pid
+fi
+
+if ! curl -fs --max-time 2 http://127.0.0.1:9222/json/version >/dev/null 2>&1; then
+  mkdir -p "$PROFILE"
+  chromium \
+    --remote-debugging-address=127.0.0.1 \
+    --remote-debugging-port=9222 \
+    --proxy-server="$PROXY" \
+    --user-data-dir="$PROFILE" \
+    --no-first-run \
+    --no-default-browser-check \
+    --no-sandbox \
+    --disable-dev-shm-usage \
+    --disable-gpu \
+    --disable-background-networking \
+    --disable-component-update \
+    --disable-sync \
+    --metrics-recording-only \
+    --no-pings \
+    --start-maximized \
+    --window-size="${WIDTH},${HEIGHT}" \
+    --window-position=0,0 \
+    about:blank >/tmp/brot-chromium.log 2>&1 &
+  i=0
+  until curl -fs --max-time 2 http://127.0.0.1:9222/json/version >/dev/null 2>&1; do
+    i=$((i + 1))
+    if [ "$i" -ge 100 ]; then echo "Chromium did not answer on 9222" >&2; exit 1; fi
+    sleep 0.2
+  done
+fi

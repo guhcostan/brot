@@ -166,3 +166,15 @@ describe('tool approval flow', () => {
     expect((await call(ctx.app, 'GET', '/api/approvals?status=bogus')).status).toBe(400);
   });
 });
+
+describe('read-risk requests', () => {
+  it('runs a read without asking, unless a deny policy matches', async () => {
+    const { bot, thread } = await setup();
+    const scope = { botId: bot.id, threadId: thread.id, runId: 'run-read' };
+    const read = { callId: 'c1', tool: 'browser_snapshot', args: {}, kind: 'other' as const, summary: 'snapshot', risk: 'read' as const };
+    await expect(ctx.services.broker.request(scope, read)).resolves.toEqual({ allowed: true });
+
+    await call(ctx.app, 'POST', `/api/bots/${bot.id}/policies`, { tool: 'browser_snapshot', effect: 'deny' });
+    await expect(ctx.services.broker.request(scope, read)).resolves.toMatchObject({ allowed: false });
+  });
+});

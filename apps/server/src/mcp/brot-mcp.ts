@@ -13,7 +13,7 @@ import type { ApprovalScope } from '../broker';
 import { createHttpRequestTool } from './http-request';
 import { createNotifyUserTool, createRememberTool } from './builtin-tools';
 import { redact } from './helpers';
-import type { BrotMcpDeps, BrotMcpService, BrotTool, RecordedDecision } from './types';
+import type { BrotMcpDeps, BrotMcpService, BrotTool, RecordedDecision, ToolResult } from './types';
 
 const MCP_SERVER_NAME = 'brot';
 const MCP_SERVER_VERSION = '0.1.0';
@@ -35,7 +35,6 @@ interface RunEntry {
  */
 export function createBrotMcp(deps: BrotMcpDeps): BrotMcpService {
   const tools = registerTools(deps);
-  const specs = [...tools.values()].map((tool) => tool.spec);
   const runs = new Map<string, RunEntry>();
   const decisions: RecordedDecision[] = [];
 
@@ -44,9 +43,19 @@ export function createBrotMcp(deps: BrotMcpDeps): BrotMcpService {
     if (decisions.length > MAX_RECORDED_DECISIONS) decisions.splice(0, decisions.length - MAX_RECORDED_DECISIONS);
   }
 
+  async function visibleTools(scope: ApprovalScope): Promise<BrotTool[]> {
+    const visible: BrotTool[] = [];
+    for (const tool of tools.values()) {
+      if (tool.enabledFor === undefined || (await tool.enabledFor(scope))) visible.push(tool);
+    }
+    return visible;
+  }
+
   async function callTool(scope: ApprovalScope, name: string, args: Record<string, unknown>): Promise<CallToolResult> {
     const tool = tools.get(name);
-    if (!tool) return toolError(`Unknown tool ${name}.`);
+    if (!tool || (tool.enabledFor !== undefined && !(await tool.enabledFor(scope)))) {
+      return toolError(`Unknown tool ${name}.`);
+    }
 
     let prepared: Awaited<ReturnType<BrotTool['prepare']>>;
     try {
@@ -89,21 +98,24 @@ export function createBrotMcp(deps: BrotMcpDeps): BrotMcpService {
     }
 
     const values = Object.values(secrets);
-    let result: { ok: boolean; output: string };
+    let result: ToolResult;
     try {
       result = await prepared.run(secrets);
     } catch (error) {
       result = { ok: false, output: error instanceof Error ? error.message : String(error) };
     }
-    return {
-      isError: !result.ok,
-      content: [{ type: 'text', text: redact(result.output, values) }],
-    };
+    const content: CallToolResult['content'] = [{ type: 'text', text: redact(result.output, values) }];
+    if (result.image !== undefined) {
+      content.push({ type: 'image', data: result.image.data, mimeType: result.image.mimeType });
+    }
+    return { isError: !result.ok, content };
   }
 
   function buildServer(scope: ApprovalScope): Server {
     const server = new Server({ name: MCP_SERVER_NAME, version: MCP_SERVER_VERSION }, { capabilities: { tools: {} } });
-    server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: specs.map(toMcpTool) }));
+    server.setRequestHandler(ListToolsRequestSchema, async () => ({
+      tools: (await visibleTools(scope)).map((tool) => toMcpTool(tool.spec)),
+    }));
     server.setRequestHandler(CallToolRequestSchema, async (request) =>
       callTool(scope, request.params.name, request.params.arguments ?? {}),
     );

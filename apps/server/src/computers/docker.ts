@@ -4,6 +4,7 @@ import { EgressHost, type Bot, type ComputerExecOptions, type ComputerHandle, ty
 import {
   assertBotId,
   BUILD_COMPUTER_IMAGE,
+  BUILD_DESKTOP_IMAGE,
   BUILD_EGRESS_IMAGE,
   buildComputerRunArgs,
   buildEgressRunArgs,
@@ -21,6 +22,7 @@ import {
   COMPUTER_IMAGE,
   computerName,
   DEFAULT_COMPUTER_RESOURCES,
+  DESKTOP_IMAGE,
   EGRESS_ALIAS,
   EGRESS_IMAGE,
   EGRESS_PORT,
@@ -42,6 +44,8 @@ export interface DockerProviderOptions {
   /** Port the Brot server listens on. The computer reaches it through the sidecar relay. Default 8799. */
   brotPort?: number;
   computerImage?: string;
+  /** The image for bots with `desktop: true`. Default `brot-desktop:latest`. */
+  desktopImage?: string;
   egressImage?: string;
   /** The docker CLI binary. Default `docker`. */
   dockerBin?: string;
@@ -100,6 +104,7 @@ export function createDockerComputerProvider(opts: DockerProviderOptions = {}): 
   const bin = opts.dockerBin ?? 'docker';
   const brotPort = opts.brotPort ?? 8799;
   const computerImage = opts.computerImage ?? COMPUTER_IMAGE;
+  const desktopImage = opts.desktopImage ?? DESKTOP_IMAGE;
   const egressImage = opts.egressImage ?? EGRESS_IMAGE;
   const resources: ComputerResources = { ...DEFAULT_COMPUTER_RESOURCES, ...opts.resources };
   const started = new Set<string>();
@@ -217,13 +222,14 @@ export function createDockerComputerProvider(opts: DockerProviderOptions = {}): 
     });
   }
 
-  async function requireReady(): Promise<void> {
+  async function requireReady(desktop: boolean): Promise<void> {
     const status = await available();
     if (!status.ok) throw new Error(`Docker computer is unavailable: ${status.reason}`);
-    const images = [
+    const images: ReadonlyArray<readonly [string, string]> = [
       [computerImage, BUILD_COMPUTER_IMAGE],
       [egressImage, BUILD_EGRESS_IMAGE],
-    ] as const;
+      ...(desktop ? [[desktopImage, BUILD_DESKTOP_IMAGE] as const] : []),
+    ];
     for (const [image, hint] of images) {
       if ((await docker(buildImageInspectArgs(image))).code !== 0) {
         throw new Error(`image ${image} is not built. Run: ${hint}`);
@@ -271,9 +277,13 @@ export function createDockerComputerProvider(opts: DockerProviderOptions = {}): 
     startFollower(botId, name);
   }
 
-  async function ensureComputer(botId: string, network: NetworkInfo): Promise<void> {
+  async function ensureComputer(bot: Bot, network: NetworkInfo): Promise<void> {
+    const botId = bot.id;
     const name = computerName(botId);
-    const spec = fingerprint({ v: SPEC_VERSION, role: 'computer', image: computerImage, resources });
+    const desktop = bot.desktop === true;
+    const image = desktop ? desktopImage : computerImage;
+    // `desktop` joins the fingerprint only when set, so the hash of an existing non-desktop computer is unchanged.
+    const spec = fingerprint({ v: SPEC_VERSION, role: 'computer', image, resources, ...(desktop ? { desktop: true } : {}) });
     const current = await inspectContainer(name);
     if (current?.labels[FINGERPRINT_LABEL] === spec && current.networks.includes(network.name)) {
       if (!current.running) await startContainer(name);
@@ -281,7 +291,7 @@ export function createDockerComputerProvider(opts: DockerProviderOptions = {}): 
     }
     await removeContainer(name);
     await runContainer(
-      buildComputerRunArgs({ botId, image: computerImage, network: network.name, resources, fingerprint: spec }),
+      buildComputerRunArgs({ botId, image, network: network.name, resources, fingerprint: spec, desktop }),
       name,
     );
   }
@@ -306,12 +316,12 @@ export function createDockerComputerProvider(opts: DockerProviderOptions = {}): 
       const botId = assertBotId(bot.id);
       const allow = egressAllowlist(bot.egress, call.extraHosts);
       return withBotLock(botId, async () => {
-        await requireReady();
+        await requireReady(bot.desktop === true);
         sinks.set(botId, call.onBlocked);
         await mustDocker(buildVolumeCreateArgs(botId), `create workspace volume for ${botId}`);
         const network = await ensureNetwork(botId);
         await ensureEgress(botId, allow, network);
-        await ensureComputer(botId, network);
+        await ensureComputer(bot, network);
         const name = computerName(botId);
         return {
           id: name,
