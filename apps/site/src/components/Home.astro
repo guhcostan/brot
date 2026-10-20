@@ -1,13 +1,28 @@
 ---
-import { BrandMark, StatusDot } from '@brot/ui';
+import { BrandMark } from '@brot/ui';
 import Base from '../layouts/Base.astro';
 import Header from './Header.astro';
-import ChatMock from './ChatMock.astro';
 import Icon from './Icon.astro';
+import AppDemo from './AppDemo';
+import TakeoverDemo from './TakeoverDemo';
 import HeroAvatars from './HeroAvatars';
 import LiveAvatar from './LiveAvatar';
-import { speciesOf } from './species';
-import { GITHUB_URL, LOCALES, LOCALE_LABELS, RELEASES_URL, dict, localePath, type Locale } from '../i18n/ui';
+import { splitMentions } from '../lib/mentions';
+import {
+  CAST,
+  CHANGELOG_URL,
+  DEPLOY_URL,
+  GITHUB_URL,
+  ISSUES_URL,
+  LICENSE_URL,
+  LOCALES,
+  LOCALE_LABELS,
+  PLATFORMS,
+  RELEASES_URL,
+  dict,
+  localePath,
+  type Locale,
+} from '../i18n/ui';
 
 interface Props {
   locale: Locale;
@@ -16,162 +31,448 @@ interface Props {
 const { locale } = Astro.props;
 const t = dict(locale);
 const year = new Date().getFullYear();
+const f = t.features;
+const MODELS = ['OpenCode Go', 'DeepSeek', 'OpenAI', 'Anthropic API', 'OpenRouter', 'Ollama', 'LM Studio'];
+const APPS = ['GitHub', 'Gmail', 'Google Calendar', 'Slack', 'Notion', 'Linear', 'Stripe', 'Postgres'];
+const COMPOSE = 'docker compose -f deploy/compose.yaml up -d';
+const jobBots = (['capy', 'onca', 'tuca'] as const).map((id) => ({ id, ...CAST[id], role: t.demo.roles[id] }));
 ---
 
 <Base locale={locale} title={t.meta.title} description={t.meta.description}>
+  <div class="grid-bg" aria-hidden="true"></div>
   <Header locale={locale} />
 
   <main id="main">
     <section class="hero" aria-labelledby="hero-title" data-avatar-zone>
       <div class="wrap hero__inner">
-        <HeroAvatars client:load label={t.hero.avatars} />
-        <p class="eyebrow">{t.hero.eyebrow}</p>
-        <h1 id="hero-title">{t.hero.title}</h1>
-        <p class="lead">{t.hero.lead}</p>
-        <div class="cta-row">
-          <a class="brot-button cta" data-variant="primary" href={RELEASES_URL}>
-            <Icon name="download" />
-            {t.hero.download}
+        <p class="chip" data-reveal>
+          <span class="chip__new">{t.hero.chipNew}</span>
+          <span class="chip__text">{t.hero.chipAvailable}</span>
+          {
+            PLATFORMS.map((platform, index) => (
+              <>
+                {index > 0 && (
+                  <span class="chip__dot" aria-hidden="true">
+                    ·
+                  </span>
+                )}
+                <span class="chip__platform">{platform}</span>
+              </>
+            ))
+          }
+        </p>
+
+        <h1 id="hero-title" class="hero__title" data-reveal style="--d: 80ms">
+          <span>{t.hero.meet}</span>
+          <span class="hero__tile" role="img" aria-label={t.hero.avatar}>
+            <LiveAvatar client:load species="capivara" color="black" size={96} />
+          </span>
+          <span>Brot</span>
+        </h1>
+
+        <p class="hero__lead" data-reveal style="--d: 160ms">{t.hero.lead}</p>
+
+        <div class="hero__ctas" data-reveal style="--d: 240ms">
+          <div class="split">
+            <a class="split__main" href={RELEASES_URL}>
+              <Icon name="download" size={18} />
+              {t.hero.download}
+            </a>
+            <details class="split__more">
+              <summary aria-label={t.hero.otherPlatforms}>
+                <Icon name="chevron" size={16} />
+              </summary>
+              <ul class="popover popover--platforms">
+                {
+                  PLATFORMS.map((platform) => (
+                    <li>
+                      <a href={RELEASES_URL}>
+                        <span>{platform}</span>
+                        <span class="popover__note">{t.hero.platformNote[platform]}</span>
+                      </a>
+                    </li>
+                  ))
+                }
+              </ul>
+            </details>
+          </div>
+          <a class="pill pill--dark pill--lg" href="#self-host">
+            <Icon name="server" size={18} />
+            {t.hero.selfHost}
           </a>
-          <a class="brot-button cta" data-variant="secondary" href="#waitlist">{t.hero.cloud}</a>
         </div>
-        <p class="note">{t.hero.note}</p>
+        <p class="hero__note" data-reveal style="--d: 300ms">{t.hero.note}</p>
+      </div>
+
+      <div class="wrap wrap--wide">
+        <figure class="window" data-reveal style="--d: 360ms">
+          <figcaption class="brot-sr-only">{t.demo.summary}</figcaption>
+          <div class="window__bar" aria-hidden="true">
+            <span class="window__dot"></span><span class="window__dot"></span><span class="window__dot"></span>
+            <span class="window__title">brot</span>
+          </div>
+          <div class="window__body" aria-hidden="true" inert>
+            <AppDemo client:visible copy={t.demo} />
+          </div>
+        </figure>
       </div>
     </section>
 
-    <section class="section section--mock" aria-labelledby="chat-title">
+    <section id="product" class="section" aria-labelledby="product-title">
       <div class="wrap">
-        <div class="section__head">
-          <h2 id="chat-title">{t.chat.title}</h2>
-          <p class="section__lead">{t.chat.lead}</p>
-        </div>
-        <ChatMock locale={locale} />
-      </div>
-    </section>
+        <header class="section__head" data-reveal>
+          <h2 id="product-title">{f.title}</h2>
+          <p class="section__lead">{f.lead}</p>
+        </header>
 
-    <section id="team" class="section" aria-labelledby="team-title">
-      <div class="wrap">
-        <div class="section__head">
-          <h2 id="team-title">{t.team.title}</h2>
-          <p class="section__lead">{t.team.lead}</p>
-        </div>
-        <ul class="team">
-          {
-            t.team.bots.map((bot) => (
-              <li class="team__card" data-avatar-zone>
-                <LiveAvatar client:visible species={speciesOf(bot)} color={bot.color} mood={bot.mood} size={48} />
-                <div class="team__text">
-                  <h3>
-                    {bot.name}
-                    <span class="team__role">{bot.role}</span>
-                  </h3>
-                  <p>{bot.job}</p>
-                  <StatusDot status={bot.status} label={bot.statusLabel} />
+        <ul class="bento">
+          <li class="card card--job" data-reveal>
+            <div class="card__visual" data-avatar-zone>
+              <ul class="jobs">
+                {
+                  jobBots.map((bot, index) => (
+                    <li class="jobs__row" style={`--i: ${index}`}>
+                      <LiveAvatar client:visible species={bot.species} color={bot.color} mood={index === 1 ? 'thinking' : 'idle'} size={36} />
+                      <span class="jobs__name">{bot.name}</span>
+                      <span class="jobs__role">{bot.role}</span>
+                    </li>
+                  ))
+                }
+              </ul>
+            </div>
+            <h3><Icon name="job" size={18} />{f.job.title}</h3>
+            <p>{f.job.body}</p>
+          </li>
+
+          <li class="card card--computer" data-reveal style="--d: 80ms">
+            <div class="card__visual">
+              <div class="mini-screen" aria-hidden="true">
+                <span class="mini-screen__url"></span>
+                <span class="mini-screen__line" style="width: 70%"></span>
+                <span class="mini-screen__line" style="width: 52%"></span>
+                <span class="mini-screen__line" style="width: 64%"></span>
+                <span class="mini-screen__btn"></span>
+                <svg class="mini-screen__cursor" viewBox="0 0 16 20" width="14" height="18"><path d="M1 1l13 10.5-6 .6 3.6 6.4-2.6 1.4-3.6-6.5L1 17.6z"></path></svg>
+              </div>
+            </div>
+            <h3><Icon name="computer" size={18} />{f.computer.title}</h3>
+            <p>{f.computer.body}</p>
+          </li>
+
+          <li class="card card--rooms" data-reveal style="--d: 160ms">
+            <div class="card__visual network" data-avatar-zone>
+              <svg class="network__lines" viewBox="0 0 300 150" preserveAspectRatio="none" aria-hidden="true">
+                <path d="M60 104 L150 64"></path>
+                <path d="M150 64 L244 104"></path>
+                <path d="M60 104 L244 104"></path>
+              </svg>
+              <span class="network__node" style="left: 20%; top: 69%">
+                <LiveAvatar client:visible species="capivara" color="black" gaze="right" size={44} />
+                <span>Capy</span>
+              </span>
+              <span class="network__node" style="left: 50%; top: 43%">
+                <LiveAvatar client:visible species="onca" color="orange" mood="thinking" size={44} />
+                <span>Onça</span>
+              </span>
+              <span class="network__node" style="left: 81%; top: 69%">
+                <LiveAvatar client:visible species="lobo" color="gray" gaze="left" size={44} />
+                <span>Lobo</span>
+              </span>
+              <p class="network__bubble">
+                {splitMentions(f.rooms.bubble).map((part) => (part.mention ? <strong>{part.text}</strong> : part.text))}
+              </p>
+            </div>
+            <h3><Icon name="room" size={18} />{f.rooms.title}</h3>
+            <p>{f.rooms.body}</p>
+          </li>
+
+          <li class="card card--approvals" data-reveal>
+            <div class="card__visual">
+              <div class="brot-approval mini-approval" data-status="pending" aria-hidden="true">
+                <p class="brot-approval__title">{f.approvals.card}</p>
+                <p class="brot-approval__meta">{f.approvals.meta}</p>
+                <div class="brot-approval__actions">
+                  <span class="brot-button" data-variant="primary" data-size="sm">{f.approvals.allow}</span>
+                  <span class="brot-button" data-variant="danger" data-size="sm">{f.approvals.deny}</span>
                 </div>
-              </li>
-            ))
-          }
+              </div>
+            </div>
+            <h3><Icon name="approval" size={18} />{f.approvals.title}</h3>
+            <p>{f.approvals.body}</p>
+          </li>
+
+          <li class="card card--memory" data-reveal style="--d: 80ms">
+            <div class="card__visual">
+              <ul class="memory" aria-hidden="true">
+                {
+                  f.memory.items.map((item, index) => (
+                    <li style={`--i: ${index}`}>
+                      <span>{item}</span>
+                      <span class="memory__edit">{f.memory.edit}</span>
+                    </li>
+                  ))
+                }
+              </ul>
+            </div>
+            <h3><Icon name="memory" size={18} />{f.memory.title}</h3>
+            <p>{f.memory.body}</p>
+          </li>
+
+          <li class="card card--models" data-reveal style="--d: 160ms">
+            <div class="card__visual">
+              <ul class="models" aria-hidden="true">
+                {MODELS.map((model, index) => <li style={`--i: ${index}`}>{model}</li>)}
+              </ul>
+            </div>
+            <h3><Icon name="model" size={18} />{f.models.title}</h3>
+            <p>{f.models.body}</p>
+          </li>
+
+          <li class="card card--selfhost" data-reveal>
+            <div class="card__text">
+              <h3><Icon name="server" size={18} />{f.selfhost.title}</h3>
+              <p>{f.selfhost.body}</p>
+            </div>
+            <pre class="term" aria-label={f.selfhost.title}><code><span class="term__prompt">$</span> git clone {GITHUB_URL}.git
+<span class="term__prompt">$</span> cd brot
+<span class="term__prompt">$</span> {COMPOSE}<span class="term__caret" aria-hidden="true"></span></code></pre>
+          </li>
         </ul>
       </div>
     </section>
 
-    <section id="how" class="section" aria-labelledby="how-title">
+    <section class="works" aria-labelledby="works-title">
       <div class="wrap">
-        <div class="section__head">
-          <h2 id="how-title">{t.how.title}</h2>
-          <p class="section__lead">{t.how.lead}</p>
-        </div>
-        <ul class="features">
-          {
-            t.how.features.map((feature) => (
-              <li class="feature">
-                <span class="feature__icon">
-                  <Icon name={feature.icon} />
-                </span>
-                <h3>{feature.title}</h3>
-                <p>{feature.body}</p>
-              </li>
-            ))
-          }
-        </ul>
-      </div>
-    </section>
-
-    <section id="deploy" class="section" aria-labelledby="deploy-title">
-      <div class="wrap">
-        <div class="section__head">
-          <h2 id="deploy-title">{t.deploy.title}</h2>
-          <p class="section__lead">{t.deploy.lead}</p>
-        </div>
-        <div class="plans">
-          {
-            [
-              { plan: t.deploy.self, href: RELEASES_URL, variant: 'primary' },
-              { plan: t.deploy.cloud, href: '#waitlist', variant: 'secondary' },
-            ].map(({ plan, href, variant }) => (
-              <article class="plan">
-                <header class="plan__head">
-                  <h3>{plan.name}</h3>
-                  <span class="brot-badge">{plan.tag}</span>
-                </header>
-                <p class="plan__body">{plan.body}</p>
-                <ul class="plan__points">
-                  {plan.points.map((point) => (
-                    <li>{point}</li>
+        <h2 id="works-title" class="works__title" data-reveal>{t.works.title}</h2>
+        {
+          [
+            { label: t.works.models, items: MODELS },
+            { label: t.works.apps, items: APPS },
+          ].map((row, rowIndex) => (
+            <div class="marquee" data-reveal style={`--d: ${rowIndex * 80}ms`}>
+              <p class="marquee__label">{row.label}</p>
+              <div class="marquee__viewport">
+                <ul class:list={['marquee__track', { 'marquee__track--reverse': rowIndex === 1 }]}>
+                  {row.items.map((item) => <li>{item}</li>)}
+                  {row.items.map((item) => (
+                    <li class="marquee__clone" aria-hidden="true">{item}</li>
                   ))}
                 </ul>
-                <a class="brot-button cta" data-variant={variant} href={href}>
-                  {plan.cta}
-                </a>
-              </article>
-            ))
-          }
-        </div>
-        <aside id="waitlist" class="waitlist" aria-labelledby="waitlist-title">
-          <div>
-            <h3 id="waitlist-title">{t.waitlist.title}</h3>
-            <p>{t.waitlist.body}</p>
-          </div>
-          <a class="brot-button" data-variant="secondary" href={GITHUB_URL}>
-            <Icon name="github" />
-            {t.waitlist.cta}
-          </a>
-        </aside>
+              </div>
+            </div>
+          ))
+        }
+        <p class="works__note">{t.works.note}</p>
       </div>
     </section>
 
-    <section id="source" class="section" aria-labelledby="source-title">
-      <div class="wrap source">
-        <div class="source__text">
-          <span class="brot-badge">{t.source.license}</span>
-          <h2 id="source-title">{t.source.title}</h2>
-          <p class="section__lead">{t.source.body}</p>
-          <a class="brot-button cta" data-variant="primary" href={GITHUB_URL}>
-            <Icon name="github" />
-            {t.source.cta}
+    <section id="computer" class="section" aria-labelledby="computer-title">
+      <div class="wrap">
+        <header class="section__head" data-reveal>
+          <p class="eyebrow">{t.computer.eyebrow}</p>
+          <h2 id="computer-title">{t.computer.title}</h2>
+          <p class="section__lead">{t.computer.lead}</p>
+        </header>
+        <figure class="takeover-frame" data-reveal style="--d: 80ms">
+          <figcaption class="brot-sr-only">{t.computer.demo.label}</figcaption>
+          <div aria-hidden="true" inert>
+            <TakeoverDemo client:visible copy={t.computer.demo} />
+          </div>
+        </figure>
+        <ul class="points">
+          {
+            t.computer.points.map((point, index) => (
+              <li data-reveal style={`--d: ${index * 80}ms`}>
+                <h3>{point.title}</h3>
+                <p>{point.body}</p>
+              </li>
+            ))
+          }
+        </ul>
+      </div>
+    </section>
+
+    <section id="use-cases" class="section" aria-labelledby="cases-title">
+      <div class="wrap">
+        <header class="section__head" data-reveal>
+          <h2 id="cases-title">{t.useCases.title}</h2>
+          <p class="section__lead">{t.useCases.lead}</p>
+        </header>
+        <ul class="cases">
+          {
+            t.useCases.items.map((item, index) => {
+              const bot = CAST[item.bot];
+              return (
+                <li class="case" data-reveal data-avatar-zone style={`--d: ${(index % 4) * 70}ms`}>
+                  <div class="case__who">
+                    <LiveAvatar client:visible species={bot.species} color={bot.color} size={40} />
+                    <span>
+                      <span class="case__name">{bot.name}</span>
+                      <span class="case__role">{t.demo.roles[item.bot]}</span>
+                    </span>
+                  </div>
+                  <h3>{item.title}</h3>
+                  <p>{item.body}</p>
+                  <span class="case__tag">{item.tag}</span>
+                </li>
+              );
+            })
+          }
+        </ul>
+      </div>
+    </section>
+
+    <section id="pricing" class="section" aria-labelledby="pricing-title">
+      <div class="wrap">
+        <header class="section__head section__head--center" data-reveal>
+          <h2 id="pricing-title">{t.pricing.title}</h2>
+          <p class="section__lead">{t.pricing.lead}</p>
+        </header>
+
+        <article id="self-host" class="price-self" data-reveal>
+          <div class="price-self__main">
+            <p class="price-self__name">
+              {t.pricing.self.name}
+              <span class="tag">{t.pricing.self.badge}</span>
+            </p>
+            <p class="price-self__price">
+              <span class="price-self__amount">{t.pricing.self.price}</span>
+              <span class="price-self__per">{t.pricing.self.per}</span>
+            </p>
+            <p class="price-self__body">{t.pricing.self.body}</p>
+            <div class="price-self__ctas">
+              <a class="pill pill--light pill--lg" href={RELEASES_URL}>
+                <Icon name="download" size={18} />
+                {t.pricing.self.cta}
+              </a>
+              <a class="pill pill--dark pill--lg" href={DEPLOY_URL}>
+                {t.footer.selfHostGuide}
+                <Icon name="arrow" size={16} />
+              </a>
+            </div>
+          </div>
+          <div class="price-self__side">
+            <ul class="checks">
+              {
+                t.pricing.self.points.map((point) => (
+                  <li>
+                    <Icon name="check" size={16} />
+                    {point}
+                  </li>
+                ))
+              }
+            </ul>
+            <pre class="term term--small"><code><span class="term__prompt">$</span> {COMPOSE}</code></pre>
+          </div>
+        </article>
+
+        <div class="cloud" data-reveal>
+          <p class="cloud__title">
+            {t.pricing.cloudTitle}
+            <span class="tag tag--muted">{t.pricing.soon}</span>
+          </p>
+          <ul class="plans">
+            {
+              t.pricing.plans.map((plan) => (
+                <li class="plan">
+                  <p class="plan__name">{plan.name}</p>
+                  <p class="plan__for">{plan.for}</p>
+                  <ul class="plan__points">
+                    {plan.points.map((point) => (
+                      <li>{point}</li>
+                    ))}
+                  </ul>
+                  <span class="plan__soon">{t.pricing.soon}</span>
+                </li>
+              ))
+            }
+          </ul>
+          <p class="cloud__note">
+            {t.pricing.note}{' '}
+            <a class="textlink" href={GITHUB_URL}>
+              {t.pricing.waitlist}
+              <Icon name="arrow" size={14} />
+            </a>
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section id="faq" class="section" aria-labelledby="faq-title">
+      <div class="wrap faq">
+        <header class="faq__head" data-reveal>
+          <h2 id="faq-title">{t.faq.title}</h2>
+          <p class="section__lead">{t.faq.lead}</p>
+          <a class="textlink" href={ISSUES_URL}>
+            {t.faq.ask}
+            <Icon name="arrow" size={14} />
+          </a>
+        </header>
+        <div class="faq__list" data-reveal style="--d: 80ms">
+          {
+            t.faq.items.map((item) => (
+              <details class="faq__item">
+                <summary>
+                  {item.q}
+                  <Icon name="plus" size={16} />
+                </summary>
+                <p>{item.a}</p>
+              </details>
+            ))
+          }
+        </div>
+      </div>
+    </section>
+
+    <section class="final" aria-labelledby="final-title" data-avatar-zone>
+      <div class="wrap final__inner">
+        <div class="final__band" data-reveal>
+          <HeroAvatars client:visible label={t.cta.avatars} />
+        </div>
+        <h2 id="final-title" data-reveal>{t.cta.title}</h2>
+        <p class="section__lead" data-reveal style="--d: 80ms">{t.cta.lead}</p>
+        <div class="hero__ctas" data-reveal style="--d: 160ms">
+          <a class="pill pill--light pill--lg" href={RELEASES_URL}>
+            <Icon name="download" size={18} />
+            {t.cta.download}
+          </a>
+          <a class="pill pill--dark pill--lg" href="#self-host">
+            <Icon name="server" size={18} />
+            {t.cta.selfHost}
           </a>
         </div>
-        <pre class="brot-code source__code" aria-label={t.source.codeLabel}><code><span class="prompt">$</span> git clone https://github.com/guhcostan/brot
-<span class="prompt">$</span> cd brot && pnpm install
-<span class="prompt">$</span> pnpm dev</code></pre>
       </div>
     </section>
   </main>
 
-  <footer class="site-footer">
-    <div class="wrap site-footer__inner">
-      <div class="site-footer__brand">
-        <BrandMark size={20} />
-        <span class="wordmark">brot</span>
-        <span class="site-footer__tagline">{t.footer.tagline}</span>
+  <footer class="footer">
+    <div class="wrap footer__inner">
+      <div class="footer__brand">
+        <a class="brand" href={localePath(locale)} aria-label="brot">
+          <BrandMark size={22} />
+          <span class="wordmark" aria-hidden="true">brot</span>
+        </a>
+        <p>{t.footer.tagline}</p>
+        <p class="footer__meta">{t.footer.status}</p>
       </div>
-      <p class="site-footer__meta">
-        {t.footer.status}
-        {' · '}
-        <a href="https://github.com/guhcostan/brot/blob/main/LICENSE">{t.footer.license}</a>
-        {' · '}© {year}
-      </p>
-      <nav class="lang" aria-label={t.nav.language}>
+      <nav class="footer__col" aria-label={t.footer.product}>
+        <p class="footer__heading">{t.footer.product}</p>
+        <a href="#product">{t.nav.product}</a>
+        <a href="#computer">{t.nav.computer}</a>
+        <a href="#use-cases">{t.nav.useCases}</a>
+        <a href="#pricing">{t.nav.pricing}</a>
+        <a href="#faq">{t.nav.faq}</a>
+      </nav>
+      <nav class="footer__col" aria-label={t.footer.resources}>
+        <p class="footer__heading">{t.footer.resources}</p>
+        <a href={GITHUB_URL}>{t.footer.source}</a>
+        <a href={RELEASES_URL}>{t.nav.download}</a>
+        <a href={DEPLOY_URL}>{t.footer.selfHostGuide}</a>
+        <a href={CHANGELOG_URL}>{t.footer.changelog}</a>
+        <a href={LICENSE_URL}>{t.footer.license}</a>
+      </nav>
+      <nav class="footer__col" aria-label={t.nav.language}>
+        <p class="footer__heading">{t.nav.language}</p>
         {
           LOCALES.map((l) => (
             <a href={localePath(l)} hreflang={l} lang={l} aria-current={l === locale ? 'page' : undefined}>
@@ -181,42 +482,9 @@ const year = new Date().getFullYear();
         }
       </nav>
     </div>
+    <div class="wrap footer__base">
+      <span>© {year} Brot</span>
+      <span>AGPL-3.0</span>
+    </div>
   </footer>
 </Base>
-
-<style is:global>
-  /* Hero band: overlapping heads cropped by a dark band, after the avatar reference (DESIGN.md section 2) */
-  .hero-band {
-    --band: clamp(152px, 30vw, 236px);
-    position: relative;
-    width: min(100%, 720px);
-    height: var(--band);
-    margin-bottom: var(--space-12);
-    overflow: hidden;
-    border-radius: var(--r-xl);
-    background: var(--ink);
-    isolation: isolate;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) .hero-band {
-      background: var(--surface);
-    }
-  }
-  :root[data-theme="dark"] .hero-band {
-    background: var(--surface);
-  }
-  .hero-band__head {
-    position: absolute;
-    top: var(--y);
-    left: var(--x);
-    width: calc(var(--band) * var(--k));
-    height: calc(var(--band) * var(--k));
-    transform: translate(-50%, -50%);
-    line-height: 0;
-  }
-  .hero-band__head .brot-bot,
-  .hero-band__head .brot-bot > svg {
-    width: 100%;
-    height: 100%;
-  }
-</style>

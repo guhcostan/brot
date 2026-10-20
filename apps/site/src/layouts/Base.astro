@@ -16,15 +16,14 @@ const ogImage = new URL('/og.png', site).href;
 ---
 
 <!doctype html>
-<html lang={locale}>
+<html lang={locale} data-theme="dark">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{title}</title>
     <meta name="description" content={description} />
-    <meta name="color-scheme" content="light dark" />
-    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#FFFFFF" />
-    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0A0A0A" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#0A0A0A" />
     <link rel="canonical" href={canonical} />
     {LOCALES.map((l) => <link rel="alternate" hreflang={l} href={new URL(localePath(l), site).href} />)}
     <link rel="alternate" hreflang="x-default" href={new URL(localePath('en'), site).href} />
@@ -46,10 +45,41 @@ const ogImage = new URL('/og.png', site).href;
     <meta name="twitter:title" content={title} />
     <meta name="twitter:description" content={description} />
     <meta name="twitter:image" content={ogImage} />
+    <script is:inline>document.documentElement.classList.add("js");</script>
     <link rel="stylesheet" href={uiStyles} />
     <link rel="stylesheet" href={siteStyles} />
   </head>
   <body>
     <slot />
+    <script>
+      const targets = document.querySelectorAll<HTMLElement>('[data-reveal]');
+      if ('IntersectionObserver' in window) {
+        const observer = new IntersectionObserver(
+          (entries) => {
+            for (const entry of entries) {
+              if (!entry.isIntersecting) continue;
+              entry.target.classList.add('is-in');
+              observer.unobserve(entry.target);
+            }
+          },
+          { rootMargin: '0px 0px -8% 0px', threshold: 0.08 },
+        );
+        targets.forEach((el) => observer.observe(el));
+      } else {
+        targets.forEach((el) => el.classList.add('is-in'));
+      }
+      document.addEventListener('click', (event) => {
+        for (const menu of document.querySelectorAll<HTMLDetailsElement>('details[open].langmenu, details[open].mobilemenu, details[open].split__more')) {
+          if (!menu.contains(event.target as Node)) menu.open = false;
+        }
+      });
+      document.addEventListener('keydown', (event) => {
+        if (event.key !== 'Escape') return;
+        for (const menu of document.querySelectorAll<HTMLDetailsElement>('details[open].langmenu, details[open].mobilemenu, details[open].split__more')) {
+          menu.open = false;
+          menu.querySelector('summary')?.focus();
+        }
+      });
+    </script>
   </body>
 </html>

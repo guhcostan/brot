@@ -9,42 +9,62 @@ interface Props {
 
 const { locale } = Astro.props;
 const t = dict(locale);
+const links = [
+  { href: '#product', label: t.nav.product },
+  { href: '#computer', label: t.nav.computer },
+  { href: '#use-cases', label: t.nav.useCases },
+  { href: '#pricing', label: t.nav.pricing },
+  { href: '#faq', label: t.nav.faq },
+];
 ---
 
 <a class="skip" href="#main">{t.nav.skip}</a>
-<header class="site-header">
-  <div class="wrap site-header__inner">
+<header class="topbar">
+  <div class="topbar__inner">
     <a class="brand" href={localePath(locale)} aria-label="brot">
-      <BrandMark size={24} />
+      <BrandMark size={26} />
       <span class="wordmark" aria-hidden="true">brot</span>
     </a>
-    <nav class="site-nav" aria-label={t.nav.label}>
-      <a href="#team">{t.nav.team}</a>
-      <a href="#how">{t.nav.how}</a>
-      <a href="#deploy">{t.nav.deploy}</a>
-      <a href="#source">{t.nav.source}</a>
+
+    <nav class="pillnav" aria-label={t.nav.label}>
+      {links.map((link) => <a href={link.href}>{link.label}</a>)}
     </nav>
-    <div class="site-header__actions">
-      <nav class="lang" aria-label={t.nav.language}>
-        {
-          LOCALES.map((l) => (
-            <a
-              href={localePath(l)}
-              hreflang={l}
-              lang={l}
-              aria-current={l === locale ? 'page' : undefined}
-              title={LOCALE_LABELS[l].name}
-            >
-              <span aria-hidden="true">{LOCALE_LABELS[l].short}</span>
-              <span class="brot-sr-only">{LOCALE_LABELS[l].name}</span>
-            </a>
-          ))
-        }
-      </nav>
-      <a class="brot-button icon-link" data-variant="ghost" data-size="icon" href={GITHUB_URL} aria-label={t.nav.github}>
-        <Icon name="github" />
+
+    <div class="topbar__actions">
+      <details class="langmenu">
+        <summary aria-label={t.nav.language}>
+          <span aria-hidden="true">{LOCALE_LABELS[locale].short}</span>
+          <Icon name="chevron" size={14} />
+        </summary>
+        <ul class="popover">
+          {
+            LOCALES.map((l) => (
+              <li>
+                <a href={localePath(l)} hreflang={l} lang={l} aria-current={l === locale ? 'page' : undefined}>
+                  {LOCALE_LABELS[l].name}
+                </a>
+              </li>
+            ))
+          }
+        </ul>
+      </details>
+      <a class="pill pill--ghost topbar__github" href={GITHUB_URL}>
+        <Icon name="github" size={16} />
+        <span>{t.nav.github}</span>
       </a>
-      <a class="brot-button header-cta" data-variant="primary" data-size="sm" href={RELEASES_URL}>{t.hero.download}</a>
+      <a class="pill pill--light" href={RELEASES_URL}>
+        <Icon name="download" size={16} />
+        <span>{t.nav.download}</span>
+      </a>
+      <details class="mobilemenu">
+        <summary aria-label={t.nav.label}>
+          <Icon name="menu" size={18} />
+        </summary>
+        <nav class="popover popover--menu" aria-label={t.nav.label}>
+          {links.map((link) => <a href={link.href}>{link.label}</a>)}
+          <a href={GITHUB_URL}>{t.nav.github}</a>
+        </nav>
+      </details>
     </div>
   </div>
 </header>
