@@ -1,0 +1,1 @@
+ALTER TABLE `bots` ADD `desktop` integer DEFAULT false NOT NULL;

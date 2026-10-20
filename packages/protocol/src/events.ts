@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { Approval, ComputerState, IsoDateTime, Memory, Message, Task } from './entities';
+import { Approval, ComputerState, IsoDateTime, Memory, Message, Task, Takeover } from './entities';
 
 const base = {
   id: z.string(),
@@ -85,6 +85,12 @@ export const CanonicalEvent = z.discriminatedUnion('type', [
     botId: z.string(),
     state: ComputerState,
     reason: z.string().optional(),
+  }),
+  /** Control of a bot's desktop moved between the bot and the person. */
+  z.object({
+    ...base,
+    type: z.literal('computer.takeover'),
+    takeover: Takeover,
   }),
   /**
    * The bot's computer tried to reach `host`, which its egress policy does not allow.

@@ -49,6 +49,7 @@ const EVENT_NAMES: Record<CanonicalEventType, true> = {
   'memory.written': true,
   'cost.updated': true,
   'computer.status': true,
+  'computer.takeover': true,
   'network.blocked': true,
   'task.created': true,
   'task.updated': true,

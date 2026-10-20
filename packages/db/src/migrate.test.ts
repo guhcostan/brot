@@ -63,7 +63,7 @@ describe('migrate', () => {
     ]);
 
     const applied = await handle.client.execute('SELECT COUNT(*) AS count FROM __drizzle_migrations');
-    expect(Number(applied.rows[0]?.count)).toBe(4);
+    expect(Number(applied.rows[0]?.count)).toBe(5);
   });
 
   it('adds the rooms, team task, and per-bot session schema on a fresh database', async () => {

@@ -21,3 +21,7 @@ export const TEAM_MAX_TASKS_PER_CHAIN = 20;
  * hop 1. A call that would make hop 5 is refused.
  */
 export const TEAM_MAX_ASK_HOPS = 4;
+
+/** Size of a bot desktop's screen, in pixels. */
+export const DESKTOP_WIDTH = 1280;
+export const DESKTOP_HEIGHT = 800;

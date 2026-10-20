@@ -25,6 +25,11 @@ export const Bot = z.object({
   engine: z.string(),
   model: z.string().optional(),
   computer: ComputerKind,
+  /**
+   * With `computer: 'sandbox'`, gives the computer a screen: a Linux desktop with a browser that the
+   * bot drives and the user can watch live and take over. Absent means a headless sandbox.
+   */
+  desktop: z.boolean().optional(),
   /** Absent means deny-all. Stored bots always carry a policy; the default is `{ mode: 'deny', allow: [] }`. */
   egress: EgressPolicy.optional(),
   /**
@@ -160,6 +165,20 @@ export const ComputerStateUpdate = z.object({
   error: z.string().optional(),
 });
 export type ComputerStateUpdate = z.infer<typeof ComputerStateUpdate>;
+
+/**
+ * The person at the keyboard of a bot's desktop. While a takeover is active the bot's browser and
+ * input tools refuse with a "the person has control" result, and only the user's input reaches the screen.
+ */
+export const Takeover = z.object({
+  botId: z.string(),
+  active: z.boolean(),
+  /** Why control moved: the bot asked for help (sign-in, CAPTCHA, 2FA) or the person took it. */
+  reason: z.string().max(500).optional(),
+  requestedBy: z.enum(['bot', 'user']).optional(),
+  at: IsoDateTime,
+});
+export type Takeover = z.infer<typeof Takeover>;
 
 export const MessageRole = z.enum(['user', 'assistant', 'system']);
 export type MessageRole = z.infer<typeof MessageRole>;

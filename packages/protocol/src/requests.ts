@@ -35,6 +35,7 @@ export const CreateBot = z
     engine: z.string().min(1).default('mock'),
     model: z.string().min(1).optional(),
     computer: ComputerKind.default('sandbox'),
+    desktop: z.boolean().optional(),
     avatar: z.string().optional(),
     egress: EgressPolicy.default(defaultEgressPolicy),
     teamBudgetUsd: z.number().nonnegative().optional(),
@@ -53,6 +54,7 @@ export const UpdateBot = z
     engine: z.string().min(1).optional(),
     model: z.string().min(1).optional(),
     computer: ComputerKind.optional(),
+    desktop: z.boolean().optional(),
     egress: EgressPolicy.optional(),
     /** `null` removes the cap. */
     teamBudgetUsd: z.number().nonnegative().nullable().optional(),
@@ -253,3 +255,27 @@ export const PairingCompleteResponse = z.object({
   deviceToken: z.string(),
 });
 export type PairingCompleteResponse = z.infer<typeof PairingCompleteResponse>;
+
+/** Screen coordinates, in desktop pixels from the top-left corner. */
+const ScreenX = z.number().int().min(0).max(7680);
+const ScreenY = z.number().int().min(0).max(4320);
+
+/**
+ * One input event from the person who took over a bot's desktop. `key` uses xdotool key names
+ * (`Return`, `ctrl+l`, `BackSpace`). `type` text is sent literally.
+ */
+export const ComputerInput = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('click'), x: ScreenX, y: ScreenY, button: z.enum(['left', 'middle', 'right']).default('left'), double: z.boolean().default(false) }),
+  z.object({ type: z.literal('move'), x: ScreenX, y: ScreenY }),
+  z.object({ type: z.literal('type'), text: z.string().min(1).max(2000) }),
+  z.object({ type: z.literal('key'), key: z.string().regex(/^[A-Za-z0-9_+]{1,40}$/) }),
+  z.object({ type: z.literal('scroll'), x: ScreenX, y: ScreenY, dy: z.number().int().min(-20).max(20) }),
+]);
+export type ComputerInput = z.infer<typeof ComputerInput>;
+
+/** Starts or ends a person's takeover of a bot's desktop. */
+export const SetTakeover = z.object({
+  active: z.boolean(),
+  reason: z.string().max(500).optional(),
+});
+export type SetTakeover = z.infer<typeof SetTakeover>;

@@ -292,6 +292,7 @@ export function applyEvent(state: ThreadState, event: CanonicalEvent): ThreadSta
       return { ...state, members: event.botIds };
 
     case 'computer.status':
+    case 'computer.takeover':
     case 'network.blocked':
     case 'task.updated':
       return state;

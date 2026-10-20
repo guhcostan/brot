@@ -152,6 +152,7 @@ export function applyThreadEvent(state: ThreadState, event: CanonicalEvent): Thr
     case 'memory.written':
     case 'cost.updated':
     case 'computer.status':
+    case 'computer.takeover':
     case 'network.blocked':
     case 'task.created':
     case 'task.updated':
