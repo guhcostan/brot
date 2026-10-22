@@ -376,6 +376,22 @@ mapped in `docs/MAUSBOT-PARITY.md` (34 bots / 7 teams, 33 bots with a browser an
 - Verified live: create with one grant, [] and two-id patches, deleting a granted server pruned it from the
   bot, unknown id 400.
 - Suite: 2237 tests (229 files), typecheck 12/12, lint clean.
+## Wave 27: model fallback chain (2026-10-22)
+
+- **Fallbacks + recovery.** Bots carry up to three ordered fallback models. A relayed run resolves
+  `[thread model ?? bot model, ...fallbacks]` and uses the first route that resolves (run row and a
+  re-published run.started show the model actually used; all-unusable fails with the tried refs). If the
+  engine fails before producing any assistant text and the run was not cancelled, the next fallback runs on
+  the same run record with a fresh session/launch key; the same runId gets a second run.started, and
+  run.failed is published once only after the last attempt. Partial text, cancellations, tool denials and
+  non-relayed engines never retry. Migration 0018 adds bots.fallback_models; bot routes validate refs,
+  providers, the 3-model cap and duplicates.
+- **UI.** A Fallback models fieldset in the bot dialog (ordered list with remove, provider-grouped add
+  select excluding the main model and duplicates, max 3, empty-state copy), create/patch-only-when-changed,
+  en/pt-BR/es.
+- Verified live: a bot whose primary deepseek model has no key emitted run.started for deepseek, then
+  run.started again with opencode-go on the same runId and completed with "fallback ok".
+- Suite: 2267 tests (232 files), typecheck 12/12, lint clean.
 ## Next
 
 1. Re-run the eval suite on a live model once OpenCode Go has quota (`apps/evals`, `--base` to the server), including B8 and C; the 2026-10-20 results predate the read auto-allow and the fixes above.
