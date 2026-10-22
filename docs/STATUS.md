@@ -161,6 +161,21 @@ mapped in `docs/MAUSBOT-PARITY.md` (34 bots / 7 teams, 33 bots with a browser an
 - Suite: 1600 tests (142 files), typecheck 12/12, lint clean. Verified live: an attached report's text
   reached a mock run input; the boot sweep removed the orphan left by deleting the test bot.
 
+## Wave 12: attachments UI, notification records (2026-10-22)
+
+- **Attachments in the UI.** Composer gets a paperclip and drag-and-drop, pending chips with name/size/
+  remove, per-file errors and send-time uploads that clean up after a failed post; the transcript shows
+  image thumbnails linking to the bytes and file chips with icon, name, size and open link, with a
+  file-chip fallback when an image cannot load. Messages carry attachments through the live event and
+  the history replay. en/pt-BR/es.
+- **Notification records.** A service on the event bus records approvals (always), failures (always) and
+  finished runs (only when the bot allows it and the answer has text), each with the thread to open and a
+  300-character line; records prune after 30 days at boot. Bots have a per-bot `notifications` flag
+  (absent = true). Routes: list (unread/bot/limit), unread count, mark read, delete. Migration 0010.
+  The inbox UI and desktop notifications land next wave.
+- Suite: 1653 tests (149 files), typecheck 12/12, lint clean. Verified live: attachment text in a run
+  input; notifications for finished/failed runs, per-bot suppression and mark-all-read.
+
 ## Next
 
 1. Re-run the eval suite on a live model once OpenCode Go has quota (`apps/evals`, `--base` to the server), including B8 and C; the 2026-10-20 results predate the read auto-allow and the fixes above.

@@ -81,8 +81,8 @@ Legend: ✅ parity or better · 🟡 partial · ❌ absent · 🎯 current wave.
 | Memory: MEMORY.md + topics + recall + upkeep + journal/undo + About me | ✅ | 🟡 recall, caps and an editor are live; no journal/upkeep/about-me | W4 |
 | Skills: SKILL.md import/export, per-bot on/off, learned-skill approval | ✅ | 🟡 prompt + editor with budgets; no SKILL.md import/export or learned-skill review yet | W4 |
 | Voice: TTS providers, spoken replies, voice notes, calls, dictation | ✅ | ❌ | W8 |
-| Attachments: images/screenshots/files in transcript, quota | ✅ | 🟡 upload/storage/message linking and text-in-prompt are live; composer, gallery and thumbnails next | W6 |
-| Notifications: in-app/desktop, per-bot, exact-thread routing | ✅ | ❌ (webhooks + SSE only) | W4 |
+| Attachments: images/screenshots/files in transcript, quota | ✅ | ✅ composer, transcript gallery, storage, text-in-prompt and orphan sweep | W6 done |
+| Notifications: in-app/desktop, per-bot, exact-thread routing | ✅ | 🟡 records and API with per-bot toggle live; inbox UI and desktop notifications next | W6 |
 | Analytics: usage ledger, decision log, admin activity, Today page | ✅ | 🟡 per-run cost; no ledger/export/insights | W9 |
 | Team sharing: `.md`/package import-export, presets, org library | ✅ | ❌ | W9 |
 | Remote access: pairing, browser client, phone PWA, companions | ✅ | 🟡 mobile app + relay, loopback trust only | W10 |
