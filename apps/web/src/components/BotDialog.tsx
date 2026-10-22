@@ -14,7 +14,7 @@ import {
   type AvatarMood,
   type AvatarSpecies,
 } from '@brot/ui';
-import type { Provider } from '../data/client';
+import type { BrowserStatus, Provider } from '../data/client';
 import { ROLE_TEMPLATES, type ComputerChoice, type RoleTemplate } from '../data/templates';
 import { avatarOf } from '../format';
 import { t, type TranslationKey } from '../i18n';
@@ -30,6 +30,9 @@ export interface BotDialogProps {
   onUpdate: (botId: string, patch: UpdateBot) => Promise<unknown>;
   onDelete: (botId: string) => Promise<unknown>;
   onOpenSettings: () => void;
+  browserStatus: (botId: string) => Promise<BrowserStatus>;
+  startBrowserLogin: (botId: string) => Promise<BrowserStatus>;
+  closeBrowser: (botId: string) => Promise<void>;
   onClose: () => void;
 }
 
@@ -66,6 +69,12 @@ const COMPUTER_KEYS: Record<ComputerChoice, { title: TranslationKey; hint: Trans
   host: { title: 'botForm.computer.host', hint: 'botForm.computer.hostHint' },
 };
 
+const BROWSER_STATE_KEYS: Record<BrowserStatus['state'], TranslationKey> = {
+  stopped: 'botForm.browserState.stopped',
+  running: 'botForm.browserState.running',
+  login: 'botForm.browserState.login',
+};
+
 const DSH_ENGINE = 'dsh';
 
 interface FormState {
@@ -76,6 +85,8 @@ interface FormState {
   color: AvatarColor;
   model: string | undefined;
   computer: ComputerChoice;
+  /** A browser on the server machine. A sandbox with a desktop already has its own. */
+  browser: boolean;
   hosts: string[];
   budget: string;
   pinned: boolean;
@@ -88,7 +99,19 @@ function computerOf(bot: Pick<Bot, 'computer' | 'desktop'>): ComputerChoice {
 
 function initialState(bot: Bot | undefined): FormState {
   if (!bot) {
-    return { name: '', job: '', instructions: '', species: 'capivara', color: 'violet', model: undefined, computer: 'sandbox', hosts: [], budget: '', pinned: false };
+    return {
+      name: '',
+      job: '',
+      instructions: '',
+      species: 'capivara',
+      color: 'violet',
+      model: undefined,
+      computer: 'sandbox',
+      browser: false,
+      hosts: [],
+      budget: '',
+      pinned: false,
+    };
   }
   const avatar = avatarOf(bot);
   return {
@@ -99,6 +122,7 @@ function initialState(bot: Bot | undefined): FormState {
     color: avatar.color,
     model: bot.model,
     computer: computerOf(bot),
+    browser: bot.browser === true,
     hosts: bot.egress?.allow ?? [],
     budget: bot.teamBudgetUsd === undefined ? '' : String(bot.teamBudgetUsd),
     pinned: bot.pinned,
@@ -120,7 +144,18 @@ export function BotDialog(props: BotDialogProps): ReactElement {
   );
 }
 
-function BotForm({ bot, loadProviders, onCreate, onUpdate, onDelete, onOpenSettings, onClose }: BotDialogProps): ReactElement {
+function BotForm({
+  bot,
+  loadProviders,
+  onCreate,
+  onUpdate,
+  onDelete,
+  onOpenSettings,
+  browserStatus,
+  startBrowserLogin,
+  closeBrowser,
+  onClose,
+}: BotDialogProps): ReactElement {
   const [form, setForm] = useState<FormState>(() => initialState(bot));
   const [template, setTemplate] = useState<string | null>(null);
   const [providers, setProviders] = useState<Provider[] | null>(null);
@@ -129,6 +164,9 @@ function BotForm({ bot, loadProviders, onCreate, onUpdate, onDelete, onOpenSetti
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<'delete' | null>(null);
+  const [browserState, setBrowserState] = useState<BrowserStatus['state'] | null>(null);
+  const [browserError, setBrowserError] = useState<string | null>(null);
+  const [browserBusy, setBrowserBusy] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -149,6 +187,53 @@ function BotForm({ bot, loadProviders, onCreate, onUpdate, onDelete, onOpenSetti
       active = false;
     };
   }, [loadProviders, bot]);
+
+  // The browser state is server-side, so read it when the form opens for a bot that already has one.
+  const hasHostBrowser = bot?.browser === true && !(bot.computer === 'sandbox' && bot.desktop === true);
+  useEffect(() => {
+    if (!bot || !hasHostBrowser) return;
+    let active = true;
+    browserStatus(bot.id)
+      .then((status) => {
+        if (!active) return;
+        setBrowserState(status.state);
+        setBrowserError(null);
+      })
+      .catch((cause: unknown) => {
+        if (active) setBrowserError(cause instanceof Error ? cause.message : String(cause));
+      });
+    return () => {
+      active = false;
+    };
+  }, [bot, hasHostBrowser, browserStatus]);
+
+  const openBrowserLogin = async () => {
+    if (!bot) return;
+    setBrowserBusy(true);
+    setBrowserError(null);
+    try {
+      const status = await startBrowserLogin(bot.id);
+      setBrowserState(status.state);
+    } catch (cause) {
+      setBrowserError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBrowserBusy(false);
+    }
+  };
+
+  const closeHostBrowser = async () => {
+    if (!bot) return;
+    setBrowserBusy(true);
+    setBrowserError(null);
+    try {
+      await closeBrowser(bot.id);
+      setBrowserState('stopped');
+    } catch (cause) {
+      setBrowserError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBrowserBusy(false);
+    }
+  };
 
   const set = <K extends keyof FormState>(key: K, value: FormState[K]) => setForm((current) => ({ ...current, [key]: value }));
 
@@ -180,6 +265,9 @@ function BotForm({ bot, loadProviders, onCreate, onUpdate, onDelete, onOpenSetti
     setError(null);
     const computer = form.computer === 'desktop' ? 'sandbox' : form.computer;
     const desktop = form.computer === 'desktop';
+    // A sandbox with a desktop already has its own browser, so the host browser does not apply there.
+    const browserAvailable = form.computer !== 'desktop';
+    const browser = browserAvailable && form.browser;
     const egress = form.hosts.length > 0 ? { mode: 'allowlist' as const, allow: form.hosts } : { mode: 'deny' as const, allow: [] };
     const avatar = formatAvatar({ species: form.species, color: form.color });
     try {
@@ -192,6 +280,7 @@ function BotForm({ bot, loadProviders, onCreate, onUpdate, onDelete, onOpenSetti
           computer,
           ...(computer === 'sandbox' ? { desktop } : {}),
           ...(computer === 'host' ? { hostAcknowledged: true } : {}),
+          browser,
           egress,
           ...(form.model ? { engine: DSH_ENGINE, model: form.model } : {}),
           ...(budget === undefined ? {} : { teamBudgetUsd: budget }),
@@ -210,6 +299,12 @@ function BotForm({ bot, loadProviders, onCreate, onUpdate, onDelete, onOpenSetti
           patch.computer = computer;
           if (computer === 'sandbox') patch.desktop = desktop;
           if (computer === 'host') patch.hostAcknowledged = true;
+        }
+        if (browserAvailable && browser !== (bot.browser === true)) {
+          patch.browser = browser;
+        } else if (!browserAvailable && form.computer !== computerOf(bot) && bot.browser === true) {
+          // Moving a host-browser bot to a desktop drops the browser it no longer needs.
+          patch.browser = false;
         }
         const before = bot.egress?.allow ?? [];
         if (before.length !== form.hosts.length || before.some((host, index) => host !== form.hosts[index])) patch.egress = egress;
@@ -287,7 +382,21 @@ function BotForm({ bot, loadProviders, onCreate, onUpdate, onDelete, onOpenSetti
 
       <ComputerPicker value={form.computer} allowHost={bot?.computer === 'host'} onChange={(value) => set('computer', value)} />
 
-      {form.computer !== 'none' && form.computer !== 'host' ? <EgressEditor hosts={form.hosts} onChange={(hosts) => set('hosts', hosts)} /> : null}
+      <BrowserPicker
+        hasBrowser={bot?.browser === true}
+        enabled={form.browser}
+        desktop={form.computer === 'desktop'}
+        state={browserState}
+        error={browserError}
+        busy={browserBusy}
+        onToggle={(value) => set('browser', value)}
+        onLogin={() => void openBrowserLogin()}
+        onClose={() => void closeHostBrowser()}
+      />
+
+      {form.computer !== 'host' && (form.computer !== 'none' || form.browser) ? (
+        <EgressEditor hosts={form.hosts} onChange={(hosts) => set('hosts', hosts)} />
+      ) : null}
 
       <Input
         label={t('botForm.budget')}
@@ -549,6 +658,73 @@ function ComputerPicker({ value, allowHost, onChange }: { value: ComputerChoice;
           </label>
         ))}
       </div>
+    </fieldset>
+  );
+}
+
+interface BrowserPickerProps {
+  /** The bot already has a host browser, so the server can report its state and open it. */
+  hasBrowser: boolean;
+  enabled: boolean;
+  /** A sandbox with a desktop already has its own browser. */
+  desktop: boolean;
+  state: BrowserStatus['state'] | null;
+  error: string | null;
+  busy: boolean;
+  onToggle: (enabled: boolean) => void;
+  onLogin: () => void;
+  onClose: () => void;
+}
+
+/** Opt-in for the bot's browser on the server machine, and its live state once the bot has one. */
+function BrowserPicker({ hasBrowser, enabled, desktop, state, error, busy, onToggle, onLogin, onClose }: BrowserPickerProps): ReactElement {
+  if (desktop) {
+    return (
+      <fieldset className="m-0 flex flex-col gap-2 border-0 p-0">
+        <legend className="mb-1 p-0 text-sm font-medium">{t('botForm.browser')}</legend>
+        <p className="m-0 text-xs text-ink-2">{t('botForm.browserDesktop')}</p>
+      </fieldset>
+    );
+  }
+
+  const live = enabled && hasBrowser;
+  return (
+    <fieldset className="m-0 flex flex-col gap-2 border-0 p-0">
+      <legend className="mb-1 p-0 text-sm font-medium">{t('botForm.browser')}</legend>
+      <label className="flex cursor-pointer items-start gap-2.5">
+        <input type="checkbox" className="room-check mt-0.5" checked={enabled} onChange={(event) => onToggle(event.target.checked)} />
+        <span className="flex flex-col gap-1">
+          <span className="text-sm font-medium">{t('botForm.browserOnHost')}</span>
+          <span className="text-xs text-ink-2">{t('botForm.browserHint')}</span>
+        </span>
+      </label>
+      {live ? (
+        <div className="flex flex-col items-start gap-2 rounded-lg border border-line bg-surface-2 p-3">
+          {error === null ? (
+            <p className="m-0 text-sm" aria-live="polite">
+              {state === null ? t('botForm.browserState.checking') : t(BROWSER_STATE_KEYS[state])}
+            </p>
+          ) : null}
+          {state === 'login' && error === null ? <p className="m-0 text-xs text-ink-2">{t('botForm.browserLoginHint')}</p> : null}
+          <div className="flex flex-wrap gap-2">
+            {state !== 'login' ? (
+              <Button variant="secondary" size="sm" disabled={busy} onClick={onLogin}>
+                {t('botForm.browserLogin')}
+              </Button>
+            ) : null}
+            {state === 'running' || state === 'login' ? (
+              <Button variant="ghost" size="sm" disabled={busy} onClick={onClose}>
+                {t('botForm.browserClose')}
+              </Button>
+            ) : null}
+          </div>
+          {error ? (
+            <p role="alert" className="m-0 text-xs text-attention-text">
+              {error}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
     </fieldset>
   );
 }

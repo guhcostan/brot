@@ -87,6 +87,14 @@ export interface ComputerInfo {
   takeover: Takeover | null;
 }
 
+/**
+ * A bot's browser on the server machine from `GET /api/bots/:id/browser`. `login` means a headed
+ * window is open for the person to sign in, and the bot resumes with that profile afterwards.
+ */
+export interface BrowserStatus {
+  state: 'stopped' | 'running' | 'login';
+}
+
 /** The screen could not be read: 404 when the bot has no desktop, 409 when the computer is not running. */
 export class ScreenUnavailable extends Error {
   constructor(readonly status: number) {
@@ -139,4 +147,11 @@ export interface BrotClient {
   computerScreen(botId: string, signal?: AbortSignal): Promise<Blob>;
   computerInput(botId: string, input: ComputerInput): Promise<void>;
   setTakeover(botId: string, input: SetTakeover): Promise<Takeover>;
+
+  /** The bot's browser on the server machine. Throws when the bot has no host browser. */
+  browserStatus(botId: string): Promise<BrowserStatus>;
+  /** Opens a headed window so the person can sign in; the bot keeps the profile afterwards. */
+  startBrowserLogin(botId: string): Promise<BrowserStatus>;
+  /** Closes the browser, saving its profile. */
+  closeBrowser(botId: string): Promise<void>;
 }

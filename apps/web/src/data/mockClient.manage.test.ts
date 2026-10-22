@@ -90,3 +90,40 @@ describe('mock computer', () => {
     expect(pendingApprovals(thread).map((item) => item.approval.kind)).toEqual(['publish']);
   });
 });
+
+describe('mock host browser', () => {
+  const withBrowser = (client: ReturnType<typeof createMockClient>) =>
+    client.createBot({ name: 'Lobo', job: 'Researcher', computer: 'none', browser: true });
+
+  it('starts a new host browser stopped and opens the sign-in window', async () => {
+    const client = createMockClient();
+    const bot = await withBrowser(client);
+    expect(await client.browserStatus(bot.id)).toEqual({ state: 'stopped' });
+    expect(await client.startBrowserLogin(bot.id)).toEqual({ state: 'login' });
+    expect(await client.browserStatus(bot.id)).toEqual({ state: 'login' });
+  });
+
+  it('closes the browser and keeps it stopped', async () => {
+    const client = createMockClient();
+    const bot = await withBrowser(client);
+    await client.startBrowserLogin(bot.id);
+    await expect(client.closeBrowser(bot.id)).resolves.toBeUndefined();
+    expect(await client.browserStatus(bot.id)).toEqual({ state: 'stopped' });
+  });
+
+  it('refuses a bot without a browser and a sign-in window on a desktop bot', async () => {
+    const client = createMockClient();
+    await expect(client.browserStatus('bot_capy')).rejects.toThrow('409');
+    const desktop = await client.createBot({ name: 'Ara', job: 'Posts', computer: 'sandbox', desktop: true, browser: true });
+    expect(await client.browserStatus(desktop.id)).toEqual({ state: 'stopped' });
+    await expect(client.startBrowserLogin(desktop.id)).rejects.toThrow('409');
+  });
+
+  it('forgets the browser state once the bot no longer has a browser', async () => {
+    const client = createMockClient();
+    const bot = await withBrowser(client);
+    await client.startBrowserLogin(bot.id);
+    await client.updateBot(bot.id, { browser: false });
+    await expect(client.browserStatus(bot.id)).rejects.toThrow('409');
+  });
+});

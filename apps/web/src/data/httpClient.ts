@@ -25,7 +25,7 @@ import {
   DESKTOP_WIDTH,
   type CanonicalEventType,
 } from '@brot/protocol';
-import { ScreenUnavailable, type BotEvent, type BrotClient, type ComputerInfo, type Provider, type Room, type TaskFilter } from './client';
+import { ScreenUnavailable, type BotEvent, type BrotClient, type BrowserStatus, type ComputerInfo, type Provider, type Room, type TaskFilter } from './client';
 
 /** The slice of EventSource this client uses. The browser's EventSource satisfies it; tests pass a fake. */
 export interface EventStream {
@@ -414,6 +414,20 @@ export function createHttpClient({
       const response = await write('POST', `${botPath(botId)}/computer/takeover`, SetTakeover.parse(input));
       return Takeover.parse(await response.json());
     },
+
+    async browserStatus(botId) {
+      const response = await request(`${botPath(botId)}/browser`, { headers: { Accept: 'application/json' } });
+      return parseBrowserStatus(await response.json());
+    },
+
+    async startBrowserLogin(botId) {
+      const response = await write('POST', `${botPath(botId)}/browser/login`, {});
+      return parseBrowserStatus(await response.json());
+    },
+
+    async closeBrowser(botId) {
+      await write('POST', `${botPath(botId)}/browser/close`, {});
+    },
   };
 }
 
@@ -456,6 +470,16 @@ export function parseComputerInfo(value: unknown): ComputerInfo {
     height: size(value.height, DESKTOP_HEIGHT),
     takeover: value.takeover == null ? null : Takeover.parse(value.takeover),
   };
+}
+
+/** Validates `GET /api/bots/:id/browser` and the `POST` routes that return the new state. */
+export function parseBrowserStatus(value: unknown): BrowserStatus {
+  if (!isRecord(value) || Array.isArray(value)) throw new Error('Expected a browser status object');
+  const state = value.state;
+  if (state !== 'stopped' && state !== 'running' && state !== 'login') {
+    throw new Error('Expected browser state to be stopped, running or login');
+  }
+  return { state };
 }
 
 async function describeFailure(response: Response): Promise<string> {

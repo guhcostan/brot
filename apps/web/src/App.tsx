@@ -277,6 +277,9 @@ export function App(): ReactElement {
             setBotDialog(null);
           }}
           onOpenSettings={() => goTo({ kind: 'settings' })}
+          browserStatus={client.browserStatus}
+          startBrowserLogin={client.startBrowserLogin}
+          closeBrowser={client.closeBrowser}
           onClose={() => setBotDialog(null)}
         />
         <CreateTaskDialog

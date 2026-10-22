@@ -27,6 +27,7 @@ import {
   ScreenUnavailable,
   type BotEvent,
   type BrotClient,
+  type BrowserStatus,
   type ComputerInfo,
   type NewRoom,
   type NewTask,
@@ -138,6 +139,7 @@ export function createMockClient(): BrotClient {
   const providers = DEMO_PROVIDERS.map((provider) => structuredClone(provider));
   const devices = DEMO_DEVICES.map((device) => ({ ...device }));
   const screens = new Map<string, FakeScreen>();
+  const browserStates = new Map<string, BrowserStatus['state']>();
   const takeoverWaiters = new Map<string, () => void>();
   const listeners = new Set<(event: BotEvent) => void>();
   const histories = new Map<string, CanonicalEvent[]>();
@@ -186,6 +188,23 @@ export function createMockClient(): BrotClient {
       height: DESKTOP_HEIGHT,
       takeover: screen?.takeover ?? null,
     };
+  };
+
+  /** Mirrors the server: only a bot with `browser: true` has a host browser. */
+  const hostBrowserOf = (botId: string): Bot => {
+    const bot = bots.get(botId);
+    if (!bot) throw new Error(`Unknown bot: ${botId}`);
+    if (bot.browser !== true) throw new Error('409 This bot has no browser.');
+    return bot;
+  };
+
+  /** A sandbox with a desktop already has a browser, so the server refuses a sign-in window for it. */
+  const loginBotOf = (botId: string): Bot => {
+    const bot = hostBrowserOf(botId);
+    if (bot.computer === 'sandbox' && bot.desktop === true) {
+      throw new Error('409 This bot already has a browser in its desktop.');
+    }
+    return bot;
   };
 
   const record = (key: Key, event: CanonicalEvent) => {
@@ -508,6 +527,7 @@ export function createMockClient(): BrotClient {
       };
       bots.set(created.id, created);
       histories.set(storeKey({ botId: created.id }), []);
+      if (created.browser === true) browserStates.set(created.id, 'stopped');
       return structuredClone(created);
     },
 
@@ -522,6 +542,7 @@ export function createMockClient(): BrotClient {
       bots.set(botId, next);
       const screen = screens.get(botId);
       if (screen && (current.desktop !== next.desktop || next.computer === 'none')) screens.delete(botId);
+      if (next.browser !== true || (next.computer === 'sandbox' && next.desktop === true)) browserStates.delete(botId);
       return structuredClone(next);
     },
 
@@ -529,6 +550,7 @@ export function createMockClient(): BrotClient {
       if (!bots.delete(botId)) throw new Error(`Unknown bot: ${botId}`);
       histories.delete(storeKey({ botId }));
       screens.delete(botId);
+      browserStates.delete(botId);
       for (const room of rooms.values()) room.memberIds = room.memberIds.filter((id) => id !== botId);
     },
 
@@ -759,6 +781,22 @@ export function createMockClient(): BrotClient {
         ...(input.reason ? { reason: input.reason } : previous?.reason && !input.active ? { reason: previous.reason } : {}),
         requestedBy: input.active ? 'user' : (previous?.requestedBy ?? 'user'),
       });
+    },
+
+    async browserStatus(botId) {
+      hostBrowserOf(botId);
+      return { state: browserStates.get(botId) ?? 'stopped' };
+    },
+
+    async startBrowserLogin(botId) {
+      loginBotOf(botId);
+      browserStates.set(botId, 'login');
+      return { state: 'login' };
+    },
+
+    async closeBrowser(botId) {
+      hostBrowserOf(botId);
+      browserStates.set(botId, 'stopped');
     },
   };
 }
