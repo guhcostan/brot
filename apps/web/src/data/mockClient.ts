@@ -47,6 +47,8 @@ import {
   ScreenUnavailable,
   type BotEvent,
   type BrotClient,
+  type BrowserProfile,
+  type BrowserProfileRef,
   type BrowserStatus,
   type ComputerInfo,
   type NewRoom,
@@ -59,7 +61,9 @@ import {
 import { applyInput, navigate, newScreen, renderScreen, type FakeScreen } from './mockComputer';
 import {
   DEFAULT_THREAD_TITLE,
+  DEMO_BOT_BROWSER_PROFILES,
   DEMO_BOTS,
+  DEMO_BROWSER_PROFILES,
   DEMO_HISTORY,
   DEMO_MEMORIES,
   DEMO_NOTIFICATIONS,
@@ -235,6 +239,8 @@ export function createMockClient(): BrotClient {
   const providers = DEMO_PROVIDERS.map((provider) => structuredClone(provider));
   const devices = DEMO_DEVICES.map((device) => ({ ...device }));
   const screens = new Map<string, FakeScreen>();
+  const browserProfiles = new Map<string, BrowserProfile>(DEMO_BROWSER_PROFILES.map((profile) => [profile.id, structuredClone(profile)]));
+  /** Browser session state keyed by effective profile: `own:<botId>` or `profile:<id>`. */
   const browserStates = new Map<string, BrowserStatus['state']>();
   const takeoverWaiters = new Map<string, () => void>();
   const listeners = new Set<(event: BotEvent) => void>();
@@ -268,6 +274,29 @@ export function createMockClient(): BrotClient {
     list.push(structuredClone(run));
     routineRuns.set(run.routineId, list);
   }
+
+  const browserProfileRefOf = (bot: Bot): BrowserProfileRef => {
+    const profile = browserProfiles.get(bot.browserProfileId ?? '');
+    return profile === undefined ? { kind: 'own' } : { kind: 'shared', id: profile.id, name: profile.name };
+  };
+
+  const browserStateKeyOf = (bot: Bot): string => {
+    const ref = browserProfileRefOf(bot);
+    return ref.kind === 'shared' ? `profile:${ref.id}` : `own:${bot.id}`;
+  };
+
+  const browserStateOf = (bot: Bot): BrowserStatus['state'] => browserStates.get(browserStateKeyOf(bot)) ?? 'stopped';
+
+  const setBrowserStateOf = (bot: Bot, state: BrowserStatus['state']): void => {
+    browserStates.set(browserStateKeyOf(bot), state);
+  };
+
+  /** Drops the shared profile binding, sending the bot back to its own profile. */
+  const clearBrowserProfile = (bot: Bot): Bot => {
+    const next = { ...bot };
+    delete next.browserProfileId;
+    return next;
+  };
 
   const dmThreadsOf = (botId: string): Thread[] => threadsOfBot.get(botId) ?? [];
   const defaultThreadOf = (botId: string): Thread | undefined => dmThreadsOf(botId)[0];
@@ -365,7 +394,14 @@ export function createMockClient(): BrotClient {
     return thread;
   }
 
-  for (const bot of DEMO_BOTS) seededThread(bot.id);
+  for (const bot of DEMO_BOTS) {
+    seededThread(bot.id);
+    const profileId = DEMO_BOT_BROWSER_PROFILES[bot.id];
+    if (profileId !== undefined) {
+      const seeded = bots.get(bot.id);
+      if (seeded) bots.set(bot.id, { ...seeded, browserProfileId: profileId });
+    }
+  }
   for (const room of DEMO_ROOMS) {
     const created = structuredClone(room);
     rooms.set(created.thread.id, created);
@@ -716,6 +752,9 @@ export function createMockClient(): BrotClient {
 
     async createBot(input) {
       const parsed = CreateBot.parse(input);
+      if (parsed.browserProfileId !== undefined && !browserProfiles.has(parsed.browserProfileId)) {
+        throw new Error(`Unknown browser profile: ${parsed.browserProfileId}`);
+      }
       const at = now();
       const { hostAcknowledged: _ack, ...fields } = parsed;
       const created: Bot = {
@@ -728,29 +767,45 @@ export function createMockClient(): BrotClient {
         updatedAt: at,
       };
       bots.set(created.id, created);
-      if (created.browser === true) browserStates.set(created.id, 'stopped');
+      if (created.browser === true) setBrowserStateOf(created, 'stopped');
       return structuredClone(created);
     },
 
     async updateBot(botId, patch) {
       const current = bots.get(botId);
       if (!current) throw new Error(`Unknown bot: ${botId}`);
-      const { teamBudgetUsd, teamId, hostAcknowledged: _ack, ...rest } = UpdateBot.parse(patch);
-      const next: Bot = { ...current, ...rest, updatedAt: now() };
+      const { teamBudgetUsd, teamId, hostAcknowledged: _ack, browserProfileId, ...rest } = UpdateBot.parse(patch);
+      if (browserProfileId !== undefined && browserProfileId !== null && !browserProfiles.has(browserProfileId)) {
+        throw new Error(`Unknown browser profile: ${browserProfileId}`);
+      }
+      let next: Bot = { ...current, ...rest, updatedAt: now() };
       if (teamBudgetUsd === null) delete next.teamBudgetUsd;
       else if (teamBudgetUsd !== undefined) next.teamBudgetUsd = teamBudgetUsd;
       if (teamId === null) delete next.teamId;
       else if (teamId !== undefined) next.teamId = teamId;
       if (next.computer !== 'sandbox') delete next.desktop;
+      if (browserProfileId === null) next = clearBrowserProfile(next);
+      else if (browserProfileId !== undefined) next.browserProfileId = browserProfileId;
       bots.set(botId, next);
       const screen = screens.get(botId);
       if (screen && (current.desktop !== next.desktop || next.computer === 'none')) screens.delete(botId);
-      if (next.browser !== true || (next.computer === 'sandbox' && next.desktop === true)) browserStates.delete(botId);
+      const previousKey = browserStateKeyOf(current);
+      if (next.browser !== true || (next.computer === 'sandbox' && next.desktop === true)) {
+        browserStates.delete(previousKey);
+      } else {
+        const nextKey = browserStateKeyOf(next);
+        if (nextKey !== previousKey) {
+          browserStates.delete(previousKey);
+          if (!browserStates.has(nextKey)) browserStates.set(nextKey, 'stopped');
+        }
+      }
       return structuredClone(next);
     },
 
     async deleteBot(botId) {
+      const removed = bots.get(botId);
       if (!bots.delete(botId)) throw new Error(`Unknown bot: ${botId}`);
+      if (removed) browserStates.delete(browserStateKeyOf(removed));
       clearChiefOf(botId);
       for (const thread of dmThreadsOf(botId)) {
         threads.delete(thread.id);
@@ -758,7 +813,6 @@ export function createMockClient(): BrotClient {
       }
       threadsOfBot.delete(botId);
       screens.delete(botId);
-      browserStates.delete(botId);
       for (const [attachmentId, entry] of attachments) {
         if (threads.has(entry.threadId)) continue;
         attachments.delete(attachmentId);
@@ -1328,19 +1382,53 @@ export function createMockClient(): BrotClient {
     },
 
     async browserStatus(botId) {
-      hostBrowserOf(botId);
-      return { state: browserStates.get(botId) ?? 'stopped' };
+      const bot = hostBrowserOf(botId);
+      return { state: browserStateOf(bot), profile: browserProfileRefOf(bot) };
     },
 
     async startBrowserLogin(botId) {
-      loginBotOf(botId);
-      browserStates.set(botId, 'login');
-      return { state: 'login' };
+      const bot = loginBotOf(botId);
+      setBrowserStateOf(bot, 'login');
+      return { state: 'login', profile: browserProfileRefOf(bot) };
     },
 
     async closeBrowser(botId) {
-      hostBrowserOf(botId);
-      browserStates.set(botId, 'stopped');
+      const bot = hostBrowserOf(botId);
+      setBrowserStateOf(bot, 'stopped');
+    },
+
+    async listBrowserProfiles() {
+      return [...browserProfiles.values()]
+        .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id))
+        .map((profile) => structuredClone(profile));
+    },
+
+    async createBrowserProfile(input) {
+      const name = input.name.trim();
+      if (name === '') throw new Error('A browser profile needs a name');
+      const at = now();
+      const created: BrowserProfile = { id: nextId('profile'), name, createdAt: at, updatedAt: at };
+      browserProfiles.set(created.id, created);
+      return structuredClone(created);
+    },
+
+    async updateBrowserProfile(profileId, input) {
+      const current = browserProfiles.get(profileId);
+      if (!current) throw new Error(`Unknown browser profile: ${profileId}`);
+      const name = input.name.trim();
+      if (name === '') throw new Error('A browser profile needs a name');
+      const next: BrowserProfile = { ...current, name, updatedAt: now() };
+      browserProfiles.set(profileId, next);
+      return structuredClone(next);
+    },
+
+    async deleteBrowserProfile(profileId) {
+      if (!browserProfiles.delete(profileId)) throw new Error(`Unknown browser profile: ${profileId}`);
+      browserStates.delete(`profile:${profileId}`);
+      for (const [botId, bot] of bots) {
+        if (bot.browserProfileId !== profileId) continue;
+        bots.set(botId, clearBrowserProfile(bot));
+      }
     },
   };
 }

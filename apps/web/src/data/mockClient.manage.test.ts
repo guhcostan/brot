@@ -100,9 +100,9 @@ describe('mock host browser', () => {
   it('starts a new host browser stopped and opens the sign-in window', async () => {
     const client = createMockClient();
     const bot = await withBrowser(client);
-    expect(await client.browserStatus(bot.id)).toEqual({ state: 'stopped' });
-    expect(await client.startBrowserLogin(bot.id)).toEqual({ state: 'login' });
-    expect(await client.browserStatus(bot.id)).toEqual({ state: 'login' });
+    expect(await client.browserStatus(bot.id)).toEqual({ state: 'stopped', profile: { kind: 'own' } });
+    expect(await client.startBrowserLogin(bot.id)).toEqual({ state: 'login', profile: { kind: 'own' } });
+    expect(await client.browserStatus(bot.id)).toEqual({ state: 'login', profile: { kind: 'own' } });
   });
 
   it('closes the browser and keeps it stopped', async () => {
@@ -110,14 +110,14 @@ describe('mock host browser', () => {
     const bot = await withBrowser(client);
     await client.startBrowserLogin(bot.id);
     await expect(client.closeBrowser(bot.id)).resolves.toBeUndefined();
-    expect(await client.browserStatus(bot.id)).toEqual({ state: 'stopped' });
+    expect(await client.browserStatus(bot.id)).toEqual({ state: 'stopped', profile: { kind: 'own' } });
   });
 
   it('refuses a bot without a browser and a sign-in window on a desktop bot', async () => {
     const client = createMockClient();
     await expect(client.browserStatus('bot_capy')).rejects.toThrow('409');
     const desktop = await client.createBot({ name: 'Ara', job: 'Posts', computer: 'sandbox', desktop: true, browser: true });
-    expect(await client.browserStatus(desktop.id)).toEqual({ state: 'stopped' });
+    expect(await client.browserStatus(desktop.id)).toEqual({ state: 'stopped', profile: { kind: 'own' } });
     await expect(client.startBrowserLogin(desktop.id)).rejects.toThrow('409');
   });
 

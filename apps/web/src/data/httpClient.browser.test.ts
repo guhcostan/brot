@@ -26,16 +26,19 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 
 describe('host browser routes', () => {
   it('reads the status from GET /api/bots/:id/browser', async () => {
-    const { fetch, calls } = fakeFetch(() => json({ state: 'running' }));
+    const { fetch, calls } = fakeFetch(() => json({ state: 'running', profile: { kind: 'own' } }));
     const status = await createHttpClient({ fetch }).browserStatus('bot_1');
-    expect(status).toEqual({ state: 'running' });
+    expect(status).toEqual({ state: 'running', profile: { kind: 'own' } });
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({ method: 'GET', path: '/api/bots/bot_1/browser' });
   });
 
   it('opens the sign-in window and reports the login state', async () => {
-    const { fetch, calls } = fakeFetch(() => json({ state: 'login' }, 202));
-    await expect(createHttpClient({ fetch }).startBrowserLogin('bot_1')).resolves.toEqual({ state: 'login' });
+    const { fetch, calls } = fakeFetch(() => json({ state: 'login', profile: { kind: 'shared', id: 'profile_1', name: 'Shared accounts' } }, 202));
+    await expect(createHttpClient({ fetch }).startBrowserLogin('bot_1')).resolves.toEqual({
+      state: 'login',
+      profile: { kind: 'shared', id: 'profile_1', name: 'Shared accounts' },
+    });
     expect(calls[0]).toMatchObject({ method: 'POST', path: '/api/bots/bot_1/browser/login' });
   });
 
@@ -59,21 +62,48 @@ describe('host browser routes', () => {
   });
 
   it('rejects a state the contract does not define', async () => {
-    const { fetch } = fakeFetch(() => json({ state: 'open' }));
+    const { fetch } = fakeFetch(() => json({ state: 'open', profile: { kind: 'own' } }));
     await expect(createHttpClient({ fetch }).browserStatus('bot_1')).rejects.toThrow('Expected browser state');
+  });
+
+  it('reads a shared profile reference', async () => {
+    const { fetch } = fakeFetch(() =>
+      json({ state: 'stopped', profile: { kind: 'shared', id: 'profile_1', name: 'Shared accounts' } }),
+    );
+    await expect(createHttpClient({ fetch }).browserStatus('bot_1')).resolves.toEqual({
+      state: 'stopped',
+      profile: { kind: 'shared', id: 'profile_1', name: 'Shared accounts' },
+    });
+  });
+
+  it('rejects a status without a usable profile reference', async () => {
+    const { fetch } = fakeFetch(() => json({ state: 'stopped' }));
+    await expect(createHttpClient({ fetch }).browserStatus('bot_1')).rejects.toThrow('Expected a browser profile reference');
   });
 });
 
 describe('parseBrowserStatus', () => {
-  it('accepts the three states and copies only the state', () => {
-    expect(parseBrowserStatus({ state: 'stopped', extra: true })).toEqual({ state: 'stopped' });
-    expect(parseBrowserStatus({ state: 'running' })).toEqual({ state: 'running' });
-    expect(parseBrowserStatus({ state: 'login' })).toEqual({ state: 'login' });
+  it('accepts the three states and copies only the known fields', () => {
+    expect(parseBrowserStatus({ state: 'stopped', profile: { kind: 'own' }, extra: true })).toEqual({
+      state: 'stopped',
+      profile: { kind: 'own' },
+    });
+    expect(parseBrowserStatus({ state: 'running', profile: { kind: 'own' } })).toEqual({
+      state: 'running',
+      profile: { kind: 'own' },
+    });
+    expect(parseBrowserStatus({ state: 'login', profile: { kind: 'shared', id: 'p1', name: 'Shared', extra: 1 } })).toEqual({
+      state: 'login',
+      profile: { kind: 'shared', id: 'p1', name: 'Shared' },
+    });
   });
 
   it('rejects anything else', () => {
     expect(() => parseBrowserStatus(null)).toThrow('Expected a browser status object');
     expect(() => parseBrowserStatus([])).toThrow('Expected a browser status object');
     expect(() => parseBrowserStatus({})).toThrow('Expected browser state');
+    expect(() => parseBrowserStatus({ state: 'login' })).toThrow('Expected a browser profile reference');
+    expect(() => parseBrowserStatus({ state: 'login', profile: { kind: 'shared', id: 'p1' } })).toThrow('Expected a browser status');
+    expect(() => parseBrowserStatus({ state: 'login', profile: { kind: 'team' } })).toThrow('Expected a browser status');
   });
 });

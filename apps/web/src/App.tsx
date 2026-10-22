@@ -400,6 +400,7 @@ export function App(): ReactElement {
           browserStatus={client.browserStatus}
           startBrowserLogin={client.startBrowserLogin}
           closeBrowser={client.closeBrowser}
+          loadBrowserProfiles={() => client.listBrowserProfiles()}
           onClose={() => setBotDialog(null)}
         />
         <TeamDialog

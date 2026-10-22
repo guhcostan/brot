@@ -14,7 +14,7 @@ import {
   type AvatarMood,
   type AvatarSpecies,
 } from '@brot/ui';
-import type { BrowserStatus, Provider } from '../data/client';
+import type { BrowserProfile, BrowserStatus, Provider } from '../data/client';
 import { ROLE_TEMPLATES, type ComputerChoice, type RoleTemplate } from '../data/templates';
 import { avatarOf } from '../format';
 import { t, type TranslationKey } from '../i18n';
@@ -35,6 +35,12 @@ export interface BotDialogProps {
   browserStatus: (botId: string) => Promise<BrowserStatus>;
   startBrowserLogin: (botId: string) => Promise<BrowserStatus>;
   closeBrowser: (botId: string) => Promise<void>;
+  /** Shared host-browser profiles the bot can use. */
+  loadBrowserProfiles: () => Promise<BrowserProfile[]>;
+  /** Profiles to render before the load resolves, e.g. in an SSR render. */
+  initialBrowserProfiles?: BrowserProfile[];
+  /** The browser state to render before the load resolves, e.g. in an SSR render. */
+  initialBrowserStatus?: BrowserStatus;
   onClose: () => void;
 }
 
@@ -91,6 +97,8 @@ interface FormState {
   computer: ComputerChoice;
   /** A browser on the server machine. A sandbox with a desktop already has its own. */
   browser: boolean;
+  /** The shared browser profile id, or an empty string for the bot's own profile. */
+  browserProfileId: string;
   hosts: string[];
   budget: string;
   pinned: boolean;
@@ -114,6 +122,7 @@ function initialState(bot: Bot | undefined): FormState {
       model: undefined,
       computer: 'sandbox',
       browser: false,
+      browserProfileId: '',
       hosts: [],
       budget: '',
       pinned: false,
@@ -131,6 +140,7 @@ function initialState(bot: Bot | undefined): FormState {
     model: bot.model,
     computer: computerOf(bot),
     browser: bot.browser === true,
+    browserProfileId: bot.browserProfileId ?? '',
     hosts: bot.egress?.allow ?? [],
     budget: bot.teamBudgetUsd === undefined ? '' : String(bot.teamBudgetUsd),
     pinned: bot.pinned,
@@ -164,6 +174,9 @@ function BotForm({
   browserStatus,
   startBrowserLogin,
   closeBrowser,
+  loadBrowserProfiles,
+  initialBrowserProfiles,
+  initialBrowserStatus,
   onClose,
 }: BotDialogProps): ReactElement {
   const [form, setForm] = useState<FormState>(() => initialState(bot));
@@ -174,9 +187,10 @@ function BotForm({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<'delete' | null>(null);
-  const [browserState, setBrowserState] = useState<BrowserStatus['state'] | null>(null);
+  const [liveBrowserStatus, setLiveBrowserStatus] = useState<BrowserStatus | null>(initialBrowserStatus ?? null);
   const [browserError, setBrowserError] = useState<string | null>(null);
   const [browserBusy, setBrowserBusy] = useState(false);
+  const [profiles, setProfiles] = useState<BrowserProfile[] | null>(initialBrowserProfiles ?? null);
   const teamFieldId = useId();
 
   useEffect(() => {
@@ -199,6 +213,21 @@ function BotForm({
     };
   }, [loadProviders, bot]);
 
+  useEffect(() => {
+    let active = true;
+    loadBrowserProfiles()
+      .then((list) => {
+        if (active) setProfiles(list);
+      })
+      .catch((cause: unknown) => {
+        if (active) setProfiles([]);
+        console.warn('Browser profiles did not load', cause);
+      });
+    return () => {
+      active = false;
+    };
+  }, [loadBrowserProfiles]);
+
   // The browser state is server-side, so read it when the form opens for a bot that already has one.
   const hasHostBrowser = bot?.browser === true && !(bot.computer === 'sandbox' && bot.desktop === true);
   useEffect(() => {
@@ -207,7 +236,7 @@ function BotForm({
     browserStatus(bot.id)
       .then((status) => {
         if (!active) return;
-        setBrowserState(status.state);
+        setLiveBrowserStatus(status);
         setBrowserError(null);
       })
       .catch((cause: unknown) => {
@@ -224,7 +253,7 @@ function BotForm({
     setBrowserError(null);
     try {
       const status = await startBrowserLogin(bot.id);
-      setBrowserState(status.state);
+      setLiveBrowserStatus(status);
     } catch (cause) {
       setBrowserError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -238,7 +267,7 @@ function BotForm({
     setBrowserError(null);
     try {
       await closeBrowser(bot.id);
-      setBrowserState('stopped');
+      setLiveBrowserStatus((current) => (current === null ? null : { ...current, state: 'stopped' }));
     } catch (cause) {
       setBrowserError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -283,7 +312,7 @@ function BotForm({
     const avatar = formatAvatar({ species: form.species, color: form.color });
     try {
       if (!bot) {
-        await onCreate({
+        const input = {
           name: form.name.trim(),
           job: form.job.trim(),
           instructions: form.instructions,
@@ -297,7 +326,9 @@ function BotForm({
           ...(form.teamId === '' ? {} : { teamId: form.teamId }),
           ...(form.model ? { engine: DSH_ENGINE, model: form.model } : {}),
           ...(budget === undefined ? {} : { teamBudgetUsd: budget }),
-        });
+          ...(form.browserProfileId === '' ? {} : { browserProfileId: form.browserProfileId }),
+        };
+        await onCreate(input);
       } else {
         const patch: UpdateBot = {};
         if (form.name.trim() !== bot.name) patch.name = form.name.trim();
@@ -325,6 +356,10 @@ function BotForm({
         if (budget !== bot.teamBudgetUsd) patch.teamBudgetUsd = budget ?? null;
         if (form.pinned !== bot.pinned) patch.pinned = form.pinned;
         if (form.notifications !== (bot.notifications !== false)) patch.notifications = form.notifications;
+        const profileId = bot.browserProfileId ?? '';
+        if (form.browserProfileId !== profileId) {
+          patch.browserProfileId = form.browserProfileId === '' ? null : form.browserProfileId;
+        }
         if (Object.keys(patch).length > 0) await onUpdate(bot.id, patch);
       }
       onClose();
@@ -415,10 +450,13 @@ function BotForm({
         hasBrowser={bot?.browser === true}
         enabled={form.browser}
         desktop={form.computer === 'desktop'}
-        state={browserState}
+        status={liveBrowserStatus}
+        profiles={profiles}
+        profileId={form.browserProfileId}
         error={browserError}
         busy={browserBusy}
         onToggle={(value) => set('browser', value)}
+        onProfile={(value) => set('browserProfileId', value)}
         onLogin={() => void openBrowserLogin()}
         onClose={() => void closeHostBrowser()}
       />
@@ -711,16 +749,21 @@ interface BrowserPickerProps {
   enabled: boolean;
   /** A sandbox with a desktop already has its own browser. */
   desktop: boolean;
-  state: BrowserStatus['state'] | null;
+  status: BrowserStatus | null;
+  profiles: BrowserProfile[] | null;
+  /** The chosen shared profile id, or an empty string for the bot's own profile. */
+  profileId: string;
   error: string | null;
   busy: boolean;
   onToggle: (enabled: boolean) => void;
+  onProfile: (profileId: string) => void;
   onLogin: () => void;
   onClose: () => void;
 }
 
-/** Opt-in for the bot's browser on the server machine, and its live state once the bot has one. */
-function BrowserPicker({ hasBrowser, enabled, desktop, state, error, busy, onToggle, onLogin, onClose }: BrowserPickerProps): ReactElement {
+/** Opt-in for the bot's browser on the server machine, its shared profile and its live state. */
+function BrowserPicker({ hasBrowser, enabled, desktop, status, profiles, profileId, error, busy, onToggle, onProfile, onLogin, onClose }: BrowserPickerProps): ReactElement {
+  const profileSelectId = useId();
   if (desktop) {
     return (
       <fieldset className="m-0 flex flex-col gap-2 border-0 p-0">
@@ -731,6 +774,7 @@ function BrowserPicker({ hasBrowser, enabled, desktop, state, error, busy, onTog
   }
 
   const live = enabled && hasBrowser;
+  const profileLabel = status === null ? null : status.profile.kind === 'shared' ? t('botForm.browserProfileSharedStatus', { name: status.profile.name }) : t('botForm.browserProfileOwnStatus');
   return (
     <fieldset className="m-0 flex flex-col gap-2 border-0 p-0">
       <legend className="mb-1 p-0 text-sm font-medium">{t('botForm.browser')}</legend>
@@ -741,21 +785,37 @@ function BrowserPicker({ hasBrowser, enabled, desktop, state, error, busy, onTog
           <span className="text-xs text-ink-2">{t('botForm.browserHint')}</span>
         </span>
       </label>
+      {enabled ? (
+        <div className="flex flex-col gap-1">
+          <label htmlFor={profileSelectId} className="text-sm font-medium">
+            {t('botForm.browserProfile')}
+          </label>
+          <select id={profileSelectId} value={profileId} onChange={(event) => onProfile(event.target.value)} className="brot-input">
+            <option value="">{t('botForm.browserProfileOwn')}</option>
+            {(profiles ?? []).map((profile) => (
+              <option key={profile.id} value={profile.id}>
+                {profile.name}
+              </option>
+            ))}
+          </select>
+          <span className="text-xs text-ink-2">{t('botForm.browserProfileHint')}</span>
+        </div>
+      ) : null}
       {live ? (
         <div className="flex flex-col items-start gap-2 rounded-lg border border-line bg-surface-2 p-3">
           {error === null ? (
             <p className="m-0 text-sm" aria-live="polite">
-              {state === null ? t('botForm.browserState.checking') : t(BROWSER_STATE_KEYS[state])}
+              {status === null ? t('botForm.browserState.checking') : `${t(BROWSER_STATE_KEYS[status.state])} · ${profileLabel ?? ''}`}
             </p>
           ) : null}
-          {state === 'login' && error === null ? <p className="m-0 text-xs text-ink-2">{t('botForm.browserLoginHint')}</p> : null}
+          {status?.state === 'login' && error === null ? <p className="m-0 text-xs text-ink-2">{t('botForm.browserLoginHint')}</p> : null}
           <div className="flex flex-wrap gap-2">
-            {state !== 'login' ? (
+            {status?.state !== 'login' ? (
               <Button variant="secondary" size="sm" disabled={busy} onClick={onLogin}>
                 {t('botForm.browserLogin')}
               </Button>
             ) : null}
-            {state === 'running' || state === 'login' ? (
+            {status?.state === 'running' || status?.state === 'login' ? (
               <Button variant="ghost" size="sm" disabled={busy} onClick={onClose}>
                 {t('botForm.browserClose')}
               </Button>

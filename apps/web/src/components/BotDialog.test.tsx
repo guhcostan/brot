@@ -1,6 +1,7 @@
 import type { Bot, Team } from '@brot/protocol';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
+import type { BrowserProfile } from '../data/client';
 import { t } from '../i18n';
 import { BotDialog, type BotDialogProps } from './BotDialog';
 
@@ -32,9 +33,10 @@ function render(overrides: Partial<BotDialogProps> = {}): string {
     onUpdate: noop,
     onDelete: noop,
     onOpenSettings: () => undefined,
-    browserStatus: async () => ({ state: 'stopped' }),
-    startBrowserLogin: async () => ({ state: 'login' }),
+    browserStatus: async () => ({ state: 'stopped', profile: { kind: 'own' } }),
+    startBrowserLogin: async () => ({ state: 'login', profile: { kind: 'own' } }),
     closeBrowser: noop,
+    loadBrowserProfiles: async () => [],
     onClose: () => undefined,
     ...overrides,
   };
@@ -117,5 +119,56 @@ describe('BotDialog notifications toggle', () => {
 
     expect(textOf(html)).toContain(t('botForm.notifications'));
     expect(notificationToggle(html)).not.toContain('checked=""');
+  });
+});
+
+const sharedProfiles: BrowserProfile[] = [
+  { id: 'profile_shared', name: 'Shared accounts', createdAt: at, updatedAt: at },
+  { id: 'profile_promo', name: 'Promoções', createdAt: at, updatedAt: at },
+];
+
+describe('BotDialog browser profiles', () => {
+  /** A host-browser bot; the profile field lives on the bot beyond the current protocol type. */
+  const withBrowser = (extra: Partial<Bot> = {}): Bot =>
+    ({ ...bot, computer: 'none', browser: true, ...extra }) as Bot;
+
+  it('offers Own plus every shared profile when the host browser is on', () => {
+    const html = render({ bot: withBrowser(), initialBrowserProfiles: sharedProfiles });
+    const text = textOf(html);
+
+    expect(text).toContain(t('botForm.browserProfile'));
+    expect(text).toContain(t('botForm.browserProfileHint'));
+    expect(html).toMatch(/<option value=""[^>]*>Own profile \(default\)<\/option>/);
+    expect(html).toContain('<option value="profile_shared">Shared accounts</option>');
+    expect(html).toContain('<option value="profile_promo">Promoções</option>');
+  });
+
+  it('preselects the bot shared profile and names it in the live status line', () => {
+    const html = render({
+      bot: withBrowser({ browserProfileId: 'profile_shared' } as Partial<Bot>),
+      initialBrowserProfiles: sharedProfiles,
+      initialBrowserStatus: { state: 'running', profile: { kind: 'shared', id: 'profile_shared', name: 'Shared accounts' } },
+    });
+    const text = textOf(html);
+
+    expect(html).toContain('<option value="profile_shared" selected="">Shared accounts</option>');
+    expect(text).toContain(
+      `${t('botForm.browserState.running')} · ${t('botForm.browserProfileSharedStatus', { name: 'Shared accounts' })}`,
+    );
+  });
+
+  it('names the own profile in the status line', () => {
+    const text = textOf(
+      render({ bot: withBrowser(), initialBrowserStatus: { state: 'stopped', profile: { kind: 'own' } } }),
+    );
+
+    expect(text).toContain(`${t('botForm.browserState.stopped')} · ${t('botForm.browserProfileOwnStatus')}`);
+  });
+
+  it('keeps the picker out of a desktop sandbox bot', () => {
+    const html = render({ bot: { ...bot, desktop: true } });
+
+    expect(textOf(html)).toContain(t('botForm.browserDesktop'));
+    expect(textOf(html)).not.toContain(t('botForm.browserProfile'));
   });
 });

@@ -1,10 +1,13 @@
 import type {
   Attachment,
   Bot,
+  BrowserProfile,
+  BrowserStatus,
   CanonicalEvent,
   ComputerInput,
   ComputerState,
   CreateBotInput,
+  CreateBrowserProfile,
   CreateMemory,
   CreateRoutineInput,
   CreateSkill,
@@ -27,6 +30,7 @@ import type {
   Team,
   Thread,
   UpdateBot,
+  UpdateBrowserProfile,
   UpdateMemory,
   UpdateRoomMembers,
   UpdateRoutine,
@@ -36,6 +40,10 @@ import type {
 
 export type {
   Attachment,
+  BrowserProfile,
+  BrowserProfileRef,
+  BrowserStatus,
+  CreateBrowserProfile,
   CreateMemory,
   CreateRoutineInput,
   CreateSkill,
@@ -47,6 +55,7 @@ export type {
   RoutineRun,
   RoutineRunStatus,
   Skill,
+  UpdateBrowserProfile,
   UpdateMemory,
   UpdateRoutine,
   UpdateSkill,
@@ -142,14 +151,6 @@ export interface ComputerInfo {
   width: number;
   height: number;
   takeover: Takeover | null;
-}
-
-/**
- * A bot's browser on the server machine from `GET /api/bots/:id/browser`. `login` means a headed
- * window is open for the person to sign in, and the bot resumes with that profile afterwards.
- */
-export interface BrowserStatus {
-  state: 'stopped' | 'running' | 'login';
 }
 
 /** The screen could not be read: 404 when the bot has no desktop, 409 when the computer is not running. */
@@ -273,6 +274,13 @@ export interface BrotClient {
   browserStatus(botId: string): Promise<BrowserStatus>;
   /** Opens a headed window so the person can sign in; the bot keeps the profile afterwards. */
   startBrowserLogin(botId: string): Promise<BrowserStatus>;
-  /** Closes the browser, saving its profile. */
+  /** Closes the browser, saving its profile. Shared profiles close for every bot using them. */
   closeBrowser(botId: string): Promise<void>;
+
+  /** Shared host-browser profiles, by name. */
+  listBrowserProfiles(): Promise<BrowserProfile[]>;
+  createBrowserProfile(input: CreateBrowserProfile): Promise<BrowserProfile>;
+  updateBrowserProfile(profileId: string, input: UpdateBrowserProfile): Promise<BrowserProfile>;
+  /** Deletes the profile's saved logins and ungroups its bots, which fall back to their own profiles. */
+  deleteBrowserProfile(profileId: string): Promise<void>;
 }

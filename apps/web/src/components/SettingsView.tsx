@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useMemo, useState, type FormEvent, type ReactElement, type ReactNode } from 'react';
 import type { Device, PairingStartResponse } from '@brot/protocol';
 import { BotAvatar, Button, Skeleton, cx } from '@brot/ui';
-import type { Provider } from '../data/client';
+import type { BrowserProfile, Provider } from '../data/client';
 import { desktopNotificationState, requestDesktopNotifications, type DesktopNotificationState } from '../desktopNotifications';
 import { formatTime } from '../format';
 import { t, type Locale, type TranslationKey } from '../i18n';
@@ -10,10 +10,13 @@ import { THEMES, type Theme } from '../theme';
 import { useClient } from './client';
 import { Check, Phone, Trash } from './icons';
 import { LanguageSwitcher } from './LanguageSwitcher';
+import { BrowserProfiles } from './BrowserProfiles';
 import { PaneHeader } from './ThreadView';
 
 export interface SettingsViewProps {
   locale: Locale;
+  /** Shared browser profiles to render before the client load resolves, e.g. in an SSR render. */
+  initialBrowserProfiles?: BrowserProfile[];
   onLocaleChange: (locale: Locale) => void;
   theme: Theme;
   onThemeChange: (theme: Theme) => void;
@@ -26,7 +29,7 @@ const THEME_LABEL: Record<Theme, TranslationKey> = {
   dark: 'settings.theme.dark',
 };
 
-export function SettingsView({ locale, onLocaleChange, theme, onThemeChange, onOpenBots }: SettingsViewProps): ReactElement {
+export function SettingsView({ locale, onLocaleChange, theme, onThemeChange, onOpenBots, initialBrowserProfiles }: SettingsViewProps): ReactElement {
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg">
       <PaneHeader onOpenBots={onOpenBots}>
@@ -39,6 +42,9 @@ export function SettingsView({ locale, onLocaleChange, theme, onThemeChange, onO
         <div className="mx-auto flex w-full max-w-[720px] flex-col gap-10 px-4 py-8 md:px-6">
           <Providers />
           <DesktopNotifications />
+          <Section title={t('settings.browserProfiles')} description={t('settings.browserProfilesBody')}>
+            <BrowserProfiles initialProfiles={initialBrowserProfiles} />
+          </Section>
           <Section title={t('settings.appearance')} description={t('settings.appearanceBody')}>
             <div role="radiogroup" aria-label={t('settings.theme')} className="grid grid-cols-3 gap-2">
               {THEMES.map((option) => (

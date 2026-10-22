@@ -1,4 +1,5 @@
 import type { Approval, Bot, CanonicalEvent, Memory, Message, Notification, Routine, RoutineRun, Skill, Task, Team, Thread } from '@brot/protocol';
+import type { BrowserProfile } from './client';
 
 const CREATED = '2026-10-01T09:00:00.000Z';
 
@@ -57,7 +58,7 @@ function bot(
 export const DEMO_BOTS: Bot[] = [
   bot('bot_capy', 'Capy', 'Chief of Staff', 'capivara:black', 'sandbox', true, { teamId: GROWTH_TEAM }),
   bot('bot_onca', 'Onça', 'Bug Fixer', 'onca:orange', 'sandbox', false, { teamId: GROWTH_TEAM }),
-  bot('bot_tuca', 'Tuca', 'Sales follow-up', 'tucano:amber', 'none', true, { teamId: GROWTH_TEAM }),
+  bot('bot_tuca', 'Tuca', 'Sales follow-up', 'tucano:amber', 'none', true, { teamId: GROWTH_TEAM, browser: true }),
   bot('bot_ara', 'Ara', 'Social and content', 'arara:pink', 'sandbox', false, {
     desktop: true,
     egress: { mode: 'allowlist', allow: ['linkedin.com', '*.linkedin.com'] },
@@ -71,7 +72,7 @@ export const DEMO_BOTS: Bot[] = [
     teamId: CONTENT_TEAM,
   }),
   bot('bot_sol', 'Sol', 'Scheduled routines', 'preguica:violet', 'none', false),
-  bot('bot_mico', 'Mico', 'Quick tasks and triage', 'mico:brown', 'none', false),
+  bot('bot_mico', 'Mico', 'Quick tasks and triage', 'mico:brown', 'none', false, { browser: true }),
 ];
 
 /** The default DM thread id the mock seeds for a bot. More threads per bot are created at runtime. */
@@ -674,3 +675,25 @@ export const DEMO_NOTIFICATIONS: Notification[] = [
     createdAt: hoursAgo(26),
   },
 ];
+
+/** Two seeded shared browser profiles so Settings shows the manager in mock mode. */
+export const DEMO_BROWSER_PROFILES: BrowserProfile[] = [
+  {
+    id: 'profile_shared',
+    name: 'Shared accounts',
+    createdAt: CREATED,
+    updatedAt: CREATED,
+  },
+  {
+    id: 'profile_promo',
+    name: 'Promoções',
+    createdAt: CREATED,
+    updatedAt: CREATED,
+  },
+];
+
+/** Which demo bots already share a profile: Tuca and Mico use the two seeded ones. */
+export const DEMO_BOT_BROWSER_PROFILES: Record<string, string> = {
+  bot_tuca: 'profile_shared',
+  bot_mico: 'profile_promo',
+};

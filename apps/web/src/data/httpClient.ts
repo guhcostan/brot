@@ -2,10 +2,13 @@ import {
   Approval,
   Attachment,
   Bot,
+  BrowserProfile,
+  BrowserStatus as BrowserStatusSchema,
   CanonicalEvent,
   ComputerInput,
   ComputerState,
   CreateBot,
+  CreateBrowserProfile,
   CreateMemory,
   CreateRoom,
   CreateRoutine,
@@ -32,6 +35,7 @@ import {
   Team,
   Thread,
   UpdateBot,
+  UpdateBrowserProfile,
   UpdateMemory,
   UpdateRoomMembers,
   UpdateRoutine,
@@ -630,14 +634,28 @@ export function createHttpClient({
     async closeBrowser(botId) {
       await write('POST', `${botPath(botId)}/browser/close`, {});
     },
+
+    listBrowserProfiles() {
+      return read('/api/browser/profiles', BrowserProfile.array());
+    },
+
+    async createBrowserProfile(input) {
+      const body = CreateBrowserProfile.parse(input);
+      const response = await write('POST', '/api/browser/profiles', body);
+      return BrowserProfile.parse(await response.json());
+    },
+
+    async updateBrowserProfile(profileId, input) {
+      const body = UpdateBrowserProfile.parse(input);
+      const response = await write('PATCH', `/api/browser/profiles/${encodeURIComponent(profileId)}`, body);
+      return BrowserProfile.parse(await response.json());
+    },
+
+    async deleteBrowserProfile(profileId) {
+      await request(`/api/browser/profiles/${encodeURIComponent(profileId)}`, { method: 'DELETE' });
+    },
   };
 }
-
-const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
-const textField = (value: unknown, field: string): string => {
-  if (typeof value !== 'string') throw new Error(`Expected ${field} to be a string`);
-  return value;
-};
 
 /** Validates `GET /api/providers`. The shape lives in docs/COMPUTER-USE.md, not yet in @brot/protocol. */
 export function parseProviders(value: unknown): Provider[] {
@@ -674,14 +692,26 @@ export function parseComputerInfo(value: unknown): ComputerInfo {
   };
 }
 
-/** Validates `GET /api/bots/:id/browser` and the `POST` routes that return the new state. */
+const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
+const textField = (value: unknown, field: string): string => {
+  if (typeof value !== 'string') throw new Error(`Expected ${field} to be a string`);
+  return value;
+};
+
+/**
+ * Validates `GET /api/bots/:id/browser` (and the login response) with the protocol schema, keeping a
+ * friendlier message than a raw zod issue list.
+ */
 export function parseBrowserStatus(value: unknown): BrowserStatus {
+  const result = BrowserStatusSchema.safeParse(value);
+  if (result.success) return result.data;
   if (!isRecord(value) || Array.isArray(value)) throw new Error('Expected a browser status object');
-  const state = value.state;
-  if (state !== 'stopped' && state !== 'running' && state !== 'login') {
+  if (value.state !== 'stopped' && value.state !== 'running' && value.state !== 'login') {
     throw new Error('Expected browser state to be stopped, running or login');
   }
-  return { state };
+  if (!isRecord(value.profile)) throw new Error('Expected a browser profile reference');
+  const issue = result.error.issues[0];
+  throw new Error(`Expected a browser status: ${issue?.message ?? 'invalid shape'}`);
 }
 
 async function describeFailure(response: Response): Promise<string> {
