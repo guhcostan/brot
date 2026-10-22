@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Approval, Bot, Thread } from '@brot/protocol';
+import type { Approval, Bot, Team, Thread } from '@brot/protocol';
 import { appReducer, inbox, initialAppState, statusOfBot, statusOfRoom } from './store';
 import { foldEvents } from './thread';
 
@@ -29,8 +29,16 @@ const thread = (id: string, botId: string, title = id, updatedAt = at): Thread =
   updatedAt,
 });
 
-const approval = (id: string, botId: string, threadId: string, createdAt: string): Approval => ({
+const team = (id: string, extra: Partial<Team> = {}): Team => ({
   id,
+  name: id,
+  instructions: '',
+  createdAt: at,
+  updatedAt: at,
+  ...extra,
+});
+
+const approval = (id: string, botId: string, threadId: string, createdAt: string): Approval => ({  id,
   runId: `run_${id}`,
   threadId,
   botId,
@@ -209,5 +217,44 @@ describe('app store', () => {
     state = appReducer(state, { type: 'select', selection: { kind: 'room', id: 'r1' } });
     expect(state.selection).toEqual({ kind: 'room', id: 'r1' });
     expect(appReducer(state, { type: 'select', selection: { kind: 'tasks' } }).selection).toEqual({ kind: 'tasks' });
+  });
+});
+
+describe('app store teams', () => {
+  it('loads teams and applies a saved team in place', () => {
+    let state = appReducer(initialAppState, { type: 'teams-loaded', teams: [team('t1'), team('t2')] });
+    expect(state.teams.map((entry) => entry.id)).toEqual(['t1', 't2']);
+
+    state = appReducer(state, { type: 'team-saved', team: team('t2', { name: 'Ops' }) });
+    expect(state.teams.map((entry) => entry.name)).toEqual(['t1', 'Ops']);
+
+    state = appReducer(state, { type: 'team-saved', team: team('t3', { name: 'Content' }) });
+    expect(state.teams.map((entry) => entry.id)).toEqual(['t1', 't2', 't3']);
+  });
+
+  it('removes a team and ungroups its bots without waiting for a reload', () => {
+    let state = appReducer(initialAppState, {
+      type: 'bots-loaded',
+      bots: [bot('a', { teamId: 't1' }), bot('b', { teamId: 't2' }), bot('c')],
+    });
+    state = appReducer(state, { type: 'teams-loaded', teams: [team('t1'), team('t2')] });
+
+    state = appReducer(state, { type: 'team-removed', teamId: 't1' });
+
+    expect(state.teams.map((entry) => entry.id)).toEqual(['t2']);
+    expect(state.bots.find((entry) => entry.id === 'a')?.teamId).toBeUndefined();
+    expect(Object.hasOwn(state.bots[0] ?? {}, 'teamId')).toBe(false);
+    expect(state.bots.find((entry) => entry.id === 'b')?.teamId).toBe('t2');
+    expect(state.bots.find((entry) => entry.id === 'c')?.teamId).toBeUndefined();
+  });
+
+  it('clears the chief of a team when its bot is removed', () => {
+    let state = appReducer(initialAppState, { type: 'bots-loaded', bots: [bot('a'), bot('b')] });
+    state = appReducer(state, { type: 'teams-loaded', teams: [team('t1', { chiefBotId: 'a' }), team('t2', { chiefBotId: 'b' })] });
+
+    state = appReducer(state, { type: 'bot-removed', botId: 'a' });
+
+    expect(state.teams.find((entry) => entry.id === 't1')?.chiefBotId).toBeUndefined();
+    expect(state.teams.find((entry) => entry.id === 't2')?.chiefBotId).toBe('b');
   });
 });

@@ -1,6 +1,31 @@
-import type { Approval, Bot, CanonicalEvent, Message, Task, Thread } from '@brot/protocol';
+import type { Approval, Bot, CanonicalEvent, Message, Task, Team, Thread } from '@brot/protocol';
 
 const CREATED = '2026-10-01T09:00:00.000Z';
+
+export const GROWTH_TEAM = 'team_growth';
+export const CONTENT_TEAM = 'team_content';
+
+/** Two demo teams with a shared brief and a chief, so the sidebar shows groups next to ungrouped bots. */
+export const DEMO_TEAMS: Team[] = [
+  {
+    id: GROWTH_TEAM,
+    name: 'Growth',
+    instructions:
+      'Win the Acme renewal as one team. Research before writing, keep the customer in mind in every draft, and check with Capy before anything leaves the house.',
+    chiefBotId: 'bot_capy',
+    createdAt: CREATED,
+    updatedAt: CREATED,
+  },
+  {
+    id: CONTENT_TEAM,
+    name: 'Content',
+    instructions:
+      'Publish with one voice: short, concrete, no hype. Read the page before you act, and ask before you post or send anything.',
+    chiefBotId: 'bot_ara',
+    createdAt: CREATED,
+    updatedAt: CREATED,
+  },
+];
 
 function bot(
   id: string,
@@ -30,18 +55,20 @@ function bot(
 
 /** A demo team across the avatar species and colors in DESIGN.md section 2. */
 export const DEMO_BOTS: Bot[] = [
-  bot('bot_capy', 'Capy', 'Chief of Staff', 'capivara:black', 'sandbox', true),
-  bot('bot_onca', 'Onça', 'Bug Fixer', 'onca:orange', 'sandbox', false),
-  bot('bot_tuca', 'Tuca', 'Sales follow-up', 'tucano:amber', 'none', true),
+  bot('bot_capy', 'Capy', 'Chief of Staff', 'capivara:black', 'sandbox', true, { teamId: GROWTH_TEAM }),
+  bot('bot_onca', 'Onça', 'Bug Fixer', 'onca:orange', 'sandbox', false, { teamId: GROWTH_TEAM }),
+  bot('bot_tuca', 'Tuca', 'Sales follow-up', 'tucano:amber', 'none', true, { teamId: GROWTH_TEAM }),
   bot('bot_ara', 'Ara', 'Social and content', 'arara:pink', 'sandbox', false, {
     desktop: true,
     egress: { mode: 'allowlist', allow: ['linkedin.com', '*.linkedin.com'] },
+    teamId: CONTENT_TEAM,
   }),
-  bot('bot_tamu', 'Tamu', 'Researcher', 'tamandua:teal', 'sandbox', false),
+  bot('bot_tamu', 'Tamu', 'Researcher', 'tamandua:teal', 'sandbox', false, { teamId: GROWTH_TEAM }),
   bot('bot_boto', 'Boto', 'Web operator', 'boto:blue', 'sandbox', false, {
     desktop: true,
     egress: { mode: 'allowlist', allow: ['news.ycombinator.com', 'duckduckgo.com', 'github.com'] },
     teamBudgetUsd: 2,
+    teamId: CONTENT_TEAM,
   }),
   bot('bot_sol', 'Sol', 'Scheduled routines', 'preguica:violet', 'none', false),
   bot('bot_mico', 'Mico', 'Quick tasks and triage', 'mico:brown', 'none', false),

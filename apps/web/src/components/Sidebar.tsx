@@ -1,11 +1,11 @@
 import { useMemo, useState, type ReactElement } from 'react';
-import type { Bot, Thread } from '@brot/protocol';
+import type { Bot, Team, Thread } from '@brot/protocol';
 import { AvatarStack, BotAvatar, BrandMark, Button, Input, STATUS_MOOD, Skeleton, StatusDot, cx, type BotStatus } from '@brot/ui';
 import type { Room } from '../data/client';
 import { avatarOf } from '../format';
 import { t, type Locale } from '../i18n';
 import type { Selection } from '../state/store';
-import { Board, ChevronRight, Gear, Inbox, Plus } from './icons';
+import { Board, ChevronRight, Gear, Inbox, Pencil, Plus } from './icons';
 import { useLiveMood } from './mood';
 import { memberSummary } from './RoomView';
 import { botStatusLabel } from './taskLabels';
@@ -13,6 +13,7 @@ import { botStatusLabel } from './taskLabels';
 export interface SidebarProps {
   bots: Bot[];
   rooms: Room[];
+  teams: Team[];
   /** Each bot's DM threads, most recently active first. Missing until the list has loaded. */
   threadLists: Record<string, Thread[]>;
   statusOf: (botId: string) => BotStatus;
@@ -33,6 +34,9 @@ export interface SidebarProps {
   onNewThread: (botId: string) => void;
   onNewRoom: () => void;
   onNewBot: () => void;
+  onNewTeam: () => void;
+  /** Opens the team dialog for an existing team. */
+  onEditTeam: (teamId: string) => void;
   /** Re-renders the sidebar's copy when the language changes. */
   locale: Locale;
   /** Bots whose thread rows start expanded. */
@@ -50,9 +54,13 @@ const toggleIn = (set: ReadonlySet<string>, id: string, on: boolean): ReadonlySe
   return next;
 };
 
+/** Collapse key for the bots that belong to no team. */
+const UNGROUPED_GROUP = 'ungrouped';
+
 export function Sidebar({
   bots,
   rooms,
+  teams,
   threadLists,
   statusOf,
   threadStatusOf,
@@ -69,6 +77,8 @@ export function Sidebar({
   onNewThread,
   onNewRoom,
   onNewBot,
+  onNewTeam,
+  onEditTeam,
   defaultExpanded,
   className,
 }: SidebarProps): ReactElement {
@@ -76,6 +86,7 @@ export function Sidebar({
   const [query, setQuery] = useState('');
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set(defaultExpanded ?? []));
   const [loading, setLoading] = useState<ReadonlySet<string>>(new Set());
+  const [collapsedGroups, setCollapsedGroups] = useState<ReadonlySet<string>>(new Set());
   const needle = query.trim().toLowerCase();
 
   const visible = useMemo(() => {
@@ -91,6 +102,27 @@ export function Sidebar({
     );
   }, [rooms, bots, needle, membersOf]);
 
+  /** Active bots under their team headings, plus the ones with no team. Pinned bots sort first in a group. */
+  const { teamGroups, ungrouped } = useMemo(() => {
+    const teamById = new Map(teams.map((team) => [team.id, team]));
+    const pinnedFirst = (list: Bot[]) => [...list].sort((a, b) => Number(b.pinned) - Number(a.pinned));
+    const members = new Map<string, Bot[]>();
+    const loose: Bot[] = [];
+    for (const bot of visible) {
+      if (bot.archived) continue;
+      // A bot whose team has not loaded yet stays visible as ungrouped rather than disappearing.
+      const team = bot.teamId === undefined ? undefined : teamById.get(bot.teamId);
+      if (team === undefined) loose.push(bot);
+      else members.set(team.id, [...(members.get(team.id) ?? []), bot]);
+    }
+    const groups = [...members].flatMap(([teamId, list]) => {
+      const team = teamById.get(teamId);
+      return team === undefined ? [] : [{ team, bots: pinnedFirst(list) }];
+    });
+    groups.sort((a, b) => a.team.name.localeCompare(b.team.name) || a.team.id.localeCompare(b.team.id));
+    return { teamGroups: groups, ungrouped: pinnedFirst(loose) };
+  }, [visible, teams]);
+
   const expand = (botId: string) => {
     setExpanded((current) => toggleIn(current, botId, true));
     if (threadLists[botId] !== undefined || loading.has(botId)) return;
@@ -105,13 +137,13 @@ export function Sidebar({
     else expand(botId);
   };
 
+  const toggleGroup = (groupId: string) => setCollapsedGroups((current) => toggleIn(current, groupId, !current.has(groupId)));
+
   const createThread = (botId: string) => {
     setExpanded((current) => toggleIn(current, botId, true));
     onNewThread(botId);
   };
 
-  const pinned = visible.filter((bot) => bot.pinned && !bot.archived);
-  const others = visible.filter((bot) => !bot.pinned && !bot.archived);
   const archived = visible.filter((bot) => bot.archived);
   const selectedBot = selection?.kind === 'bot' ? selection.id : null;
   const selectedThread = selection?.kind === 'bot' ? selection.threadId : null;
@@ -251,12 +283,43 @@ export function Sidebar({
         </section>
 
         {!ready ? <SidebarSkeleton /> : null}
-        {pinned.length > 0 ? <BotSection title={t('sidebar.pinned')} bots={pinned} {...rowProps} /> : null}
-        {others.length > 0 ? <BotSection title={t('sidebar.all')} bots={others} {...rowProps} /> : null}
-        {ready && pinned.length === 0 && others.length === 0 && !needle && archived.length === 0 ? (
+        {teamGroups.map((group) => (
+          <BotGroup
+            key={group.team.id}
+            title={group.team.name}
+            titleId={`sidebar-team-${group.team.id}`}
+            bots={group.bots}
+            collapsed={collapsedGroups.has(group.team.id)}
+            onToggleCollapsed={() => toggleGroup(group.team.id)}
+            editLabel={t('sidebar.editTeam', { name: group.team.name })}
+            onEdit={() => onEditTeam(group.team.id)}
+            {...rowProps}
+          />
+        ))}
+        {ungrouped.length > 0 ? (
+          <BotGroup
+            title={t('sidebar.ungrouped')}
+            titleId="sidebar-ungrouped"
+            bots={ungrouped}
+            collapsed={collapsedGroups.has(UNGROUPED_GROUP)}
+            onToggleCollapsed={() => toggleGroup(UNGROUPED_GROUP)}
+            {...rowProps}
+          />
+        ) : null}
+        {ready && teamGroups.length === 0 && ungrouped.length === 0 && !needle && archived.length === 0 ? (
           <button type="button" onClick={onNewBot} data-avatar-zone className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-line px-3 py-5 text-center text-sm text-ink-2 hover:bg-surface-2">
             <BotAvatar species="capivara" color="black" size={36} />
             {t('sidebar.noBots')}
+          </button>
+        ) : null}
+        {ready ? (
+          <button
+            type="button"
+            onClick={onNewTeam}
+            className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm text-ink-3 transition-colors duration-[var(--dur-fast)] hover:bg-surface-2 hover:text-ink-2"
+          >
+            <Plus size={14} />
+            {t('sidebar.newTeam')}
           </button>
         ) : null}
         {archived.length > 0 ? (
@@ -305,26 +368,61 @@ interface ThreadRowsProps {
   onNewThread: (botId: string) => void;
 }
 
-interface BotSectionProps extends ThreadRowsProps {
-  title: string;
+interface BotListProps extends ThreadRowsProps {
   bots: Bot[];
   statusOf: (botId: string) => BotStatus;
   selectedId: string | null;
   onOpenBot: (botId: string) => void;
+  /** Ties the list to the collapsible heading above it. */
+  listId?: string;
 }
 
-function BotSection({ title, ...rest }: BotSectionProps): ReactElement {
+interface BotGroupProps extends BotListProps {
+  title: string;
+  titleId: string;
+  collapsed: boolean;
+  onToggleCollapsed: () => void;
+  /** The pencil that opens the team dialog. Absent for the ungrouped group, which has no team. */
+  editLabel?: string;
+  onEdit?: () => void;
+}
+
+/** A collapsible heading over its bots: a team, or the bots that belong to no team. */
+function BotGroup({ title, titleId, collapsed, onToggleCollapsed, editLabel, onEdit, ...list }: BotGroupProps): ReactElement {
+  const listId = `${titleId}-bots`;
+  const countLabel = t(list.bots.length === 1 ? 'sidebar.teamBotCountOne' : 'sidebar.teamBotCountMany', { count: String(list.bots.length) });
   return (
-    <section className="flex flex-col gap-1">
-      <h2 className="m-0 px-2 pb-1 text-xs font-medium text-ink-3">{title}</h2>
-      <BotList {...rest} />
+    <section className="flex flex-col gap-1" aria-labelledby={titleId}>
+      <div className="flex items-center justify-between pr-1 pl-2">
+        <h2 id={titleId} className="m-0 min-w-0">
+          <button
+            type="button"
+            aria-expanded={!collapsed}
+            aria-controls={listId}
+            onClick={onToggleCollapsed}
+            className="flex min-w-0 items-center gap-1.5 rounded-md py-1 text-left text-xs font-medium text-ink-3 transition-colors duration-[var(--dur-fast)] hover:text-ink-2"
+          >
+            <ChevronRight size={12} className={cx('flex-none transition-transform duration-[var(--dur-fast)]', !collapsed && 'rotate-90')} />
+            <span className="truncate">{title}</span>
+            <span className="flex-none tabular-nums" aria-label={countLabel}>
+              {list.bots.length}
+            </span>
+          </button>
+        </h2>
+        {editLabel && onEdit ? (
+          <Button variant="ghost" size="sm" onClick={onEdit} aria-label={editLabel} title={editLabel} className="!min-h-6 !px-1.5 text-ink-2">
+            <Pencil size={13} />
+          </Button>
+        ) : null}
+      </div>
+      {collapsed ? null : <BotList {...list} listId={listId} />}
     </section>
   );
 }
 
-function BotList({ bots, statusOf, selectedId, onOpenBot, ...threadRows }: Omit<BotSectionProps, 'title'>): ReactElement {
+function BotList({ bots, statusOf, selectedId, onOpenBot, listId, ...threadRows }: BotListProps): ReactElement {
   return (
-    <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
+    <ul id={listId} className="m-0 flex list-none flex-col gap-0.5 p-0">
       {bots.map((bot) => (
         <li key={bot.id} className="animate-[brot-enter_var(--dur-base)_var(--ease)_both]">
           <BotRow bot={bot} status={statusOf(bot.id)} selected={bot.id === selectedId} onOpenBot={onOpenBot} {...threadRows} />

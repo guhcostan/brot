@@ -1,4 +1,4 @@
-import type { Bot } from '@brot/protocol';
+import type { Bot, Team } from '@brot/protocol';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { t } from '../i18n';
@@ -26,6 +26,7 @@ const noop = async () => undefined;
 function render(overrides: Partial<BotDialogProps> = {}): string {
   const props: BotDialogProps = {
     open: true,
+    teams: [],
     loadProviders: async () => [],
     onCreate: noop,
     onUpdate: noop,
@@ -79,5 +80,21 @@ describe('BotDialog host browser', () => {
     expect(text).toContain(t('botForm.browserOnHost'));
     expect(html).toContain(TOGGLE_OFF);
     expect(text).not.toContain(t('botForm.browserState.checking'));
+  });
+});
+
+const team: Team = { id: 'team_growth', name: 'Growth', instructions: '', createdAt: at, updatedAt: at };
+
+describe('BotDialog team picker', () => {
+  it('offers no team plus every team for a new bot', () => {
+    const html = render({ teams: [team] });
+    expect(html).toContain(t('botForm.team'));
+    expect(html).toContain(t('botForm.noTeam'));
+    expect(html).toContain('<option value="team_growth">Growth</option>');
+  });
+
+  it('prefills the team a bot already belongs to', () => {
+    const html = render({ bot: { ...bot, teamId: team.id }, teams: [team] });
+    expect(html).toMatch(/<option value="team_growth" selected="">Growth<\/option>/);
   });
 });

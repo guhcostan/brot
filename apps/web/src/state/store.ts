@@ -1,4 +1,4 @@
-import type { Approval, Bot, CanonicalEvent, Task, Thread } from '@brot/protocol';
+import type { Approval, Bot, CanonicalEvent, Task, Team, Thread } from '@brot/protocol';
 import type { Room } from '../data/client';
 import {
   applyEvent,
@@ -23,6 +23,8 @@ export type Selection =
 export interface AppState {
   bots: Bot[];
   rooms: Room[];
+  /** Every team, by name. A team groups bots under a shared brief. */
+  teams: Team[];
   selection: Selection | null;
   /** Every loaded thread's view, DMs and rooms alike, keyed by thread id. */
   threads: Record<string, ThreadState>;
@@ -36,6 +38,7 @@ export interface AppState {
 export const initialAppState: AppState = {
   bots: [],
   rooms: [],
+  teams: [],
   selection: null,
   threads: {},
   threadLists: {},
@@ -48,6 +51,9 @@ export type AppAction =
   | { type: 'bots-loaded'; bots: Bot[] }
   | { type: 'rooms-loaded'; rooms: Room[] }
   | { type: 'room-added'; room: Room }
+  | { type: 'teams-loaded'; teams: Team[] }
+  | { type: 'team-saved'; team: Team }
+  | { type: 'team-removed'; teamId: string }
   | { type: 'tasks-loaded'; tasks: Task[] }
   | { type: 'task-saved'; task: Task }
   | { type: 'threads-loaded'; botId: string; threads: Thread[] }
@@ -78,6 +84,18 @@ function withThread(list: Thread[], thread: Thread): Thread[] {
   return [thread, ...list.filter((entry) => entry.id !== thread.id)];
 }
 
+/** A bot that left its team carries no `teamId` at all, the same shape the server returns. */
+function withoutTeam(bot: Bot): Bot {
+  const { teamId: _teamId, ...rest } = bot;
+  return rest;
+}
+
+/** A team whose chief bot is gone has no chief, the same shape the server returns. */
+function withoutChief(team: Team): Team {
+  const { chiefBotId: _chiefBotId, ...rest } = team;
+  return rest;
+}
+
 export function appReducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
     case 'bots-loaded':
@@ -88,6 +106,21 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       const others = state.rooms.filter((room) => room.thread.id !== action.room.thread.id);
       return { ...state, rooms: [action.room, ...others] };
     }
+    case 'teams-loaded':
+      return { ...state, teams: action.teams };
+    case 'team-saved': {
+      const exists = state.teams.some((team) => team.id === action.team.id);
+      return {
+        ...state,
+        teams: exists ? state.teams.map((team) => (team.id === action.team.id ? action.team : team)) : [...state.teams, action.team],
+      };
+    }
+    case 'team-removed':
+      return {
+        ...state,
+        teams: state.teams.filter((team) => team.id !== action.teamId),
+        bots: state.bots.map((bot) => (bot.teamId === action.teamId ? withoutTeam(bot) : bot)),
+      };
     case 'tasks-loaded':
       return { ...state, tasks: action.tasks.reduce(upsertTask, state.tasks) };
     case 'task-saved':
@@ -144,6 +177,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         bots,
         threads,
         threadLists,
+        teams: state.teams.map((team) => (team.chiefBotId === action.botId ? withoutChief(team) : team)),
         rooms: state.rooms.map((room) => ({ ...room, memberIds: room.memberIds.filter((id) => id !== action.botId) })),
         selection: selected ? null : state.selection,
       };

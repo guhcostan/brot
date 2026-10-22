@@ -1,5 +1,5 @@
 import { useEffect, useId, useState, type FormEvent, type KeyboardEvent, type ReactElement } from 'react';
-import { EgressHost, type Bot, type CreateBotInput, type UpdateBot } from '@brot/protocol';
+import { EgressHost, type Bot, type CreateBotInput, type Team, type UpdateBot } from '@brot/protocol';
 import {
   AVATAR_COLOR_NAMES,
   AVATAR_SPECIES,
@@ -25,6 +25,8 @@ export interface BotDialogProps {
   open: boolean;
   /** The bot to edit. Absent creates a new bot. */
   bot?: Bot;
+  /** Every team, for the picker that groups this bot. */
+  teams: Team[];
   loadProviders: () => Promise<Provider[]>;
   onCreate: (input: CreateBotInput) => Promise<unknown>;
   onUpdate: (botId: string, patch: UpdateBot) => Promise<unknown>;
@@ -81,6 +83,8 @@ interface FormState {
   name: string;
   job: string;
   instructions: string;
+  /** The bot's team id, or an empty string for no team. */
+  teamId: string;
   species: AvatarSpecies;
   color: AvatarColor;
   model: string | undefined;
@@ -103,6 +107,7 @@ function initialState(bot: Bot | undefined): FormState {
       name: '',
       job: '',
       instructions: '',
+      teamId: '',
       species: 'capivara',
       color: 'violet',
       model: undefined,
@@ -118,6 +123,7 @@ function initialState(bot: Bot | undefined): FormState {
     name: bot.name,
     job: bot.job,
     instructions: bot.instructions,
+    teamId: bot.teamId ?? '',
     species: avatar.species,
     color: avatar.color,
     model: bot.model,
@@ -146,6 +152,7 @@ export function BotDialog(props: BotDialogProps): ReactElement {
 
 function BotForm({
   bot,
+  teams,
   loadProviders,
   onCreate,
   onUpdate,
@@ -167,6 +174,7 @@ function BotForm({
   const [browserState, setBrowserState] = useState<BrowserStatus['state'] | null>(null);
   const [browserError, setBrowserError] = useState<string | null>(null);
   const [browserBusy, setBrowserBusy] = useState(false);
+  const teamFieldId = useId();
 
   useEffect(() => {
     let active = true;
@@ -282,6 +290,7 @@ function BotForm({
           ...(computer === 'host' ? { hostAcknowledged: true } : {}),
           browser,
           egress,
+          ...(form.teamId === '' ? {} : { teamId: form.teamId }),
           ...(form.model ? { engine: DSH_ENGINE, model: form.model } : {}),
           ...(budget === undefined ? {} : { teamBudgetUsd: budget }),
         });
@@ -290,6 +299,7 @@ function BotForm({
         if (form.name.trim() !== bot.name) patch.name = form.name.trim();
         if (form.job.trim() !== bot.job) patch.job = form.job.trim();
         if (form.instructions !== bot.instructions) patch.instructions = form.instructions;
+        if (form.teamId !== (bot.teamId ?? '')) patch.teamId = form.teamId === '' ? null : form.teamId;
         if (avatar !== bot.avatar) patch.avatar = avatar;
         if (form.model && form.model !== bot.model) {
           patch.model = form.model;
@@ -359,6 +369,20 @@ function BotForm({
             error={tried && !form.job.trim() ? t('botForm.jobRequired') : undefined}
           />
         </div>
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <label htmlFor={teamFieldId} className="text-sm font-medium">
+          {t('botForm.team')}
+        </label>
+        <select id={teamFieldId} value={form.teamId} onChange={(event) => set('teamId', event.target.value)} className="brot-input">
+          <option value="">{t('botForm.noTeam')}</option>
+          {teams.map((team) => (
+            <option key={team.id} value={team.id}>
+              {team.name}
+            </option>
+          ))}
+        </select>
       </div>
 
       <Textarea

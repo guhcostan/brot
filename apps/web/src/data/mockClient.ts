@@ -11,10 +11,12 @@ import type {
   ResolveApproval,
   Takeover,
   Task,
+  Team,
   Thread,
 } from '@brot/protocol';
 import {
   CreateBot,
+  CreateTeam,
   CreateThread,
   DESKTOP_HEIGHT,
   DESKTOP_WIDTH,
@@ -22,6 +24,7 @@ import {
   MIN_ROOM_BOTS,
   UpdateBot,
   UpdateRoomMembers,
+  UpdateTeam,
   UpdateThread,
   defaultEgressPolicy,
 } from '@brot/protocol';
@@ -46,6 +49,7 @@ import {
   DEMO_ROOM_HISTORY,
   DEMO_ROOMS,
   DEMO_TASKS,
+  DEMO_TEAMS,
   DEMO_THREAD_TITLES,
   OPEN_ASK,
   PENDING_SEND,
@@ -144,7 +148,23 @@ const byRecent = (threads: readonly Thread[]): Thread[] =>
  */
 export function createMockClient(): BrotClient {
   const bots = new Map<string, Bot>(DEMO_BOTS.map((bot) => [bot.id, structuredClone(bot)]));
+  const teams = new Map<string, Team>(DEMO_TEAMS.map((team) => [team.id, structuredClone(team)]));
   const nameOf = (botId: string) => bots.get(botId)?.name ?? botId;
+  const byTeamName = (a: Team, b: Team) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id);
+  /** Mirrors the server: a chief must be a bot that exists and is not archived. */
+  const requireChief = (chiefBotId: string | null | undefined) => {
+    if (chiefBotId === undefined || chiefBotId === null) return;
+    const chief = bots.get(chiefBotId);
+    if (!chief || chief.archived) throw new Error(`Unknown bot: ${chiefBotId}`);
+  };
+  const clearChiefOf = (botId: string) => {
+    for (const [teamId, team] of teams) {
+      if (team.chiefBotId !== botId) continue;
+      const cleared = { ...team };
+      delete cleared.chiefBotId;
+      teams.set(teamId, cleared);
+    }
+  };
   const providers = DEMO_PROVIDERS.map((provider) => structuredClone(provider));
   const devices = DEMO_DEVICES.map((device) => ({ ...device }));
   const screens = new Map<string, FakeScreen>();
@@ -624,6 +644,7 @@ export function createMockClient(): BrotClient {
 
     async deleteBot(botId) {
       if (!bots.delete(botId)) throw new Error(`Unknown bot: ${botId}`);
+      clearChiefOf(botId);
       for (const thread of dmThreadsOf(botId)) {
         threads.delete(thread.id);
         histories.delete(thread.id);
@@ -632,6 +653,55 @@ export function createMockClient(): BrotClient {
       screens.delete(botId);
       browserStates.delete(botId);
       for (const room of rooms.values()) room.memberIds = room.memberIds.filter((id) => id !== botId);
+    },
+
+    async listTeams() {
+      return [...teams.values()].map((team) => structuredClone(team)).sort(byTeamName);
+    },
+
+    async createTeam(input) {
+      const data = CreateTeam.parse(input);
+      requireChief(data.chiefBotId);
+      const at = now();
+      const created: Team = {
+        id: nextId('team'),
+        name: data.name,
+        instructions: data.instructions,
+        ...(data.chiefBotId === undefined ? {} : { chiefBotId: data.chiefBotId }),
+        createdAt: at,
+        updatedAt: at,
+      };
+      teams.set(created.id, created);
+      return structuredClone(created);
+    },
+
+    async updateTeam(teamId, patch) {
+      const current = teams.get(teamId);
+      if (!current) throw new Error(`Unknown team: ${teamId}`);
+      const data = UpdateTeam.parse(patch);
+      requireChief(data.chiefBotId);
+      const next: Team = {
+        id: current.id,
+        name: data.name ?? current.name,
+        instructions: data.instructions ?? current.instructions,
+        createdAt: current.createdAt,
+        updatedAt: now(),
+      };
+      const chiefBotId = data.chiefBotId === undefined ? current.chiefBotId : (data.chiefBotId ?? undefined);
+      if (chiefBotId !== undefined) next.chiefBotId = chiefBotId;
+      teams.set(teamId, next);
+      return structuredClone(next);
+    },
+
+    async deleteTeam(teamId) {
+      if (!teams.delete(teamId)) throw new Error(`Unknown team: ${teamId}`);
+      const at = now();
+      for (const [botId, bot] of bots) {
+        if (bot.teamId !== teamId) continue;
+        const ungrouped = { ...bot, updatedAt: at };
+        delete ungrouped.teamId;
+        bots.set(botId, ungrouped);
+      }
     },
 
     async listThreads(botId) {

@@ -13,6 +13,7 @@ import { Sidebar } from './components/Sidebar';
 import { TaskBoard } from './components/TaskBoard';
 import { CreateTaskDialog, TaskDetailDialog } from './components/Tasks';
 import { TeamAvatar, TeamProvider, type TeamContextValue } from './components/team';
+import { TeamDialog } from './components/TeamDialog';
 import { ThreadView } from './components/ThreadView';
 import { currentShell } from './components/shell';
 import { createClient } from './data';
@@ -64,7 +65,7 @@ interface TakeoverNoticeState {
 export function App(): ReactElement {
   const client = useMemo(() => createClient(), []);
   const chat = useChat(client);
-  const { state, select, openBot, newThread, loadThreads, loadHistory, send, sendToRoom, decide, createRoom, createTask, cancelTask } = chat;
+  const { state, select, openBot, newThread, loadThreads, loadHistory, send, sendToRoom, decide, createRoom, createTask, cancelTask, updateBot, createTeam, updateTeam, deleteTeam } = chat;
   const [pane, setPane] = useState<Pane>('thread');
   const [locale, setLocaleState] = useState<Locale>(getLocale);
   const [theme, setThemeState] = useState<Theme>(getTheme);
@@ -73,6 +74,7 @@ export function App(): ReactElement {
   const [newTaskOpen, setNewTaskOpen] = useState(false);
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
   const [botDialog, setBotDialog] = useState<{ botId?: string } | null>(null);
+  const [teamDialog, setTeamDialog] = useState<{ teamId?: string } | null>(null);
   const [notice, setNotice] = useState<TakeoverNoticeState | null>(null);
   const seenTakeovers = useRef(new Set<string>());
   const wide = useWide();
@@ -88,6 +90,7 @@ export function App(): ReactElement {
   };
 
   const botsById = useMemo(() => Object.fromEntries(state.bots.map((bot) => [bot.id, bot])), [state.bots]);
+  const teamsById = useMemo(() => Object.fromEntries(state.teams.map((team) => [team.id, team])), [state.teams]);
   const memberBots = useCallback(
     (roomId: string) => membersOf(state, roomId).flatMap((botId) => (botsById[botId] ? [botsById[botId]] : [])),
     [state, botsById],
@@ -187,6 +190,7 @@ export function App(): ReactElement {
   const allTasks = taskList(state);
   const activeTasks = allTasks.filter((task) => task.status === 'open' || task.status === 'in_progress' || task.status === 'blocked').length;
   const editing = botDialog?.botId ? botsById[botDialog.botId] : undefined;
+  const editingTeam = teamDialog?.teamId ? teamsById[teamDialog.teamId] : undefined;
 
   const subject: ContextSubject | null = bot
     ? { kind: 'bot', bot }
@@ -276,6 +280,7 @@ export function App(): ReactElement {
           <Sidebar
             bots={state.bots}
             rooms={state.rooms}
+            teams={state.teams}
             threadLists={state.threadLists}
             statusOf={(botId) => statusOfBot(state, botId)}
             threadStatusOf={(threadId) => threadStatusOf(state, threadId)}
@@ -292,6 +297,8 @@ export function App(): ReactElement {
             onNewThread={(botId) => void startThread(botId)}
             onNewRoom={() => setNewRoomOpen(true)}
             onNewBot={newBot}
+            onNewTeam={() => setTeamDialog({})}
+            onEditTeam={(teamId) => setTeamDialog({ teamId })}
             locale={locale}
             className={pane === 'bots' ? 'flex' : 'hidden md:flex'}
           />
@@ -330,6 +337,7 @@ export function App(): ReactElement {
         <BotDialog
           open={botDialog !== null}
           bot={editing}
+          teams={state.teams}
           loadProviders={client.listProviders}
           onCreate={chat.createBot}
           onUpdate={chat.updateBot}
@@ -342,6 +350,16 @@ export function App(): ReactElement {
           startBrowserLogin={client.startBrowserLogin}
           closeBrowser={client.closeBrowser}
           onClose={() => setBotDialog(null)}
+        />
+        <TeamDialog
+          open={teamDialog !== null}
+          team={editingTeam}
+          bots={state.bots}
+          onCreate={createTeam}
+          onUpdate={updateTeam}
+          onUpdateBot={updateBot}
+          onDelete={deleteTeam}
+          onClose={() => setTeamDialog(null)}
         />
         <CreateTaskDialog
           open={newTaskOpen}

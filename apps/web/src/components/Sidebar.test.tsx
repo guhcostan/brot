@@ -1,4 +1,4 @@
-import type { Bot, Thread } from '@brot/protocol';
+import type { Bot, Team, Thread } from '@brot/protocol';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { t } from '../i18n';
@@ -19,6 +19,15 @@ const bot: Bot = {
   updatedAt: at,
 };
 
+const team: Team = {
+  id: 'team_growth',
+  name: 'Growth',
+  instructions: 'Win the Acme renewal.',
+  chiefBotId: 'bot_1',
+  createdAt: at,
+  updatedAt: at,
+};
+
 const thread = (id: string, title: string): Thread => ({ id, botId: 'bot_1', title, kind: 'dm', createdAt: at, updatedAt: at });
 
 const noop = () => undefined;
@@ -27,6 +36,7 @@ function render(overrides: Partial<SidebarProps> = {}): string {
   const props: SidebarProps = {
     bots: [bot],
     rooms: [],
+    teams: [],
     threadLists: { bot_1: [thread('thr_2', 'Planning'), thread('thr_1', 'Morning check-in')] },
     statusOf: () => 'idle',
     threadStatusOf: () => 'idle',
@@ -43,6 +53,8 @@ function render(overrides: Partial<SidebarProps> = {}): string {
     onNewThread: noop,
     onNewRoom: noop,
     onNewBot: noop,
+    onNewTeam: noop,
+    onEditTeam: noop,
     locale: 'en',
     ...overrides,
   };
@@ -88,5 +100,45 @@ describe('sidebar threads', () => {
 
     expect(text).toContain(t('sidebar.newThread'));
     expect(text).not.toContain('Planning');
+  });
+});
+
+describe('sidebar teams', () => {
+  const solo: Bot = { ...bot, id: 'bot_2', name: 'Mico', job: 'Triage', pinned: false };
+
+  it('groups active bots under their team, then the ones without a team', () => {
+    const html = render({ bots: [{ ...bot, teamId: team.id }, solo], teams: [team] });
+
+    expect(html).toContain('Growth');
+    expect(html).toContain(t('sidebar.ungrouped'));
+    expect(html.indexOf('Growth')).toBeLessThan(html.indexOf('Capy'));
+    expect(html.indexOf('Capy')).toBeLessThan(html.indexOf(t('sidebar.ungrouped')));
+    expect(html.indexOf(t('sidebar.ungrouped'))).toBeLessThan(html.indexOf('Mico'));
+  });
+
+  it('counts the bots in a group and offers its team dialog', () => {
+    const html = render({ bots: [{ ...bot, teamId: team.id }, { ...solo, teamId: team.id }], teams: [team] });
+
+    expect(html).toContain(t('sidebar.teamBotCountMany', { count: '2' }));
+    expect(html).toContain(t('sidebar.editTeam', { name: 'Growth' }));
+    expect(html).toContain(t('sidebar.newTeam'));
+  });
+
+  it('hides a team with no active bots and keeps archived bots out of the groups', () => {
+    const html = render({
+      bots: [{ ...bot, teamId: team.id }, { ...solo, archived: true }],
+      teams: [team, { ...team, id: 'team_ops', name: 'Ops' }],
+    });
+
+    expect(html).not.toContain('Ops');
+    expect(html).not.toContain(t('sidebar.ungrouped'));
+    expect(html).toContain('Capy');
+  });
+
+  it('shows a bot whose team is missing as ungrouped instead of dropping it', () => {
+    const html = render({ bots: [{ ...bot, teamId: 'team_deleted' }], teams: [] });
+
+    expect(html).toContain(t('sidebar.ungrouped'));
+    expect(html).toContain('Capy');
   });
 });

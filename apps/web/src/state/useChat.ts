@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useReducer, useRef } from 'react';
-import type { ApprovalDecision, CreateBotInput, Thread, UpdateBot } from '@brot/protocol';
+import type { ApprovalDecision, CreateBotInput, CreateTeamInput, Team, Thread, UpdateBot, UpdateTeam } from '@brot/protocol';
 import type { BrotClient, NewRoom, NewTask, RoomMessage } from '../data/client';
 import { appReducer, initialAppState, type Selection } from './store';
 
@@ -150,11 +150,15 @@ export function useChat(client: BrotClient) {
     const loadTasks = client.listTasks().then((tasks) => {
       if (active) dispatch({ type: 'tasks-loaded', tasks });
     });
+    // A server without teams still serves bots: they all show as ungrouped.
+    const loadTeams = client.listTeams().then((teams) => {
+      if (active) dispatch({ type: 'teams-loaded', teams });
+    });
 
     loadBots.catch((error: unknown) => {
       if (active) dispatch({ type: 'failed', message: messageOf(error) });
     });
-    for (const optional of [loadRooms, loadTasks]) {
+    for (const optional of [loadRooms, loadTasks, loadTeams]) {
       optional.catch((error: unknown) => console.warn('Team data did not load', error));
     }
 
@@ -254,6 +258,32 @@ export function useChat(client: BrotClient) {
     [client, openBot],
   );
 
+  const createTeam = useCallback(
+    async (input: CreateTeamInput): Promise<Team> => {
+      const team = await client.createTeam(input);
+      dispatch({ type: 'team-saved', team });
+      return team;
+    },
+    [client],
+  );
+
+  const updateTeam = useCallback(
+    async (teamId: string, patch: UpdateTeam): Promise<Team> => {
+      const team = await client.updateTeam(teamId, patch);
+      dispatch({ type: 'team-saved', team });
+      return team;
+    },
+    [client],
+  );
+
+  const deleteTeam = useCallback(
+    async (teamId: string) => {
+      await client.deleteTeam(teamId);
+      dispatch({ type: 'team-removed', teamId });
+    },
+    [client],
+  );
+
   const updateRoomMembers = useCallback(
     async (roomId: string, change: { add?: string[]; remove?: string[] }) => {
       const memberIds = await client.updateRoomMembers(roomId, change);
@@ -279,6 +309,9 @@ export function useChat(client: BrotClient) {
     createBot,
     updateBot,
     deleteBot,
+    createTeam,
+    updateTeam,
+    deleteTeam,
     updateRoomMembers,
   };
 }

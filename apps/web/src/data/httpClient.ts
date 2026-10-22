@@ -7,6 +7,7 @@ import {
   CreateBot,
   CreateRoom,
   CreateTask,
+  CreateTeam,
   CreateThread,
   Device,
   Message,
@@ -18,10 +19,12 @@ import {
   SetTakeover,
   Takeover,
   Task,
+  Team,
   Thread,
   UpdateBot,
   UpdateRoomMembers,
   UpdateTask,
+  UpdateTeam,
   UpdateThread,
   DESKTOP_HEIGHT,
   DESKTOP_WIDTH,
@@ -293,6 +296,26 @@ export function createHttpClient({
       knownBots.delete(botId);
       for (const thread of threadsOfBot.get(botId) ?? []) botOfThread.delete(thread.id);
       threadsOfBot.delete(botId);
+    },
+
+    listTeams() {
+      return read('/api/teams', Team.array());
+    },
+
+    async createTeam(input) {
+      const body = CreateTeam.parse(input);
+      const response = await write('POST', '/api/teams', body);
+      return Team.parse(await response.json());
+    },
+
+    async updateTeam(teamId, patch) {
+      const body = UpdateTeam.parse(patch);
+      const response = await write('PATCH', `/api/teams/${encodeURIComponent(teamId)}`, body);
+      return Team.parse(await response.json());
+    },
+
+    async deleteTeam(teamId) {
+      await request(`/api/teams/${encodeURIComponent(teamId)}`, { method: 'DELETE' });
     },
 
     listThreads(botId) {

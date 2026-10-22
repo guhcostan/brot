@@ -4,6 +4,7 @@ import type {
   ComputerInput,
   ComputerState,
   CreateBotInput,
+  CreateTeamInput,
   Device,
   PairingStartResponse,
   PostMessage,
@@ -13,10 +14,14 @@ import type {
   Takeover,
   Task,
   TaskStatus,
+  Team,
   Thread,
   UpdateBot,
   UpdateRoomMembers,
+  UpdateTeam,
 } from '@brot/protocol';
+
+export type { Team } from '@brot/protocol';
 
 /**
  * A live event and the conversation it belongs to: a bot's DM thread (`botId`), a room (`roomId`), or
@@ -109,6 +114,9 @@ export interface ListBotsOptions {
   includeArchived?: boolean;
 }
 
+/** A team's shared brief, from the team dialog: name, instructions and an optional chief. */
+export type NewTeam = CreateTeamInput;
+
 /**
  * What the web app needs from the Brot server. Posting returns before the run finishes; the run
  * arrives as canonical events through onEvent, the same way the server's SSE stream delivers them.
@@ -121,6 +129,14 @@ export interface BrotClient {
   createBot(input: CreateBotInput): Promise<Bot>;
   updateBot(botId: string, patch: UpdateBot): Promise<Bot>;
   deleteBot(botId: string): Promise<void>;
+
+  /** Every team, by name. A team groups bots and gives them a shared brief. */
+  listTeams(): Promise<Team[]>;
+  createTeam(input: NewTeam): Promise<Team>;
+  /** `chiefBotId: null` removes the chief. */
+  updateTeam(teamId: string, patch: UpdateTeam): Promise<Team>;
+  /** Deletes the team and ungroups its bots; the bots stay. */
+  deleteTeam(teamId: string): Promise<void>;
 
   /** A bot's DM threads, most recently active first. */
   listThreads(botId: string): Promise<Thread[]>;
