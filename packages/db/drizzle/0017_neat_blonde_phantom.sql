@@ -1,0 +1,1 @@
+ALTER TABLE `bots` ADD `mcp_server_ids` text;

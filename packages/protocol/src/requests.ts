@@ -10,6 +10,7 @@ import {
   Takeover,
   DeviceRole,
   IsoDateTime,
+  McpServerIds,
   MemoryKind,
   PolicyEffect,
   ResponderMode,
@@ -45,6 +46,7 @@ export const CreateBot = z
     browserProfileId: z.string().min(1).optional(),
     notifications: z.boolean().default(true),
     speakReplies: z.boolean().default(false),
+    mcpServerIds: McpServerIds.nullable().optional(),
     approvalMode: ApprovalMode.default('ask'),
     avatar: z.string().optional(),
     teamId: z.string().min(1).optional(),
@@ -71,6 +73,8 @@ export const UpdateBot = z
     browserProfileId: z.string().min(1).nullable().optional(),
     notifications: z.boolean().optional(),
     speakReplies: z.boolean().optional(),
+    /** An allowlist of user MCP server ids; `null` returns to every enabled server, `[]` allows none. */
+    mcpServerIds: McpServerIds.nullable().optional(),
     /** `ask` pauses every risky action; `edits` auto-allows shell, file writes and other write actions. */
     approvalMode: ApprovalMode.optional(),
     /** `null` removes the bot from its team. */

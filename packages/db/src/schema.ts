@@ -55,6 +55,11 @@ export const bots = sqliteTable('bots', {
   notifications: integer('notifications', { mode: 'boolean' }).notNull().default(true),
   /** Whether the chat may speak this bot's replies. */
   speakReplies: integer('speak_replies', { mode: 'boolean' }).notNull().default(false),
+  /**
+   * The user MCP servers this bot's runs may use, as an allowlist of ids. Null means every enabled server;
+   * an empty array means none. Stale ids are ignored when the bot is read.
+   */
+  mcpServerIds: text('mcp_server_ids', { mode: 'json' }).$type<string[]>(),
   /** How the broker treats write actions: `ask` pauses all of them, `edits` only the irreversible kinds. */
   approvalMode: text('approval_mode').$type<ApprovalMode>().notNull().default('ask'),
   /** The bot's team. Plain text, not a foreign key: deleting a team ungroups its bots instead of touching them. */

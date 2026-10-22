@@ -351,7 +351,7 @@ export function createHarness(deps: HarnessDeps): Harness {
             };
       // The run's engine gets the Brot MCP server and every enabled user server. Secret env values are resolved
       // here, for the child process only: they are part of the spec, never of the prompt or an event.
-      const userMcpServers = await enabledMcpServerSpecs(repos, vault);
+      const userMcpServers = await enabledMcpServerSpecs(repos, vault, bot);
       const brotMcpServers = mcp
         ? [mcp.specForRun({ botId: bot.id, threadId: state.threadId, runId: state.runId }, place.brotBaseUrl)]
         : [];

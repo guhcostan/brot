@@ -203,6 +203,16 @@ async function unknownBots(repos: Repos, ids: readonly string[]): Promise<string
   return missing;
 }
 
+/** Ids that name no stored user MCP server. `null` and absent grants have nothing to validate. */
+async function unknownMcpServerIds(
+  repos: Repos,
+  ids: readonly string[] | null | undefined,
+): Promise<string[]> {
+  if (ids === undefined || ids === null || ids.length === 0) return [];
+  const known = new Set((await repos.mcpServers.list()).map((server) => server.id));
+  return [...new Set(ids)].filter((id) => !known.has(id));
+}
+
 /**
  * Why a message may not link these attachment ids: an id names nothing, an attachment belongs to another
  * thread, or one is already linked to a message.
@@ -367,6 +377,10 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     if (body.data.computer === 'host' && config.mode !== 'desktop') return hostRefused(c);
     const missingProfile = await unknownBrowserProfile(repos, body.data.browserProfileId);
     if (missingProfile !== undefined) return invalidReference(c, 'browserProfileId', 'unknown browser profile');
+    const missingMcpServers = await unknownMcpServerIds(repos, body.data.mcpServerIds);
+    if (missingMcpServers.length > 0) {
+      return invalidReference(c, 'mcpServerIds', `unknown MCP servers: ${missingMcpServers.join(', ')}`);
+    }
     return c.json(await repos.bots.create(body.data), 201);
   });
 
@@ -381,6 +395,10 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     if (body.data.computer === 'host' && config.mode !== 'desktop') return hostRefused(c);
     const missingProfile = await unknownBrowserProfile(repos, body.data.browserProfileId);
     if (missingProfile !== undefined) return invalidReference(c, 'browserProfileId', 'unknown browser profile');
+    const missingMcpServers = await unknownMcpServerIds(repos, body.data.mcpServerIds);
+    if (missingMcpServers.length > 0) {
+      return invalidReference(c, 'mcpServerIds', `unknown MCP servers: ${missingMcpServers.join(', ')}`);
+    }
     const before = await repos.bots.get(c.req.param('id'));
     const bot = await repos.bots.update(c.req.param('id'), body.data);
     if (bot && before && bot.engine !== before.engine) await harness.resetEngineSessions(bot.id);

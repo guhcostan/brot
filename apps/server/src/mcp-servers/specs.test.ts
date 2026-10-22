@@ -93,7 +93,7 @@ describe('enabledMcpServerSpecs', () => {
     await repos.mcpServers.create({ name: 'remote', transport: 'http', url: 'https://mcp.example.com/mcp' });
     const off = await repos.mcpServers.create({ name: 'disabled', command: process.execPath, enabled: false });
 
-    const specs = await enabledMcpServerSpecs(repos, vault);
+    const specs = await enabledMcpServerSpecs(repos, vault, { mcpServerIds: null });
     expect(specs.map((spec) => spec.name)).toEqual(['absolute', 'local-tools', 'remote']);
     expect(specs.find((spec) => spec.name === 'local-tools')).toMatchObject({
       command: expect.stringMatching(new RegExp(`^${fixture.dir}`)),
@@ -104,7 +104,7 @@ describe('enabledMcpServerSpecs', () => {
     expect(absolute.command).toBe(process.execPath);
 
     await repos.mcpServers.update(off.id, { enabled: true });
-    expect((await enabledMcpServerSpecs(repos, vault)).map((spec) => spec.name)).toEqual([
+    expect((await enabledMcpServerSpecs(repos, vault, { mcpServerIds: null })).map((spec) => spec.name)).toEqual([
       'absolute',
       'disabled',
       'local-tools',
@@ -123,7 +123,7 @@ describe('enabledMcpServerSpecs', () => {
     });
     await repos.mcpServers.create({ name: 'good', command: process.execPath });
 
-    const specs = await enabledMcpServerSpecs(repos, vault);
+    const specs = await enabledMcpServerSpecs(repos, vault, { mcpServerIds: null });
     expect(specs.map((spec) => spec.name)).toEqual(['good']);
     const logged = errors.mock.calls.map((call) => call.join(' ')).join('\n');
     expect(logged).toContain('"broken"');
@@ -135,7 +135,7 @@ describe('enabledMcpServerSpecs', () => {
     const { repos, vault } = ctx.services;
     const name = 'a'.repeat(64);
     await repos.mcpServers.create({ name, command: process.execPath });
-    const [spec] = await enabledMcpServerSpecs(repos, vault);
+    const [spec] = await enabledMcpServerSpecs(repos, vault, { mcpServerIds: null });
     expect(spec?.name).toHaveLength(32);
   });
 });
@@ -157,5 +157,32 @@ describe('mcpServerSpec', () => {
       url: 'https://mcp.example.com/mcp',
     });
     expect(await mcpServerSpec(web, {})).toEqual({ name: 'remote', url: 'https://mcp.example.com/mcp', headers: {} });
+  });
+});
+
+describe('per-bot MCP server grants', () => {
+  it('attaches every enabled server when the grant is null or absent', async () => {
+    const { repos, vault } = ctx.services;
+    await repos.mcpServers.create({ name: 'one', command: process.execPath });
+    await repos.mcpServers.create({ name: 'two', command: process.execPath });
+
+    expect((await enabledMcpServerSpecs(repos, vault, { mcpServerIds: null })).map((spec) => spec.name)).toEqual([
+      'one',
+      'two',
+    ]);
+    expect(
+      (await enabledMcpServerSpecs(repos, vault, { mcpServerIds: undefined })).map((spec) => spec.name),
+    ).toEqual(['one', 'two']);
+  });
+
+  it('attaches only the allowlist, ignoring stale ids and disabled servers', async () => {
+    const { repos, vault } = ctx.services;
+    const one = await repos.mcpServers.create({ name: 'one', command: process.execPath });
+    await repos.mcpServers.create({ name: 'two', command: process.execPath });
+    await repos.mcpServers.create({ name: 'off', command: process.execPath, enabled: false });
+
+    const specs = await enabledMcpServerSpecs(repos, vault, { mcpServerIds: [one.id, 'deleted-server-id'] });
+    expect(specs.map((spec) => spec.name)).toEqual(['one']);
+    expect((await enabledMcpServerSpecs(repos, vault, { mcpServerIds: [] }))).toEqual([]);
   });
 });

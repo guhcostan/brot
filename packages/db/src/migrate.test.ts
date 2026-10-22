@@ -71,7 +71,7 @@ describe('migrate', () => {
     ]);
 
     const applied = await handle.client.execute('SELECT COUNT(*) AS count FROM __drizzle_migrations');
-    expect(Number(applied.rows[0]?.count)).toBe(17);
+    expect(Number(applied.rows[0]?.count)).toBe(18);
   });
 
   it('adds saved logins on a fresh database', async () => {
@@ -863,6 +863,46 @@ describe('migrate', () => {
     expect(workspace.botId).toBeUndefined();
     expect((await repos.memories.listWorkspace()).map((memory) => memory.id)).toEqual([workspace.id]);
     expect((await repos.memories.listByBot('bot_old')).map((memory) => memory.id)).toEqual(['mem_old']);
+  });
+
+  it('adds the bot MCP server grant in place', async () => {
+    const { handle } = await tempDb();
+    const journal = JSON.parse(await readFile(join(migrationsFolder, 'meta', '_journal.json'), 'utf8')) as {
+      entries: Array<{ tag: string; when: number }>;
+    };
+    const applied = journal.entries.slice(0, 17);
+    if (applied.length !== 17 || applied[16]?.tag !== '0016_concerned_meteorite') {
+      throw new Error('journal must start with the 0000 to 0016 migrations');
+    }
+
+    for (const entry of applied) {
+      await handle.client.executeMultiple(await readFile(join(migrationsFolder, `${entry.tag}.sql`), 'utf8'));
+    }
+    await handle.client.execute(
+      'CREATE TABLE "__drizzle_migrations" ("id" INTEGER PRIMARY KEY AUTOINCREMENT, "hash" text NOT NULL, "created_at" numeric)',
+    );
+    for (const entry of applied) {
+      await handle.client.execute({
+        sql: 'INSERT INTO "__drizzle_migrations" ("hash", "created_at") VALUES (?, ?)',
+        args: [entry.tag, entry.when],
+      });
+    }
+    const stamp = '2026-10-19T10:00:00.000Z';
+    await handle.client.execute({
+      sql: `INSERT INTO bots (id, name, job, instructions, engine, computer, pinned, archived, created_at, updated_at)
+            VALUES ('bot_old', 'Ada', 'Researcher', '', 'mock', 'none', 0, 0, ?, ?)`,
+      args: [stamp, stamp],
+    });
+
+    await migrate(handle.db);
+
+    expect(await columnNames(handle, 'bots')).toContain('mcp_server_ids');
+    const repos = createRepos(handle.db);
+    expect((await repos.bots.get('bot_old'))?.mcpServerIds).toBeUndefined();
+
+    const server = await repos.mcpServers.create({ name: 'tools', command: 'node' });
+    expect((await repos.bots.update('bot_old', { mcpServerIds: [server.id] }))?.mcpServerIds).toEqual([server.id]);
+    expect((await repos.bots.update('bot_old', { mcpServerIds: null }))?.mcpServerIds).toBeUndefined();
   });
 
   it('enables foreign keys on the connection', async () => {

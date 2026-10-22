@@ -85,6 +85,31 @@ describe('bots', () => {
     expect((await repos.bots.update(plain.id, { speakReplies: true }))?.speakReplies).toBe(true);
   });
 
+  it('stores the MCP server grant and drops ids of servers that no longer exist', async () => {
+    const first = await repos.mcpServers.create({ name: 'first', command: 'node' });
+    const second = await repos.mcpServers.create({ name: 'second', command: 'node' });
+
+    const all = await repos.bots.create({ name: 'Ada', job: 'x' });
+    expect(all.mcpServerIds).toBeUndefined();
+
+    const granted = await repos.bots.create({ name: 'Bo', job: 'x', mcpServerIds: [first.id, second.id] });
+    expect(granted.mcpServerIds).toEqual([first.id, second.id]);
+    expect((await repos.bots.get(granted.id))?.mcpServerIds).toEqual([first.id, second.id]);
+
+    const none = await repos.bots.update(granted.id, { mcpServerIds: [] });
+    expect(none?.mcpServerIds).toEqual([]);
+    expect((await repos.bots.update(granted.id, { mcpServerIds: [first.id] }))?.mcpServerIds).toEqual([first.id]);
+    expect((await repos.bots.update(granted.id, { mcpServerIds: null }))?.mcpServerIds).toBeUndefined();
+
+    const stale = await repos.bots.create({ name: 'Cy', job: 'x', mcpServerIds: [first.id, second.id] });
+    expect(await repos.mcpServers.remove(second.id)).toBe(true);
+    expect((await repos.bots.get(stale.id))?.mcpServerIds).toEqual([first.id]);
+    expect((await repos.bots.list()).find((bot) => bot.id === stale.id)?.mcpServerIds).toEqual([first.id]);
+
+    expect(await repos.mcpServers.remove(first.id)).toBe(true);
+    expect((await repos.bots.get(stale.id))?.mcpServerIds).toEqual([]);
+  });
+
   it('stores a host browser flag and leaves it unset when false', async () => {
     const plain = await repos.bots.create({ name: 'Ada', job: 'x' });
     expect(plain.browser).toBeUndefined();

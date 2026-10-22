@@ -1,4 +1,4 @@
-import { and, asc, eq } from 'drizzle-orm';
+import { and, asc, eq, sql } from 'drizzle-orm';
 import { CreateMemory, UpdateMemory, type CreateMemory as CreateMemoryBody, type Memory, type MemoryScope } from '@brot/protocol';
 import type { Db } from '../client';
 import { memories } from '../schema';
@@ -35,7 +35,7 @@ export function createMemoryRepo(db: Db) {
         .select()
         .from(memories)
         .where(and(eq(memories.botId, botId), eq(memories.scope, 'bot')))
-        .orderBy(asc(memories.createdAt), asc(memories.id));
+        .orderBy(asc(memories.createdAt), asc(sql`rowid`));
       return rows.map(toMemory);
     },
 
@@ -45,7 +45,7 @@ export function createMemoryRepo(db: Db) {
         .select()
         .from(memories)
         .where(eq(memories.scope, 'workspace'))
-        .orderBy(asc(memories.createdAt), asc(memories.id));
+        .orderBy(asc(memories.createdAt), asc(sql`rowid`));
       return rows.map(toMemory);
     },
 

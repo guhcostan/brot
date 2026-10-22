@@ -251,6 +251,15 @@ describe('entity schemas', () => {
     expect(Bot.parse(bot).speakReplies).toBeUndefined();
   });
 
+  it('round-trips the MCP server grant, including null and an empty allowlist', () => {
+    expect(Bot.parse(bot).mcpServerIds).toBeUndefined();
+    expect(roundTrip(Bot, { ...bot, mcpServerIds: ['mcp_1', 'mcp_2'] })).toMatchObject({ mcpServerIds: ['mcp_1', 'mcp_2'] });
+    expect(roundTrip(Bot, { ...bot, mcpServerIds: [] })).toMatchObject({ mcpServerIds: [] });
+    expect(roundTrip(Bot, { ...bot, mcpServerIds: null })).toMatchObject({ mcpServerIds: null });
+    expect(() => Bot.parse({ ...bot, mcpServerIds: Array.from({ length: 51 }, (_, i) => `mcp_${i}`) })).toThrow();
+    expect(() => Bot.parse({ ...bot, mcpServerIds: [1] })).toThrow();
+  });
+
   it('round-trips a bot grouped in a team', () => {
     const grouped = { ...bot, teamId: 'team_1' };
     expect(roundTrip(Bot, grouped)).toEqual(grouped);

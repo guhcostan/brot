@@ -1323,3 +1323,59 @@ describe('attachments in the run input', () => {
     expect(input).not.toContain('PDFDATA');
   });
 });
+
+describe('per-bot MCP server grants', () => {
+  it('attaches only the allowlisted servers, ignoring stale ids, next to the Brot server', async () => {
+    const engine = fakeEngine(replies);
+    const { mcp } = fakeMcp();
+    const ctx = await contextWith({ engines: createEngineRegistry([engine.driver]), mcp: () => mcp });
+    const granted = await ctx.services.repos.mcpServers.create({ name: 'granted', command: process.execPath });
+    await ctx.services.repos.mcpServers.create({ name: 'other', command: process.execPath });
+    const { bot, threadId } = await botAndThread(ctx, { computer: 'none' });
+    await ctx.services.repos.bots.update(bot.id, { mcpServerIds: [granted.id, 'deleted-server-id'] });
+
+    await runToEnd(ctx, threadId);
+
+    expect(engine.contexts[0]?.mcpServers?.map((server) => server.name)).toEqual(['brot', 'granted']);
+  });
+
+  it('attaches no user server for an empty allowlist, but keeps Brot’s own server', async () => {
+    const engine = fakeEngine(replies);
+    const { mcp } = fakeMcp();
+    const ctx = await contextWith({ engines: createEngineRegistry([engine.driver]), mcp: () => mcp });
+    await ctx.services.repos.mcpServers.create({ name: 'unused', command: process.execPath });
+    const { bot, threadId } = await botAndThread(ctx, { computer: 'none' });
+    await ctx.services.repos.bots.update(bot.id, { mcpServerIds: [] });
+
+    await runToEnd(ctx, threadId);
+
+    expect(engine.contexts[0]?.mcpServers?.map((server) => server.name)).toEqual(['brot']);
+  });
+
+  it('ignores a grant that names only servers that no longer exist', async () => {
+    const engine = fakeEngine(replies);
+    const { mcp } = fakeMcp();
+    const ctx = await contextWith({ engines: createEngineRegistry([engine.driver]), mcp: () => mcp });
+    await ctx.services.repos.mcpServers.create({ name: 'still-there', command: process.execPath });
+    const { bot, threadId } = await botAndThread(ctx, { computer: 'none' });
+    await ctx.services.repos.bots.update(bot.id, { mcpServerIds: ['deleted-server-id'] });
+    const { terminal } = await runToEnd(ctx, threadId);
+
+    expect(terminal.type).toBe('run.completed');
+    expect(engine.contexts[0]?.mcpServers?.map((server) => server.name)).toEqual(['brot']);
+  });
+
+  it('keeps every enabled server for a bot whose grant is null', async () => {
+    const engine = fakeEngine(replies);
+    const { mcp } = fakeMcp();
+    const ctx = await contextWith({ engines: createEngineRegistry([engine.driver]), mcp: () => mcp });
+    await ctx.services.repos.mcpServers.create({ name: 'one', command: process.execPath });
+    await ctx.services.repos.mcpServers.create({ name: 'two', command: process.execPath });
+    const { bot, threadId } = await botAndThread(ctx, { computer: 'none' });
+    await ctx.services.repos.bots.update(bot.id, { mcpServerIds: null });
+
+    await runToEnd(ctx, threadId);
+
+    expect(engine.contexts[0]?.mcpServers?.map((server) => server.name)).toEqual(['brot', 'one', 'two']);
+  });
+});

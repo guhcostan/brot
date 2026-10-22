@@ -1,7 +1,7 @@
-import { asc, eq } from 'drizzle-orm';
+import { asc, eq, inArray } from 'drizzle-orm';
 import { CreateBot, UpdateBot, type Bot, type CreateBotInput } from '@brot/protocol';
 import type { Db } from '../client';
-import { bots } from '../schema';
+import { bots, mcpServers } from '../schema';
 import { newId, nowIso, required } from './common';
 
 type BotRow = typeof bots.$inferSelect;
@@ -23,6 +23,7 @@ export function toBot(row: BotRow): Bot {
     ...(row.notifications ? {} : { notifications: false }),
     ...(row.speakReplies ? { speakReplies: true } : {}),
     ...(row.approvalMode === 'ask' ? {} : { approvalMode: row.approvalMode }),
+    ...(row.mcpServerIds === null ? {} : { mcpServerIds: row.mcpServerIds }),
     egress: row.egress,
     teamBudgetUsd: row.teamBudgetUsd ?? undefined,
     pinned: row.pinned,
@@ -33,6 +34,29 @@ export function toBot(row: BotRow): Bot {
 }
 
 export function createBotRepo(db: Db) {
+  /** The user MCP servers that still exist among `ids`: a grant keeps only these. */
+  async function knownMcpServerIds(ids: readonly string[]): Promise<Set<string>> {
+    const unique = [...new Set(ids)];
+    if (unique.length === 0) return new Set();
+    const rows = await db
+      .select({ id: mcpServers.id })
+      .from(mcpServers)
+      .where(inArray(mcpServers.id, unique));
+    return new Set(rows.map((row) => row.id));
+  }
+
+  /** Drops stale ids from a bot's grant. A deleted server must not stay in the allowlist. */
+  function pruneGrant(bot: Bot, known: ReadonlySet<string>): Bot {
+    if (bot.mcpServerIds === undefined || bot.mcpServerIds === null) return bot;
+    return { ...bot, mcpServerIds: bot.mcpServerIds.filter((id) => known.has(id)) };
+  }
+
+  async function mapBot(row: BotRow): Promise<Bot> {
+    const bot = toBot(row);
+    if (bot.mcpServerIds === undefined || bot.mcpServerIds === null) return bot;
+    return pruneGrant(bot, await knownMcpServerIds(bot.mcpServerIds));
+  }
+
   return {
     async list(options: { includeArchived?: boolean } = {}): Promise<Bot[]> {
       const rows = await db
@@ -40,12 +64,14 @@ export function createBotRepo(db: Db) {
         .from(bots)
         .where(options.includeArchived ? undefined : eq(bots.archived, false))
         .orderBy(asc(bots.createdAt));
-      return rows.map(toBot);
+      const mapped = rows.map(toBot);
+      const known = await knownMcpServerIds(mapped.flatMap((bot) => bot.mcpServerIds ?? []));
+      return mapped.map((bot) => pruneGrant(bot, known));
     },
 
     async get(id: string): Promise<Bot | undefined> {
       const [row] = await db.select().from(bots).where(eq(bots.id, id)).limit(1);
-      return row ? toBot(row) : undefined;
+      return row ? mapBot(row) : undefined;
     },
 
     async create(input: CreateBotInput): Promise<Bot> {
@@ -62,7 +88,7 @@ export function createBotRepo(db: Db) {
           updatedAt: timestamp,
         })
         .returning();
-      return toBot(required(row, 'bot'));
+      return mapBot(required(row, 'bot'));
     },
 
     async update(id: string, input: UpdateBot): Promise<Bot | undefined> {
@@ -72,7 +98,7 @@ export function createBotRepo(db: Db) {
         .set({ ...patch, updatedAt: nowIso() })
         .where(eq(bots.id, id))
         .returning();
-      return rows[0] ? toBot(rows[0]) : undefined;
+      return rows[0] ? mapBot(rows[0]) : undefined;
     },
 
     /** Deletes the bot. Threads, messages, runs, approvals, memories, routines, and policies cascade. */

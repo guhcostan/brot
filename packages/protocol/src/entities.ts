@@ -53,6 +53,13 @@ export type BrowserProfile = z.infer<typeof BrowserProfile>;
 export const ApprovalMode = z.enum(['ask', 'edits']);
 export type ApprovalMode = z.infer<typeof ApprovalMode>;
 
+/**
+ * The user MCP servers a bot may use: an allowlist of ids. `null` or absent means every enabled server
+ * attaches; an empty array means none. A server that no longer exists is ignored.
+ */
+export const McpServerIds = z.array(z.string().min(1)).max(50);
+export type McpServerIds = z.infer<typeof McpServerIds>;
+
 export const Bot = z.object({
   id: z.string(),
   name: z.string(),
@@ -90,6 +97,11 @@ export const Bot = z.object({
    * server's voice settings, so a bot needs no voice of its own.
    */
   speakReplies: z.boolean().optional(),
+  /**
+   * The user MCP servers this bot's runs may attach: an allowlist of ids. Absent or `null` means every
+   * enabled server; an empty array means none. Brot's own MCP server always attaches. Stale ids are ignored.
+   */
+  mcpServerIds: McpServerIds.nullable().optional(),
   /**
    * How the bot handles approvals. Absent means `ask`. In `edits` mode the broker auto-allows shell, file
    * writes and other write actions; send, publish, delete, purchase and permission changes always ask.

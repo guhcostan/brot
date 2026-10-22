@@ -112,6 +112,20 @@ describe('request schemas', () => {
     expect(() => CreateBrowserProfile.parse({ name: 'two\nlines' })).toThrow(/single line/);
   });
 
+  it('leaves the MCP server grant absent by default and accepts an allowlist or null', () => {
+    expect(CreateBot.parse({ name: 'Ada', job: 'Researcher' })).not.toHaveProperty('mcpServerIds');
+    expect(CreateBot.parse({ name: 'Ada', job: 'Researcher', mcpServerIds: ['mcp_1'] }).mcpServerIds).toEqual(['mcp_1']);
+    expect(CreateBot.parse({ name: 'Ada', job: 'Researcher', mcpServerIds: [] }).mcpServerIds).toEqual([]);
+    expect(CreateBot.parse({ name: 'Ada', job: 'Researcher', mcpServerIds: null }).mcpServerIds).toBeNull();
+    expect(UpdateBot.parse({ mcpServerIds: ['mcp_1'] })).toEqual({ mcpServerIds: ['mcp_1'] });
+    expect(UpdateBot.parse({ mcpServerIds: null })).toEqual({ mcpServerIds: null });
+    expect(UpdateBot.parse({ mcpServerIds: [] })).toEqual({ mcpServerIds: [] });
+    expect(() =>
+      UpdateBot.parse({ mcpServerIds: Array.from({ length: 51 }, (_, i) => `mcp_${i}`) }),
+    ).toThrow();
+    expect(() => UpdateBot.parse({ mcpServerIds: [''] })).toThrow();
+  });
+
   it('defaults spoken replies off and lets CreateBot or UpdateBot turn them on', () => {
     expect(CreateBot.parse({ name: 'Ada', job: 'Researcher' }).speakReplies).toBe(false);
     expect(CreateBot.parse({ name: 'Ada', job: 'Researcher', speakReplies: true }).speakReplies).toBe(true);

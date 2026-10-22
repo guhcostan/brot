@@ -7,6 +7,7 @@ import {
   HttpMcpServer,
   StdioMcpServer,
   secretNameOf,
+  type Bot,
   type McpServer,
   type McpServerSpec,
 } from '@brot/protocol';
@@ -100,16 +101,22 @@ export async function mcpServerSpec(server: McpServer, env: Record<string, strin
 }
 
 /**
- * Every enabled user MCP server as an engine spec, in one list, with secret env values resolved for this run.
- * A stored row that cannot become a valid spec is skipped rather than failing the run. The log names the
- * server, and the command when that is the problem; it never holds an env value.
+ * Every enabled user MCP server this bot may use, as engine specs, with secret env values resolved for this run.
+ * `bot.mcpServerIds` is the grant: absent or null attaches every enabled server, an array is an allowlist
+ * (empty means none) and ids that name no server are ignored. A stored row that cannot become a valid spec is
+ * skipped rather than failing the run. The log names the server, and the command when that is the problem; it
+ * never holds an env value.
  */
 export async function enabledMcpServerSpecs(
   repos: Pick<Repos, 'mcpServers'>,
   vault: Pick<Vault, 'resolveRef'>,
+  bot: Pick<Bot, 'mcpServerIds'>,
 ): Promise<McpServerSpec[]> {
+  const grant = bot.mcpServerIds;
+  const allow = grant === undefined || grant === null ? undefined : new Set(grant);
   const specs: McpServerSpec[] = [];
   for (const server of await repos.mcpServers.listEnabled()) {
+    if (allow !== undefined && !allow.has(server.id)) continue;
     try {
       specs.push(await mcpServerSpec(server, await resolveEnv(server.env, vault)));
     } catch (error) {
