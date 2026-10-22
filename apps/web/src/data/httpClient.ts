@@ -21,6 +21,7 @@ import {
   Memory,
   BrowserTakeover as BrowserTakeoverSchema,
   CreateMcpServer,
+  ImportSkill,
   ImportTeamPackage,
   MarkNotificationsRead,
   McpServer,
@@ -61,6 +62,7 @@ import {
   DESKTOP_WIDTH,
   type CanonicalEventType,
 } from '@brot/protocol';
+import { skillFileFallbackFromId } from '../skillFileName';
 import {
   ScreenUnavailable,
   type BotEvent,
@@ -406,6 +408,20 @@ export function createHttpClient({
 
     async deleteSkill(skillId) {
       await request(`/api/skills/${encodeURIComponent(skillId)}`, { method: 'DELETE' });
+    },
+
+    async exportSkill(skillId) {
+      const response = await request(`/api/skills/${encodeURIComponent(skillId)}/export`, { headers: { Accept: 'text/markdown' } });
+      const content = await response.text();
+      const fallback = skillFileFallbackFromId(skillId);
+      return { content, filename: downloadName(response.headers.get('content-disposition')) ?? fallback };
+    },
+
+    async importSkill(input) {
+      if (input.content.trim() === '') throw new Error('A skill file is required');
+      const body = ImportSkill.parse({ content: input.content, ...(input.botId === undefined ? {} : { botId: input.botId }) });
+      const response = await write('POST', '/api/skills/import', body);
+      return Skill.parse(await response.json());
     },
 
     async uploadAttachment(threadId, file) {

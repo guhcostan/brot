@@ -148,6 +148,15 @@ export function ContextPanel({
     },
     [client, loadSkills],
   );
+  const exportSkill = useCallback((skillId: string) => client.exportSkill(skillId), [client]);
+  const importSkill = useCallback(
+    async (input: { content: string; botId?: string }) => {
+      const created = await client.importSkill(input);
+      await loadSkills();
+      return created;
+    },
+    [client, loadSkills],
+  );
 
   return (
     <aside className={cx('context-panel flex min-h-0 flex-col bg-surface md:border-l md:border-line', className)}>
@@ -223,6 +232,8 @@ export function ContextPanel({
               onCreate={createSkill}
               onUpdate={updateSkill}
               onDelete={deleteSkill}
+              onExport={exportSkill}
+              onImport={importSkill}
             />
           ) : plainTab !== null ? (
             <TabBody tab={plainTab} name={subject.kind === 'bot' ? subject.bot.name : subject.room.thread.title} thread={thread} />

@@ -1,9 +1,11 @@
 import { useId, useState, type FormEvent, type ReactElement } from 'react';
 import { Badge, Button, Card, EmptyState, Input, Skeleton } from '@brot/ui';
-import type { CreateSkill, Skill, UpdateSkill } from '../data/client';
+import type { CreateSkill, Skill, SkillExport, UpdateSkill } from '../data/client';
+import { downloadTextFile } from '../download';
 import { t } from '../i18n';
 import { Dialog, ConfirmDialog } from './Dialog';
-import { Pencil, Plus, Trash } from './icons';
+import { Download, Pencil, Plus, Trash } from './icons';
+import { SkillImportDialog } from './SkillImportDialog';
 
 export interface SkillsTabProps {
   botId: string;
@@ -14,25 +16,63 @@ export interface SkillsTabProps {
   onCreate: (input: CreateSkill) => Promise<unknown>;
   onUpdate: (skillId: string, patch: UpdateSkill) => Promise<unknown>;
   onDelete: (skillId: string) => Promise<unknown>;
+  /** Downloads the skill's SKILL.md. */
+  onExport: (skillId: string) => Promise<SkillExport>;
+  /** Imports a SKILL.md for this bot (default) or shared. */
+  onImport: (input: { content: string; botId?: string }) => Promise<Skill>;
 }
 
 /**
  * Reusable procedures: the bot's own skills plus the shared ones. A skill's name, description and
  * body are added to the run prompt within a character budget, so the editor says so.
  */
-export function SkillsTab({ botId, botName, skills, error, onCreate, onUpdate, onDelete }: SkillsTabProps): ReactElement {
+export function SkillsTab({ botId, botName, skills, error, onCreate, onUpdate, onDelete, onExport, onImport }: SkillsTabProps): ReactElement {
   const [dialog, setDialog] = useState<{ skill?: Skill } | null>(null);
   const [deleting, setDeleting] = useState<Skill | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importedName, setImportedName] = useState<string | null>(null);
+  const [exporting, setExporting] = useState<string | null>(null);
+  const [fileError, setFileError] = useState<string | null>(null);
+
+  const exportSkill = async (skill: Skill) => {
+    setExporting(skill.id);
+    setFileError(null);
+    try {
+      const file = await onExport(skill.id);
+      if (!downloadTextFile(file.filename, file.content, 'text/markdown;charset=utf-8')) setFileError(t('skills.downloadUnavailable'));
+    } catch (cause) {
+      setFileError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setExporting(null);
+    }
+  };
+
 
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center justify-between gap-2">
         <h3 className="m-0 text-sm font-medium text-ink-2">{t('skills.count', { count: String(skills?.length ?? 0) })}</h3>
-        <Button variant="secondary" size="sm" onClick={() => setDialog({})}>
-          <Plus size={14} />
-          {t('skills.new')}
-        </Button>
+        <div className="flex items-center gap-1.5">
+          <Button variant="secondary" size="sm" onClick={() => setImporting(true)}>
+            {t('skills.import')}
+          </Button>
+          <Button variant="secondary" size="sm" onClick={() => setDialog({})}>
+            <Plus size={14} />
+            {t('skills.new')}
+          </Button>
+        </div>
       </div>
+
+      {importedName !== null ? (
+        <p role="status" className="m-0 text-sm text-ink-2">
+          {t('skills.imported', { name: importedName })}
+        </p>
+      ) : null}
+      {fileError !== null ? (
+        <p role="alert" className="m-0 text-sm text-attention-text">
+          {t('skills.exportError', { message: fileError })}
+        </p>
+      ) : null}
 
       {error ? (
         <p role="alert" className="m-0 text-sm text-attention-text">
@@ -59,6 +99,17 @@ export function SkillsTab({ botId, botName, skills, error, onCreate, onUpdate, o
                 <p className="m-0 line-clamp-2 text-xs text-ink-2">{skill.description}</p>
                 <p className="m-0 line-clamp-2 font-mono text-xs whitespace-pre-wrap text-ink-3">{skill.body}</p>
                 <div className="flex justify-end gap-1">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={exporting === skill.id}
+                    onClick={() => void exportSkill(skill)}
+                    aria-label={t('skills.exportNamed', { name: skill.name })}
+                    title={t('skills.exportNamed', { name: skill.name })}
+                    className="text-ink-3"
+                  >
+                    <Download size={14} />
+                  </Button>
                   <Button
                     variant="ghost"
                     size="sm"
@@ -90,6 +141,17 @@ export function SkillsTab({ botId, botName, skills, error, onCreate, onUpdate, o
           <SkillForm botId={botId} skill={dialog.skill} onClose={() => setDialog(null)} onCreate={onCreate} onUpdate={onUpdate} />
         ) : null}
       </Dialog>
+      <SkillImportDialog
+        open={importing}
+        botId={botId}
+        botName={botName}
+        onClose={() => setImporting(false)}
+        onImport={async (input) => {
+          const created = await onImport(input);
+          setImportedName(created.name);
+          return created;
+        }}
+      />
       <ConfirmDialog
         open={deleting !== null}
         title={t('skills.deleteTitle', { name: deleting?.name ?? '' })}

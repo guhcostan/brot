@@ -40,6 +40,7 @@ import {
   DESKTOP_WIDTH,
   MAX_ROOM_BOTS,
   MIN_ROOM_BOTS,
+  ImportSkill,
   McpServer as McpServerSchema,
   SearchQuery,
   TEAM_PACKAGE_FORMAT,
@@ -55,7 +56,9 @@ import {
   UpdateThread,
   attachmentKindFor,
   defaultEgressPolicy,
+  formatSkillFile,
   formatTeamPackage,
+  parseSkillFile,
   parseTeamPackage,
   sanitizeAttachmentName,
 } from '@brot/protocol';
@@ -101,6 +104,7 @@ import {
   dmThreadOf,
 } from './fixtures';
 import { findMentions } from '../mentions';
+import { skillFileFilename } from '../skillFileName';
 import { buildSearchSnippet } from '../search';
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -977,6 +981,33 @@ export function createMockClient(): BrotClient {
         name: data.name,
         description: data.description,
         body: data.body,
+        version: 1,
+        createdAt: at,
+        updatedAt: at,
+      };
+      skills.set(created.id, created);
+      return structuredClone(created);
+    },
+
+    async exportSkill(skillId) {
+      const skill = skills.get(skillId);
+      if (!skill) throw new Error(`Unknown skill: ${skillId}`);
+      return { content: formatSkillFile(skill), filename: skillFileFilename(skill.name) };
+    },
+
+    async importSkill(input) {
+      if (input.content.trim() === '') throw new Error('A skill file is required');
+      const body = ImportSkill.parse(input);
+      const parsed = parseSkillFile(body.content, body.name === undefined ? {} : { name: body.name });
+      if (!parsed.ok) throw new Error(`Invalid skill file: ${parsed.issues[0]?.message ?? 'invalid file'}`);
+      if (body.botId !== undefined && !bots.has(body.botId)) throw new Error(`Unknown bot: ${body.botId}`);
+      const at = now();
+      const created: Skill = {
+        id: nextId('skill'),
+        ...(body.botId === undefined ? {} : { botId: body.botId }),
+        name: parsed.skill.name,
+        description: parsed.skill.description,
+        body: parsed.skill.body,
         version: 1,
         createdAt: at,
         updatedAt: at,

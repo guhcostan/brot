@@ -161,6 +161,12 @@ export interface NotificationFilter {
   limit?: number;
 }
 
+/** A downloaded skill: its SKILL.md text and the filename the server suggested. */
+export interface SkillExport {
+  content: string;
+  filename: string;
+}
+
 /** A downloaded team package: its Markdown and the filename the server suggested. */
 export interface TeamPackageExport {
   content: string;
@@ -282,6 +288,10 @@ export interface BrotClient {
   createSkill(input: CreateSkill): Promise<Skill>;
   updateSkill(skillId: string, patch: UpdateSkill): Promise<Skill>;
   deleteSkill(skillId: string): Promise<void>;
+  /** Downloads the skill as a SKILL.md file. */
+  exportSkill(skillId: string): Promise<SkillExport>;
+  /** Imports a SKILL.md file; without a botId the skill is shared. */
+  importSkill(input: { content: string; botId?: string }): Promise<Skill>;
 
   /** Uploads one file into a conversation. The bytes stay on the server; only metadata comes back. */
   uploadAttachment(threadId: string, file: File): Promise<Attachment>;
