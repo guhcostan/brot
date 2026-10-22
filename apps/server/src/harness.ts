@@ -21,6 +21,7 @@ import type { ComputerProvider } from './computers/types';
 import type { ServerMode } from './config';
 import type { LlmRelay, ResolvedRoute, RunUsage } from './llm';
 import type { BrotMcp } from './mcp/types';
+import { selectForPrompt } from './memory/recall';
 import type { ChainLedger } from './rooms/chains';
 import { buildTurn, roomFor } from './rooms/context';
 import type { BotRunOutcome, BotRunRequest } from './team/types';
@@ -282,7 +283,7 @@ export function createHarness(deps: HarnessDeps): Harness {
         bot,
         history: turn.history,
         input: turn.input,
-        memories: await repos.memories.listByBot(bot.id),
+        memories: selectForPrompt(await repos.memories.listByBot(bot.id), turn.input),
         skills: await repos.skills.listForBot(bot.id),
         signal: state.controller.signal,
         requestTool: (req) => requestTool(state, req),

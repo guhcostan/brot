@@ -534,6 +534,27 @@ describe('contained runs: team brief', () => {
   });
 });
 
+describe('contained runs: memory recall', () => {
+  it('passes only the recall budget, ranking the memory relevant to the run input first', async () => {
+    const engine = fakeEngine(replies);
+    const ctx = await contextWith({ engines: createEngineRegistry([engine.driver]) });
+    const { bot, threadId } = await botAndThread(ctx, { computer: 'none' });
+    const relevant = await ctx.services.repos.memories.create(bot.id, {
+      kind: 'fact',
+      content: 'The launch code is 4321',
+    });
+    for (let index = 0; index < 12; index += 1) {
+      await ctx.services.repos.memories.create(bot.id, { kind: 'fact', content: `Stored fact number ${index}` });
+    }
+
+    await runToEnd(ctx, threadId, 'what is the launch code');
+
+    const recalled = engine.contexts[0]?.memories ?? [];
+    expect(recalled).toHaveLength(12);
+    expect(recalled[0]?.id).toBe(relevant.id);
+  });
+});
+
 describe('services shutdown', () => {
   it('closes engines and computer providers once, however often close is called', async () => {
     const engine = fakeEngine(replies);

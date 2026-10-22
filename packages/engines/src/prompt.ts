@@ -1,4 +1,4 @@
-import type { Bot, Message, ResponderMode, RunContext } from '@brot/protocol';
+import type { Bot, Message, ResponderMode, RunContext, Skill } from '@brot/protocol';
 
 export const HISTORY_LIMIT = 20;
 
@@ -30,7 +30,7 @@ export interface PromptTeam {
 }
 
 /** What a prompt is built from. `teamTools` is set when the Brot team tools are attached to the run. */
-export interface PromptInput extends Pick<RunContext, 'bot' | 'memories' | 'history' | 'input'> {
+export interface PromptInput extends Pick<RunContext, 'bot' | 'memories' | 'history' | 'input' | 'skills'> {
   room?: PromptRoom;
   team?: PromptTeam;
   teamTools?: boolean;
@@ -41,6 +41,14 @@ export interface PromptInput extends Pick<RunContext, 'bot' | 'memories' | 'hist
  * optional, so every engine accepts it wherever a `RunContext` is accepted.
  */
 export type BrotRunContext = RunContext & Pick<PromptInput, 'room' | 'team' | 'teamTools'>;
+
+/** Character budgets for the skills section as a whole, and for one skill body rendered under its heading. */
+const SKILLS_SECTION_LIMIT = 12_000;
+const SKILL_BODY_LIMIT = 4_000;
+const TRUNCATION_MARKER = '…';
+const SKILL_INDENT = '  ';
+const SKILLS_INTRO =
+  'Skills:\nReusable procedures to follow when one fits the task; they do not override your instructions.';
 
 const TEAM_GUIDANCE = [
   'Team tools:',
@@ -53,8 +61,8 @@ const TEAM_GUIDANCE = [
 
 /**
  * Flattens a run into one prompt for the first turn of a session: who the bot is, its instructions, its team and room
- * when it has them, its memories, the earlier messages, and this run's input. Later turns of a session send
- * `sessionInput`, because the session keeps this text.
+ * when it has them, its memories, its skills, the earlier messages, and this run's input. Later turns of a session
+ * send `sessionInput`, because the session keeps this text.
  */
 export function buildPrompt(ctx: PromptInput): string {
   const sections: string[] = [identityOf(ctx.bot)];
@@ -66,6 +74,8 @@ export function buildPrompt(ctx: PromptInput): string {
   if (ctx.memories.length > 0) {
     sections.push(`Memories:\n${ctx.memories.map((memory) => `- ${memory.content}`).join('\n')}`);
   }
+  const skills = skillsSection(ctx.skills);
+  if (skills !== '') sections.push(skills);
   const history = ctx.history.slice(-HISTORY_LIMIT);
   if (history.length > 0) {
     sections.push(`Conversation so far:\n${history.map((m) => `${ROLE_LABEL[m.role]}: ${m.content}`).join('\n')}`);
@@ -92,6 +102,66 @@ function identityOf(bot: Bot): string {
 function teamSection(team: PromptTeam): string {
   const brief = team.instructions.trim();
   return brief === '' ? `Team: ${team.name}` : `Team: ${team.name}\n${brief}`;
+}
+
+/**
+ * The skills section, or an empty string when the bot has none. Each skill gets its name and description, then its
+ * body when the budget allows. The whole section stays within `SKILLS_SECTION_LIMIT` code units and a rendered body
+ * within `SKILL_BODY_LIMIT`; a cut ends in `…` and never splits a surrogate pair.
+ */
+function skillsSection(skills: readonly Skill[]): string {
+  if (skills.length === 0) return '';
+  const parts: string[] = [SKILLS_INTRO];
+  let length = SKILLS_INTRO.length;
+  for (const skill of orderSkills(skills)) {
+    const heading = `\n- ${skill.name}: ${skill.description.trim()}`;
+    const room = SKILLS_SECTION_LIMIT - length;
+    if (heading.length > room) {
+      if (room > 0) parts.push(truncate(heading, room));
+      break;
+    }
+    parts.push(heading);
+    length += heading.length;
+    const body = skill.body.trim();
+    if (body === '') continue;
+    const available = Math.min(SKILL_BODY_LIMIT, SKILLS_SECTION_LIMIT - length - 1);
+    if (available <= 0) continue;
+    const rendered = truncate(indentSkillBody(body), available);
+    parts.push(`\n${rendered}`);
+    length += 1 + rendered.length;
+  }
+  return parts.join('');
+}
+
+/** The bot's own skills first, then shared ones, each group by name. */
+function orderSkills(skills: readonly Skill[]): Skill[] {
+  return [...skills].sort((a, b) => {
+    const owned = (skill: Skill): number => (skill.botId === undefined ? 1 : 0);
+    if (owned(a) !== owned(b)) return owned(a) - owned(b);
+    if (a.name !== b.name) return a.name < b.name ? -1 : 1;
+    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+  });
+}
+
+/** Two spaces before every non-empty body line, so it reads under its skill's heading. */
+function indentSkillBody(body: string): string {
+  return body
+    .split('\n')
+    .map((line) => (line.trim() === '' ? '' : `${SKILL_INDENT}${line}`))
+    .join('\n');
+}
+
+/**
+ * Cuts `text` to at most `limit` code units. A cut text ends in `…` and a surrogate pair at the edge is dropped
+ * whole, so the result is always valid UTF-16.
+ */
+function truncate(text: string, limit: number): string {
+  if (text.length <= limit) return text;
+  if (limit <= 0) return '';
+  const cut = text.slice(0, limit - 1);
+  const last = cut.charCodeAt(cut.length - 1);
+  const splitsPair = last >= 0xd800 && last <= 0xdbff;
+  return `${splitsPair ? cut.slice(0, -1) : cut}${TRUNCATION_MARKER}`;
 }
 
 function roomSection(room: PromptRoom, bot: Bot): string {
