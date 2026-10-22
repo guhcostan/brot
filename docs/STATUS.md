@@ -176,6 +176,20 @@ mapped in `docs/MAUSBOT-PARITY.md` (34 bots / 7 teams, 33 bots with a browser an
 - Suite: 1653 tests (149 files), typecheck 12/12, lint clean. Verified live: attachment text in a run
   input; notifications for finished/failed runs, per-bot suppression and mark-all-read.
 
+## Wave 13: notification inbox, usage ledger (2026-10-22)
+
+- **Notification inbox (web).** Sidebar bell with an unread badge, a Notifications pane (newest first,
+  bot avatar, kind badge, unread dot, relative time, mark all read, delete, click opens the thread), a
+  20 s unread poll while visible and on focus, native desktop banners for newly seen unread records while
+  the window is hidden (explicit enable in Settings, one banner per id, click opens the thread), and a
+  per-bot notifications toggle in the bot dialog. en/pt-BR/es.
+- **Usage ledger (server).** GET /api/usage aggregates runs (no new table): totals with
+  completed/failed/cancelled counts, token and cost sums, bot filter, grouping by UTC day or bot, default
+  last 30 days. GET /api/usage/export.csv streams RFC 4180 CSV with a UTF-8 BOM, CRLF, bot names and
+  spreadsheet formula-injection neutralization. Live totals: 8 runs, 333,569 input / 3,291 output tokens,
+  US$ 0.052. The Usage dashboard page lands next.
+- Suite: 1709 tests (158 files), typecheck 12/12, lint clean.
+
 ## Next
 
 1. Re-run the eval suite on a live model once OpenCode Go has quota (`apps/evals`, `--base` to the server), including B8 and C; the 2026-10-20 results predate the read auto-allow and the fixes above.
