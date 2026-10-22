@@ -145,6 +145,22 @@ mapped in `docs/MAUSBOT-PARITY.md` (34 bots / 7 teams, 33 bots with a browser an
 - Suite: 1527 tests (135 files), typecheck 12/12, lint clean. Web surfaces for skills/memory and the MCP
   settings panel are the next wave.
 
+## Wave 11: memory and skills UI, attachments (2026-10-22)
+
+- **Memory and Skills tabs.** The bot context panel's Memory tab now lists the bot's memories with kind
+  badges, dates, create/edit dialogs and delete with a confirmation; the Skills tab lists bot and shared
+  skills with a "Shared" badge, a markdown editor that states the run-prompt budget, and a warning that
+  editing a shared skill changes every bot. en/pt-BR/es.
+- **Attachments backend.** Multipart upload (20 MiB, images + text/JSON + PDF/ZIP), bytes in
+  `<BROT_HOME>/attachments/<id>` at 0600 with atomic writes, download with inline disposition and nosniff,
+  delete refused for linked attachments, `attachmentIds` on messages with same-thread validation, and
+  attachments returned by every message read. The run input gets an Attachments section: text/JSON inlined
+  up to 8k per file and 24k total, images noted (no vision yet), no filesystem paths. A boot sweep removes
+  files whose rows are gone, so deleting a bot or thread leaves no orphan bytes. Migration 0009.
+  The composer/gallery UI comes next wave.
+- Suite: 1600 tests (142 files), typecheck 12/12, lint clean. Verified live: an attached report's text
+  reached a mock run input; the boot sweep removed the orphan left by deleting the test bot.
+
 ## Next
 
 1. Re-run the eval suite on a live model once OpenCode Go has quota (`apps/evals`, `--base` to the server), including B8 and C; the 2026-10-20 results predate the read auto-allow and the fixes above.

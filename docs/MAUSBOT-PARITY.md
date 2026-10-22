@@ -78,10 +78,10 @@ Legend: ✅ parity or better · 🟡 partial · ❌ absent · 🎯 current wave.
 | Routines: cron/weekday with timezone, receipts, recovery, calendar | ✅ | ✅ runs, receipts, catch-up, timezone, routines page; calendar next | W3 done |
 | Webhook triggers | ✅ | 🟡 receiver exists, no signed secret UX | W6 |
 | App-event triggers | ✅ | ❌ | W6 |
-| Memory: MEMORY.md + topics + recall + upkeep + journal/undo + About me | ✅ | 🟡 lexical recall with caps is live; no journal/upkeep/about-me/editor UI | W4 |
-| Skills: SKILL.md import/export, per-bot on/off, learned-skill approval | ✅ | 🟡 skills now reach the prompt with budgets; no SKILL.md import/export, review or UI yet | W4 |
+| Memory: MEMORY.md + topics + recall + upkeep + journal/undo + About me | ✅ | 🟡 recall, caps and an editor are live; no journal/upkeep/about-me | W4 |
+| Skills: SKILL.md import/export, per-bot on/off, learned-skill approval | ✅ | 🟡 prompt + editor with budgets; no SKILL.md import/export or learned-skill review yet | W4 |
 | Voice: TTS providers, spoken replies, voice notes, calls, dictation | ✅ | ❌ | W8 |
-| Attachments: images/screenshots/files in transcript, quota | ✅ | ❌ | W4 |
+| Attachments: images/screenshots/files in transcript, quota | ✅ | 🟡 upload/storage/message linking and text-in-prompt are live; composer, gallery and thumbnails next | W6 |
 | Notifications: in-app/desktop, per-bot, exact-thread routing | ✅ | ❌ (webhooks + SSE only) | W4 |
 | Analytics: usage ledger, decision log, admin activity, Today page | ✅ | 🟡 per-run cost; no ledger/export/insights | W9 |
 | Team sharing: `.md`/package import-export, presets, org library | ✅ | ❌ | W9 |
