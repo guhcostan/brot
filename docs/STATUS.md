@@ -350,6 +350,20 @@ mapped in `docs/MAUSBOT-PARITY.md` (34 bots / 7 teams, 33 bots with a browser an
   en/pt-BR/es.
 - Verified live: POST /api/voice/speak returned a 55 KB RIFF WAV rendered by the real `say` + `afconvert`.
 - Suite: 2174 tests (221 files), typecheck 12/12, lint clean.
+## Wave 25: workspace memory (About me) (2026-10-22)
+
+- **Workspace facts.** Memory now has a scope ('bot' default or 'workspace') and an optional botId; GET/POST
+  /api/profile/memories manage facts about the person, the shared PATCH/DELETE by id serve both scopes, and
+  bot lists stay bot-only. Deleting a bot removes its memories but keeps workspace facts. Migration 0016 adds
+  memories.scope and makes bot_id nullable (generated recreate fixed for old rows; upgrade test covers it).
+- **Prompt.** Every run prepends up to 20 workspace facts (3000 chars, newest first) to the recalled bot
+  memories, at most 32 items / 9000 chars combined, under an "About the person:" section before "Memories:";
+  with no workspace facts the prompt is byte-identical to before.
+- **UI.** Settings → About me lists the facts with kind badges, dates, edit and delete (the shared memory
+  editor extracted from the bot Memory tab), with the exact delete consequence. en/pt-BR/es.
+- Verified live: a workspace fact "the secret code is JABUTICABA" made a DSH run answer JABUTICABA while the
+  bot's own memory list stayed empty.
+- Suite: 2205 tests (226 files), typecheck 12/12, lint clean.
 ## Next
 
 1. Re-run the eval suite on a live model once OpenCode Go has quota (`apps/evals`, `--base` to the server), including B8 and C; the 2026-10-20 results predate the read auto-allow and the fixes above.
