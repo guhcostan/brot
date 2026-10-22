@@ -1,4 +1,4 @@
-import type { ApprovalKind, CanonicalEvent, Memory, Message, Run, Task } from '@brot/protocol';
+import type { ApprovalDecision, ApprovalKind, CanonicalEvent, Memory, Message, Run, Task } from '@brot/protocol';
 import type { CaseContext } from './context';
 
 /** How a case is treated, as in docs/USE-CASES.md. */
@@ -51,8 +51,14 @@ export interface ApprovalRecord {
   /** When the runner first saw the approval pending. `seenAt - createdAt` is how long a human would wait for the card. */
   seenAt: string;
   timeToAppearMs: number;
+  /** The action the policy chose. `hold` leaves the approval pending on purpose. */
   action: ApprovalAction | 'unresolved';
   reason: string;
+  /**
+   * The decision the runner sent to the server, as the server echoed it back. `null` when the runner sent none (a
+   * hold, or a resolve that failed).
+   */
+  decision: ApprovalDecision | null;
   decidedAt?: string;
   resolvedStatus?: string;
   error?: string;
@@ -82,6 +88,11 @@ export interface Evidence {
   tasks: Task[];
   memories: Record<string, Memory[]>;
   approvals: ApprovalRecord[];
+  /**
+   * Ids of approvals on the case's bots that the runner never recorded, so the server resolved them without the
+   * runner. Should be empty. Missing on evidence built without the server's list.
+   */
+  unrecordedApprovals?: string[];
   /** Workspace files the case asked for, keyed `${botKey}:${path}`. `null` when the file does not exist. */
   artifacts: Record<string, string | null>;
   /** Command results and other facts the case measured on a computer. */
@@ -120,7 +131,8 @@ export interface Case {
 /** What a case may use while it runs. Implemented by `CaseContext`. */
 export type CaseApi = CaseContext;
 
-export type ResultStatus = 'pass' | 'fail' | 'skipped' | 'error' | 'pending';
+/** `stopped` means the cost guard ended the case before its checks could run. */
+export type ResultStatus = 'pass' | 'fail' | 'skipped' | 'error' | 'pending' | 'stopped';
 
 export interface CaseOutcome {
   id: string;
@@ -137,7 +149,12 @@ export interface CaseOutcome {
   costUsd: number;
   tokensIn: number;
   tokensOut: number;
+  /** External approvals only: the ones a human saw or that the policy decided. */
   approvals: ApprovalRecord[];
+  /** Brot-internal tool calls (team, memory, notify), which the runner's policy allows without an approval. */
+  internalToolCalls: Record<string, number>;
+  /** Set when `status` is `stopped`: which budget ended the case. */
+  stoppedBy?: 'budget';
   notableEvents: string[];
   finalTexts: Array<{ bot: string; text: string }>;
   startedAt?: string;

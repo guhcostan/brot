@@ -1,10 +1,27 @@
 import type { Repos } from '@brot/db';
+import type { PromptRoom } from '@brot/engines';
 import type { Bot, Message, Thread } from '@brot/protocol';
 
 /** What the engine receives for one run: the earlier messages, and this run's input. */
 export interface Turn {
   history: Message[];
   input: string;
+}
+
+/**
+ * The room a run answers in, as its prompt names it: the room's title, who leads, how replies are chosen, and the
+ * active members. Undefined for a direct thread.
+ */
+export async function roomFor(repos: Repos, thread: Thread): Promise<PromptRoom | undefined> {
+  if (thread.kind !== 'room') return undefined;
+  const members = await repos.rooms.listMembers(thread.id);
+  const bots = await Promise.all(members.map((member) => repos.bots.get(member.botId)));
+  return {
+    title: thread.title,
+    responder: thread.responder ?? 'lead',
+    ...(thread.leadBotId === undefined ? {} : { leadBotId: thread.leadBotId }),
+    members: bots.flatMap((bot) => (bot && !bot.archived ? [{ id: bot.id, name: bot.name, job: bot.job }] : [])),
+  };
 }
 
 export interface TurnRequest {

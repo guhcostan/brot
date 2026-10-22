@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ArgError, DEFAULT_BASE, DEFAULT_MODEL, parseArgs } from './args';
+import { ArgError, DEFAULT_BASE, DEFAULT_MODEL, outputNames, parseArgs } from './args';
 
 const now = new Date('2026-10-19T12:00:00.000Z');
 
@@ -11,6 +11,8 @@ describe('parseArgs', () => {
     expect(options.engine).toBe('dsh');
     expect(options.cases).toBeUndefined();
     expect(options.maxUsd).toBe(5);
+    expect(options.maxCaseUsd).toBe(1.5);
+    expect(options.suffix).toBeUndefined();
     expect(options.caseTimeoutMs).toBe(10 * 60_000);
     expect(options.keepComputers).toBe(false);
     expect(options.out).toMatch(/results\/2026-10-19T12-00-00-000Z$/);
@@ -54,6 +56,28 @@ describe('parseArgs', () => {
 
   it('treats --cases all as every case', () => {
     expect(parseArgs(['--cases', 'all']).cases).toBeUndefined();
+  });
+
+  it('reads the per-case cap and refuses a zero or negative one', () => {
+    expect(parseArgs(['--max-case-usd', '0.25']).maxCaseUsd).toBe(0.25);
+    expect(() => parseArgs(['--max-case-usd', '0'])).toThrow(/--max-case-usd must be a positive number/);
+    expect(() => parseArgs(['--max-case-usd', '-2'])).toThrow(ArgError);
+  });
+
+  it('runs a subset of cases into the same out dir with a suffix', () => {
+    const options = parseArgs(['--out', '/tmp/eval-run1', '--cases', 'a6, a8', '--suffix', 'run2'], now);
+    expect(options.out).toBe('/tmp/eval-run1');
+    expect(options.cases).toEqual(['A6', 'A8']);
+    expect(options.suffix).toBe('run2');
+    expect(outputNames(options.suffix)).toEqual({ results: 'results-run2.json', report: 'REPORT-run2.md', artifacts: 'artifacts-run2' });
+    expect(outputNames(undefined)).toEqual({ results: 'results.json', report: 'REPORT.md', artifacts: 'artifacts' });
+  });
+
+  it('rejects a suffix that is not a plain name, an empty case list, and a suffix with resume', () => {
+    expect(() => parseArgs(['--suffix', 'run 2'])).toThrow(/--suffix must be/);
+    expect(() => parseArgs(['--suffix', '../x'])).toThrow(/--suffix must be/);
+    expect(() => parseArgs(['--cases', ' , '])).toThrow(/needs at least one case id/);
+    expect(() => parseArgs(['--resume', 'C6', '--suffix', 'x'])).toThrow(/either --suffix or --resume/);
   });
 
   it('rejects an unknown engine, an unknown flag and a flag without a value', () => {

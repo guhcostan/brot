@@ -1,4 +1,5 @@
 import type { Repos } from '@brot/db';
+import { randomUUID } from 'node:crypto';
 import {
   MAX_ROOM_BOTS,
   MIN_ROOM_BOTS,
@@ -11,6 +12,7 @@ import {
 } from '@brot/protocol';
 import type { EventBus } from '../bus';
 import type { Harness } from '../harness';
+import type { ChainRef } from '../team/types';
 import { RuleViolation } from './errors';
 import { chooseResponders, resolveMentions } from './routing';
 
@@ -61,22 +63,38 @@ export function createRoomService(deps: { repos: Repos; bus: EventBus; harness: 
     await bus.publish({ type: 'room.members', threadId, botIds: members.map((member) => member.botId) });
   }
 
+  /**
+   * Every reply to one message shares a chain, so the room's budget covers the whole exchange. A reply that cannot start
+   * stops the rest, and the room says why.
+   */
   async function startReplies(threadId: string, trigger: Message, responders: string[]): Promise<string | null> {
     const [first, ...rest] = responders;
     if (first === undefined) return null;
     const harness = deps.harness();
-    let current = await harness.startBotRun({ botId: first, threadId, input: trigger.content, inputMessage: trigger });
+    const chain: ChainRef = { chainId: randomUUID(), depth: 0, askHops: 0 };
+    let current = await harness.startBotRun({ botId: first, threadId, input: trigger.content, inputMessage: trigger, chain });
     const firstRunId = current.runId;
     void (async () => {
       for (const botId of rest) {
         const outcome = await current.settled;
         if (outcome.status === 'cancelled') return;
-        current = await harness.startBotRun({ botId, threadId, input: trigger.content, inputMessage: trigger });
+        current = await harness.startBotRun({ botId, threadId, input: trigger.content, inputMessage: trigger, chain });
       }
-    })().catch((error: unknown) => {
+    })().catch(async (error: unknown) => {
       console.error(`room ${threadId} replies stopped`, error);
+      await postNotice(threadId, `The room stopped before its next reply: ${error instanceof Error ? error.message : String(error)}`);
     });
     return firstRunId;
+  }
+
+  /** Stores a system note in a room, so a stopped exchange is visible in the timeline. */
+  async function postNotice(threadId: string, content: string): Promise<void> {
+    try {
+      const message = await repos.messages.create({ threadId, role: 'system', content });
+      await bus.publish({ type: 'message.completed', threadId, message });
+    } catch (error) {
+      console.error(`room ${threadId} could not record a notice`, error);
+    }
   }
 
   return {

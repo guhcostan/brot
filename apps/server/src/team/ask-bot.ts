@@ -51,7 +51,7 @@ export function createAskBotTool(deps: TeamDeps, ledger: AskLedger): BrotTool {
     spec: {
       name: 'ask_bot',
       description:
-        'Ask another bot a question and wait for its answer. Use it for what that bot knows or owns. The answer comes back in this call. Give exactly one of botId or botName.',
+        'Ask another bot a quick question you need answered before you can continue, and wait for its answer. Never ask a bot something this chain has already asked. Give exactly one of botId or botName.',
       inputSchema: inputSchemaOf(AskBotInput),
       risk: 'write',
     },

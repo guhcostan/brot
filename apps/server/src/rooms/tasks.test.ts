@@ -368,3 +368,22 @@ describe('delegator notices', () => {
     expect((await notice.settled).status).toBe('completed');
   });
 });
+
+describe('delegated task settlement', () => {
+  it('notifies the delegator once when a delegated task ends with its run and was never reported on', async () => {
+    const { ctx, recording, capy, dex, capyDm } = await team();
+    const created = await json<Task>(
+      await createTask(ctx, { title: 'Delegated', assigneeBotId: dex.id, createdByBotId: capy.id, threadId: capyDm.id }),
+    );
+
+    await until(() => recording.runs.some((run) => run.bot.name === 'Capy'));
+    await until(async () => (await fetchTask(ctx, created.id)).status === 'done');
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    const notices = recording.runs.filter((run) => run.bot.name === 'Capy');
+    expect(notices).toHaveLength(1);
+    expect(notices[0]?.input).toContain(`Task ${created.id} "Delegated"`);
+    expect(notices[0]?.input).toContain('is done');
+    expect(notices[0]?.input).toContain('Dex replies to:');
+  });
+});

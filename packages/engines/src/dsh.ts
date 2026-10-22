@@ -50,7 +50,7 @@ import {
   usageEvents,
 } from './dsh-protocol';
 import { llmLaunchKey, llmOverlay, LLM_TOKEN_ENV, routeModelId } from './dsh-llm';
-import { buildPrompt } from './prompt';
+import { buildPrompt, sessionInput, type BrotRunContext } from './prompt';
 
 const LABEL = 'DeepSeek Harness';
 const ACP_PROFILE = 'acp';
@@ -531,7 +531,7 @@ export function createDshEngine(opts: DshEngineOptions = {}): DshEngine {
     run.mailbox.push(item);
   }
 
-  async function* execute(ctx: RunContext): AsyncGenerator<EngineEvent> {
+  async function* execute(ctx: BrotRunContext): AsyncGenerator<EngineEvent> {
     const state = stateFor(ctx.threadId, ctx.bot.id);
     if (state.busy) throw new Error(`${LABEL} already has a run in progress for this bot in this thread`);
     state.busy = true;
@@ -553,7 +553,7 @@ export function createDshEngine(opts: DshEngineOptions = {}): DshEngine {
       await untilAborted(applyModel(state, current, model), ctx.signal);
       if (ctx.signal.aborted) return;
 
-      const text = state.primed ? ctx.input : buildPrompt(ctx);
+      const text = state.primed ? sessionInput(ctx) : buildPrompt(ctx);
       const prompt = server.connection.agent.request(methods.agent.session.prompt, {
         sessionId,
         prompt: [{ type: 'text', text }],

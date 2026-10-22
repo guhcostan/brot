@@ -12,6 +12,7 @@ const options: RunOptions = {
   engine: 'dsh',
   out: '/tmp/unused',
   maxUsd: 5,
+  maxCaseUsd: 1.5,
   caseTimeoutMs: 1000,
   pollMs: 1,
   keepComputers: false,

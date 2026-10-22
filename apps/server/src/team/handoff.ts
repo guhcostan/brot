@@ -9,7 +9,7 @@ export function createHandoffTool(deps: TeamDeps): BrotTool {
     spec: {
       name: 'handoff',
       description:
-        'In a room, pass the conversation to another member of the room. That member answers next. Give exactly one of botId or botName.',
+        'In a room, pass the conversation to another member, who answers next. Use it only when that member should take over. Give exactly one of botId or botName.',
       inputSchema: inputSchemaOf(HandoffInput),
       risk: 'write',
     },

@@ -20,32 +20,28 @@ interface FakeRunner extends TeamRunner {
   readonly runs: BotRunRequest[];
   readonly starts: BotRunRequest[];
   readonly chains: Map<string, ChainRef>;
-  readonly attached: Array<[runId: string, chainId: string]>;
+  /** Each `linkBudget` call, as [chainId, budgetChainId]. */
+  readonly links: Array<[string, string]>;
   onRun: (req: BotRunRequest) => Promise<BotRunOutcome>;
   failStart?: Error;
-  /** How the run started by `startBot` ends. Defaults to a completed run. */
+  /** How the runs started by `startBot` end at once. Unset, a started run keeps going until `finishStart` ends it. */
   startOutcome?: Omit<BotRunOutcome, 'runId'>;
-  /** When set, runs started by `startBot` stay open until `finish` ends them. */
-  holdRuns?: boolean;
-  /** The run id the next `startBot` returns, for tests whose events must reference a stored run. */
-  nextRunId?: string;
-  finish(runId: string, outcome: Omit<BotRunOutcome, 'runId'>): void;
+  /** Ends the run started by `startBot` number `index` (1 for the first start). */
+  finishStart(index: number, outcome: Omit<BotRunOutcome, 'runId'>): void;
 }
 
-function createFakeRunner(spentUsd?: (chainId: string) => number): FakeRunner {
+/** A runner whose `startBot` runs are real run rows, so tasks can link them, and which the test ends by hand. */
+function createFakeRunner(repos: Repos, spentUsd?: (chainId: string) => number): FakeRunner {
   const runs: BotRunRequest[] = [];
   const starts: BotRunRequest[] = [];
   const chains = new Map<string, ChainRef>();
-  const attached: Array<[string, string]> = [];
-  const held = new Map<string, (outcome: BotRunOutcome) => void>();
+  const links: Array<[string, string]> = [];
+  const ends: Array<(outcome: Omit<BotRunOutcome, 'runId'>) => void> = [];
   const runner: FakeRunner = {
     runs,
     starts,
     chains,
-    attached,
-    attachSpend(runId, chainId) {
-      attached.push([runId, chainId]);
-    },
+    links,
     onRun: async () => ({ runId: 'run-target', status: 'completed', text: 'Ship it' }),
     async runBot(req) {
       runs.push(req);
@@ -54,21 +50,28 @@ function createFakeRunner(spentUsd?: (chainId: string) => number): FakeRunner {
     async startBot(req) {
       starts.push(req);
       if (runner.failStart) throw runner.failStart;
-      const runId = runner.nextRunId ?? `started-${starts.length}`;
-      if (runner.holdRuns) {
-        return { runId, settled: new Promise<BotRunOutcome>((resolve) => held.set(runId, resolve)) };
-      }
-      const outcome = { runId, status: 'completed' as const, text: 'Ok', ...runner.startOutcome };
-      return { runId, settled: Promise.resolve(outcome) };
+      const run = await repos.runs.create({ threadId: req.threadId, botId: req.botId, engine: 'mock' });
+      let resolveSettled!: (outcome: BotRunOutcome) => void;
+      const settled = new Promise<BotRunOutcome>((resolve) => {
+        resolveSettled = resolve;
+      });
+      ends.push((outcome) => resolveSettled({ runId: run.id, ...outcome }));
+      if (runner.startOutcome) runner.finishStart(starts.length, runner.startOutcome);
+      return { runId: run.id, settled };
     },
-    finish(runId, outcome) {
-      held.get(runId)?.({ runId, ...outcome });
+    finishStart(index, outcome) {
+      ends[index - 1]?.(outcome);
     },
     chainOf(runId) {
       return chains.get(runId);
     },
+    linkBudget(chainId, budgetChainId) {
+      links.push([chainId, budgetChainId]);
+    },
   };
-  return spentUsd ? Object.assign(runner, { chainSpentUsd: spentUsd }) : runner;
+  return spentUsd
+    ? Object.assign(runner, { chainSpentUsd: spentUsd, chainCapUsd: (): number | undefined => undefined })
+    : runner;
 }
 
 interface Fixture {
@@ -95,7 +98,7 @@ async function setup(options: { spentUsd?: (chainId: string) => number } = {}): 
   await migrate(handle.db);
   const repos = createRepos(handle.db);
   const bus = createEventBus(repos.events);
-  const runner = createFakeRunner(options.spentUsd);
+  const runner = createFakeRunner(repos, options.spentUsd);
   const events: CanonicalEvent[] = [];
   const handoffs: Fixture['handoffs'] = [];
   bus.subscribe((event) => events.push(event));
@@ -315,7 +318,6 @@ describe('ask_bot', () => {
 describe('delegate_task', () => {
   it('creates the task, starts it in the assignee DM thread, and returns the task id', async () => {
     const f = await setup();
-    f.runner.holdRuns = true;
     const ada = await f.bot('Ada');
     const bo = await f.bot('Bo');
     const thread = await f.thread(ada);
@@ -449,78 +451,6 @@ describe('delegate_task', () => {
     expect(task).toMatchObject({ status: 'failed', result: 'Could not start Bo: engine offline' });
     expect(f.events.map((event) => event.type)).toEqual(['task.created', 'task.updated', 'task.updated']);
   });
-
-  it('makes every delegation from one top-level run share one chain, and counts the run once', async () => {
-    const f = await setup();
-    f.runner.holdRuns = true;
-    const ada = await f.bot('Ada');
-    const bo = await f.bot('Bo');
-    const cy = await f.bot('Cy');
-    const scope = await f.scope(ada, await f.thread(ada));
-
-    await invoke(f.tool('delegate_task'), scope, { botName: 'Bo', title: 'First' });
-    await invoke(f.tool('delegate_task'), scope, { botName: 'Cy', title: 'Second' });
-
-    const [first] = await f.repos.tasks.list({ assigneeBotId: bo.id });
-    const [second] = await f.repos.tasks.list({ assigneeBotId: cy.id });
-    expect(first).toMatchObject({ chainId: first?.id, depth: 1, parentTaskId: undefined });
-    expect(second).toMatchObject({ chainId: first?.chainId, depth: 1, parentTaskId: undefined });
-    expect(f.runner.attached).toEqual([[scope.runId, first?.chainId]]);
-  });
-
-  it('shares one chain between delegations that run at the same time', async () => {
-    const f = await setup();
-    f.runner.holdRuns = true;
-    const ada = await f.bot('Ada');
-    const bo = await f.bot('Bo');
-    const cy = await f.bot('Cy');
-    const scope = await f.scope(ada, await f.thread(ada));
-
-    const results = await Promise.all([
-      invoke(f.tool('delegate_task'), scope, { botName: 'Bo', title: 'Parallel one' }),
-      invoke(f.tool('delegate_task'), scope, { botName: 'Cy', title: 'Parallel two' }),
-    ]);
-
-    expect(results.map((result) => result.ok)).toEqual([true, true]);
-    const [first] = await f.repos.tasks.list({ assigneeBotId: bo.id });
-    const [second] = await f.repos.tasks.list({ assigneeBotId: cy.id });
-    expect(second?.chainId).toBe(first?.chainId);
-    expect(f.runner.attached).toHaveLength(1);
-  });
-
-  it('starts a separate chain for delegations from two different top-level runs', async () => {
-    const f = await setup();
-    f.runner.holdRuns = true;
-    const ada = await f.bot('Ada');
-    const bo = await f.bot('Bo');
-    const cy = await f.bot('Cy');
-    const thread = await f.thread(ada);
-
-    await invoke(f.tool('delegate_task'), await f.scope(ada, thread), { botName: 'Bo', title: 'From one run' });
-    await invoke(f.tool('delegate_task'), await f.scope(ada, thread), { botName: 'Cy', title: 'From another run' });
-
-    const [first] = await f.repos.tasks.list({ assigneeBotId: bo.id });
-    const [second] = await f.repos.tasks.list({ assigneeBotId: cy.id });
-    expect(first?.chainId).toBeDefined();
-    expect(second?.chainId).toBeDefined();
-    expect(second?.chainId).not.toBe(first?.chainId);
-  });
-
-  it('keeps a work run delegating under its own task, in that task chain', async () => {
-    const f = await setup();
-    f.runner.holdRuns = true;
-    const ada = await f.bot('Ada');
-    const bo = await f.bot('Bo');
-    const cy = await f.bot('Cy');
-    const thread = await f.thread(ada);
-    const root = await f.repos.tasks.create({ title: 'Root', assigneeBotId: bo.id, threadId: thread.id, createdByBotId: ada.id });
-    const working = await f.scope(bo, thread, { chainId: root.chainId, depth: root.depth, askHops: 0 });
-
-    await invoke(f.tool('delegate_task'), working, { botName: 'Cy', title: 'Under root', parentTaskId: root.id });
-
-    const [child] = await f.repos.tasks.list({ assigneeBotId: cy.id });
-    expect(child).toMatchObject({ chainId: root.chainId, parentTaskId: root.id, depth: root.depth + 1 });
-  });
 });
 
 /** Resolves with the first value the read returns, polling until one exists. */
@@ -532,63 +462,6 @@ async function eventually<T>(read: () => Promise<T | undefined>): Promise<T> {
   }
   throw new Error('timed out waiting for condition');
 }
-
-describe('a delegated task ends with its work run', () => {
-  /** Delegates a task from Ada to Bo. Bo's work run stays open until the test ends it. */
-  async function delegateHeld() {
-    const f = await setup();
-    f.runner.holdRuns = true;
-    const ada = await f.bot('Ada');
-    const bo = await f.bot('Bo');
-    const thread = await f.thread(ada);
-    const workRun = await f.repos.runs.create({ threadId: (await f.thread(bo)).id, botId: bo.id, engine: 'mock' });
-    f.runner.nextRunId = workRun.id;
-    await invoke(f.tool('delegate_task'), await f.scope(ada, thread), { botName: 'Bo', title: 'Draft copy' });
-    const [task] = await f.repos.tasks.list({ assigneeBotId: bo.id });
-    if (!task) throw new Error('no task was created');
-    return { f, bo, thread, task, workRunId: workRun.id };
-  }
-
-  it('fails the task with the reason when the work run fails without the assignee closing it', async () => {
-    const { f, task, workRunId } = await delegateHeld();
-
-    f.runner.finish(workRunId, { status: 'failed', text: '', error: 'model down' });
-
-    const closed = await eventually(async () => {
-      const current = await f.repos.tasks.get(task.id);
-      return current?.status === 'failed' ? current : undefined;
-    });
-    expect(closed.result).toBe('model down');
-  });
-
-  it('completes the task with the run text, posts it to the origin thread, and notifies the delegator once', async () => {
-    const { f, thread, task, workRunId } = await delegateHeld();
-
-    f.runner.finish(workRunId, { status: 'completed', text: 'Two paragraphs ready' });
-
-    const closed = await eventually(async () => {
-      const current = await f.repos.tasks.get(task.id);
-      return current?.status === 'done' ? current : undefined;
-    });
-    expect(closed.result).toBe('Two paragraphs ready');
-    await eventually(async () => ((await f.repos.messages.listByThread(thread.id)).some((m) => m.content.includes('Two paragraphs ready')) ? true : undefined));
-    expect(f.runner.starts.filter((start) => start.botId !== task.assigneeBotId)).toHaveLength(1);
-  });
-
-  it('leaves a task alone when the assignee closed it before the work run ended', async () => {
-    const { f, bo, thread, task, workRunId } = await delegateHeld();
-    const boScope = await f.scope(bo, await f.thread(bo), { chainId: task.chainId, depth: task.depth, askHops: 0 });
-    await invoke(f.tool('update_my_task'), boScope, { taskId: task.id, status: 'done', result: 'Mine' });
-
-    f.runner.finish(workRunId, { status: 'completed', text: 'Late text' });
-    await new Promise((resolve) => setTimeout(resolve, 20));
-
-    expect((await f.repos.tasks.get(task.id))?.result).toBe('Mine');
-    const posted = (await f.repos.messages.listByThread(thread.id)).map((message) => message.content);
-    expect(posted.filter((content) => content.includes('Mine'))).toHaveLength(1);
-    expect(posted.some((content) => content.includes('Late text'))).toBe(false);
-  });
-});
 
 describe('update_my_task', () => {
   async function delegatedTask() {
@@ -741,5 +614,128 @@ describe('handoff', () => {
     expect(f.handoffs).toEqual([{ threadId: room.id, toBotId: bo.id, eventsSoFar: 0 }]);
     expect(f.events).toHaveLength(1);
     expect(f.events[0]).toMatchObject({ type: 'handoff', threadId: room.id, fromBotId: ada.id, toBotId: bo.id, note: 'Your turn' });
+  });
+});
+
+describe('per-run call limits', () => {
+  it('refuses a tool past its limit within one run, and starts every run with fresh limits', async () => {
+    const f = await setup();
+    const ada = await f.bot('Ada');
+    await f.bot('Bo');
+    const thread = await f.thread(ada);
+    const scope = await f.scope(ada, thread);
+
+    expect(await invoke(f.tool('list_team'), scope, {})).toMatchObject({ ok: true });
+    expect(await refusal(f.tool('list_team'), scope, {})).toMatch(/list_team is used up for this run \(at most 1 calls per run\)/);
+
+    for (let call = 0; call < 3; call += 1) {
+      expect(await invoke(f.tool('ask_bot'), scope, { botName: 'Bo', question: `Question ${call}` })).toMatchObject({ ok: true });
+    }
+    expect(await refusal(f.tool('ask_bot'), scope, { botName: 'Bo', question: 'One more' })).toMatch(/ask_bot is used up/);
+    expect(f.runner.runs).toHaveLength(3);
+
+    const next = await f.scope(ada, thread);
+    expect(await invoke(f.tool('list_team'), next, {})).toMatchObject({ ok: true });
+  });
+
+  it('caps delegations at six per run and refuses the seventh before anything is created', async () => {
+    const f = await setup();
+    const ada = await f.bot('Ada');
+    const bo = await f.bot('Bo');
+    const scope = await f.scope(ada, await f.thread(ada));
+    for (let index = 0; index < 6; index += 1) {
+      expect(await invoke(f.tool('delegate_task'), scope, { botName: 'Bo', title: `Task ${index}` })).toMatchObject({ ok: true });
+    }
+    expect(await refusal(f.tool('delegate_task'), scope, { botName: 'Bo', title: 'Seventh' })).toMatch(/delegate_task is used up/);
+    expect(await f.repos.tasks.list({ assigneeBotId: bo.id })).toHaveLength(6);
+  });
+});
+
+describe('delegated task settlement', () => {
+  /** Delegates from Ada to Bo and returns the task, with the scope Bo's work run would use. */
+  async function delegated(f: Fixture) {
+    const ada = await f.bot('Ada');
+    const bo = await f.bot('Bo');
+    const thread = await f.thread(ada);
+    expect(await invoke(f.tool('delegate_task'), await f.scope(ada, thread), { botName: 'Bo', title: 'Draft copy' })).toMatchObject({
+      ok: true,
+    });
+    const task = await eventually(async () => (await f.repos.tasks.list({ assigneeBotId: bo.id }))[0]);
+    return { ada, bo, thread, task };
+  }
+
+  /** Waits for the delegator's notice run to start, then gives the event loop a few turns to show any second one. */
+  async function noticesAfter(f: Fixture, expected: number): Promise<void> {
+    await eventually(async () => (f.runner.starts.length >= expected ? true : undefined));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(f.runner.starts).toHaveLength(expected);
+  }
+
+  it('ends the task with the run output and notifies the delegator once, when the assignee never reports', async () => {
+    const f = await setup();
+    const { ada, bo, thread, task } = await delegated(f);
+    expect(task?.status).toBe('in_progress');
+    expect(task?.workRunId).toEqual(expect.any(String));
+
+    f.runner.finishStart(1, { status: 'completed', text: 'Two paragraphs' });
+
+    await noticesAfter(f, 2);
+    const ended = await f.repos.tasks.get(task!.id);
+    expect(ended).toMatchObject({ status: 'done', result: 'Two paragraphs' });
+    expect(f.runner.starts[1]).toMatchObject({ botId: ada.id, threadId: thread.id, fromBotId: bo.id, chain: { depth: 0 } });
+    expect(f.runner.starts[1]?.input).toContain('Two paragraphs');
+    expect(f.runner.starts[1]?.input).toContain('is done');
+    const posted = (await f.repos.messages.listByThread(thread.id)).at(-1);
+    expect(posted).toMatchObject({ authorBotId: bo.id, viaBotId: ada.id, content: expect.stringContaining('**Task done: Draft copy**') });
+  });
+
+  it('does not notify again when the assignee reported on its task before its run settled', async () => {
+    const f = await setup();
+    const { bo, task } = await delegated(f);
+    const boScope = await f.scope(bo, await f.thread(bo));
+
+    expect(await invoke(f.tool('update_my_task'), boScope, { taskId: task!.id, status: 'done', result: 'Reported' })).toMatchObject({
+      ok: true,
+    });
+    await noticesAfter(f, 2);
+
+    f.runner.finishStart(1, { status: 'completed', text: 'Same result, later' });
+    await noticesAfter(f, 2);
+    expect(await f.repos.tasks.get(task!.id)).toMatchObject({ status: 'done', result: 'Reported' });
+  });
+
+  it('fails the task with the reason when its run fails, and still notifies the delegator once', async () => {
+    const f = await setup();
+    const { task } = await delegated(f);
+
+    f.runner.finishStart(1, { status: 'failed', text: '', error: 'model down' });
+
+    await noticesAfter(f, 2);
+    expect(await f.repos.tasks.get(task!.id)).toMatchObject({ status: 'failed', result: 'model down' });
+    expect(f.runner.starts[1]?.input).toContain('is failed');
+  });
+});
+
+describe('delegated work and the caller budget', () => {
+  it('charges a task delegated from a run to the chain that run is in', async () => {
+    const f = await setup();
+    const ada = await f.bot('Ada');
+    const bo = await f.bot('Bo');
+    const scope = await f.scope(ada, await f.thread(ada), { chainId: 'room-chain', depth: 0, askHops: 0 });
+
+    expect(await invoke(f.tool('delegate_task'), scope, { botName: 'Bo', title: 'Work' })).toMatchObject({ ok: true });
+
+    const [task] = await f.repos.tasks.list({ assigneeBotId: bo.id });
+    expect(task?.chainId).not.toBe('room-chain');
+    expect(f.runner.links).toEqual([[task?.chainId, 'room-chain']]);
+    expect(f.runner.starts[0]?.chain).toMatchObject({ chainId: task?.chainId, depth: 1 });
+  });
+
+  it('charges nothing to a budget when the delegating run is outside any chain', async () => {
+    const f = await setup();
+    const ada = await f.bot('Ada');
+    await f.bot('Bo');
+    await invoke(f.tool('delegate_task'), await f.scope(ada, await f.thread(ada)), { botName: 'Bo', title: 'Loose' });
+    expect(f.runner.links).toEqual([]);
   });
 });

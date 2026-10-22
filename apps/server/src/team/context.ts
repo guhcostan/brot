@@ -50,9 +50,10 @@ export async function postBotMessage(
   await deps.bus.publish({ type: 'message.completed', threadId: input.threadId, runId: input.runId, message });
 }
 
-/** A runner that reports how much a chain has spent, so budgets can stop new work. */
+/** A runner that reports how much a chain has spent and what cap applies to it, so budgets can stop new work. */
 export interface SpendAwareRunner extends TeamRunner {
   chainSpentUsd(chainId: string): number;
+  chainCapUsd(chainId: string): number | undefined;
 }
 
 export function isSpendAware(runner: TeamRunner): runner is SpendAwareRunner {
@@ -60,8 +61,9 @@ export function isSpendAware(runner: TeamRunner): runner is SpendAwareRunner {
 }
 
 /**
- * True when the chain's smallest team budget is spent. The cap is the smallest `teamBudgetUsd` among the
- * given bots and every bot that holds a task in the chain. A runner that reports no spend never blocks.
+ * True when the chain's team budget is spent. The cap is the smallest `teamBudgetUsd` among the given bots and every
+ * bot that holds a task in the chain; without one, the runner's cap for the chain (a room's default) applies. A runner
+ * that reports no spend never blocks.
  */
 export async function chainBudgetSpent(deps: TeamDeps, chainId: string, botIds: string[]): Promise<boolean> {
   const { runner, repos } = deps;
@@ -77,6 +79,7 @@ export async function chainBudgetSpent(deps: TeamDeps, chainId: string, botIds: 
     const budget = (await repos.bots.get(botId))?.teamBudgetUsd;
     if (budget !== undefined && (cap === undefined || budget < cap)) cap = budget;
   }
+  cap ??= runner.chainCapUsd(chainId);
   return cap !== undefined && runner.chainSpentUsd(chainId) >= cap;
 }
 

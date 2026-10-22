@@ -9,7 +9,7 @@ export function createListTeamTool(deps: TeamDeps): BrotTool {
     spec: {
       name: 'list_team',
       description:
-        'List the bots you can work with: every active bot, with the members of this room first when this thread is a room. Use their ids or names with the other team tools.',
+        'List the bots you can work with, room members first. Call it at most once per run; use the ids or names it gives with the other team tools.',
       inputSchema: inputSchemaOf(ListTeamInput),
       risk: 'read',
     },

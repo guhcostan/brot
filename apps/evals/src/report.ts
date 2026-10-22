@@ -7,6 +7,8 @@ export interface ResultsFile {
   engine: string;
   model: string;
   maxUsd: number;
+  /** Per-case spend cap. Missing on results written before the cap existed. */
+  maxCaseUsd?: number;
   server?: { version: string; protocol: number };
   dockerServer?: string;
   totals: { costUsd: number; tokensIn: number; tokensOut: number; runs: number };
@@ -26,11 +28,20 @@ const RESULT_LABEL: Record<ResultStatus, string> = {
   skipped: 'skipped',
   error: 'error',
   pending: 'pending (restart)',
+  stopped: 'stopped',
 };
 
-export function resultLabel(outcome: Pick<CaseOutcome, 'status' | 'needsReview'>): string {
+export function resultLabel(outcome: Pick<CaseOutcome, 'status' | 'needsReview' | 'stoppedBy'>): string {
+  if (outcome.status === 'stopped') return `stopped: ${outcome.stoppedBy ?? 'unknown'}`;
   const label = RESULT_LABEL[outcome.status];
   return outcome.needsReview && outcome.status === 'pass' ? `${label}, needs-review` : label;
+}
+
+/** `list_team 3, remember 1`, or `0` when no Brot-internal tool ran. */
+export function internalSummary(counts: Record<string, number>): string {
+  const entries = Object.entries(counts).sort(([a], [b]) => a.localeCompare(b));
+  if (entries.length === 0) return '0';
+  return entries.map(([tool, count]) => `${tool} ${count}`).join(', ');
 }
 
 export function countChecks(outcome: CaseOutcome): Record<CheckStatus, number> {
@@ -59,6 +70,7 @@ function summaryRow(outcome: CaseOutcome): string {
     checksSummary(outcome),
     money(outcome.costUsd),
     String(outcome.approvals.length),
+    cell(internalSummary(outcome.internalToolCalls)),
     cell(note),
   ].join(' | ');
 }
@@ -79,7 +91,7 @@ function approvalsTable(outcome: CaseOutcome): string[] {
     '| --- | --- | --- | --- | --- | --- | --- |',
   ];
   for (const approval of outcome.approvals) {
-    const decision = approval.action === 'hold' ? 'held' : approval.action;
+    const decision = approval.decision ?? (approval.action === 'hold' ? 'held' : 'none sent');
     lines.push(
       `| ${cell(approval.botKey)} | ${cell(approval.tool)} | ${approval.kind} | ${cell(approval.summary)} | ${decision}${
         approval.error === undefined ? '' : ` (${cell(approval.error)})`
@@ -105,6 +117,7 @@ function caseSection(outcome: CaseOutcome): string[] {
     lines.push('#### Checks', '', ...checksTable(outcome));
   }
   lines.push('#### Approvals', '', ...approvalsTable(outcome));
+  lines.push(`Brot-internal tool calls (allowed by policy, not approvals): ${internalSummary(outcome.internalToolCalls)}`, '');
   if (outcome.notableEvents.length > 0) {
     lines.push('#### Notable events', '', ...outcome.notableEvents.map((event) => `- ${cell(event)}`), '');
   }
@@ -124,7 +137,9 @@ export function renderReport(results: ResultsFile): string {
     '',
     `Generated ${results.generatedAt} against ${results.base}. Engine: ${results.engine}${
       results.engine === 'dsh' ? `, model ${results.model}` : ''
-    }. Cost cap ${money(results.maxUsd)}.`,
+    }. Run cost cap ${money(results.maxUsd)}, per-case cap ${
+      results.maxCaseUsd === undefined ? 'not recorded' : money(results.maxCaseUsd)
+    }.`,
     '',
     `Total: ${results.totals.runs} runs, ${results.totals.tokensIn} tokens in, ${results.totals.tokensOut} tokens out, ${money(
       results.totals.costUsd,
@@ -136,8 +151,8 @@ export function renderReport(results: ResultsFile): string {
     '',
     '## Summary',
     '',
-    '| Case | Title | Case status | Result | Checks | Cost | Approvals | Note |',
-    '| --- | --- | --- | --- | --- | --- | --- | --- |',
+    '| Case | Title | Case status | Result | Checks | Cost | Approvals | Internal calls | Note |',
+    '| --- | --- | --- | --- | --- | --- | --- | --- | --- |',
     ...results.cases.map((outcome) => `| ${summaryRow(outcome)} |`),
     '',
     '## Cases',

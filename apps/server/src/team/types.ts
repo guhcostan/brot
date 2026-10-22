@@ -43,8 +43,8 @@ export interface TeamRunner {
   /** The chain the given run belongs to, if any. */
   chainOf(runId: string): ChainRef | undefined;
   /**
-   * Counts what a run that is not a chain member has cost, and what it spends from now on, toward `chainId`.
-   * Idempotent per run, so a run that delegates several times is counted once.
+   * Charges the spend of chain `chainId` to the budget of chain `budgetChainId`. Called before a task delegated from a run
+   * starts, so the work counts against the chain its caller ran in.
    */
-  attachSpend?(runId: string, chainId: string): void;
+  linkBudget(chainId: string, budgetChainId: string): void;
 }

@@ -1,7 +1,6 @@
-import { standardPolicy } from '../approvals';
 import { check, review } from '../checks';
 import type { Case } from '../types';
-import { botSpec, distinctMatches, fixturePath, httpCalls, readFixtureJson, textsOf } from './shared';
+import { botSpec, distinctMatches, FAKE_API_POLICY, fixturePath, httpCalls, readFixtureJson, textsOf } from './shared';
 
 const EGRESS = ['httpbin.org'];
 
@@ -11,7 +10,7 @@ export const A6: Case = {
   status: 'sim',
   note: 'Simulated: inputs are a fixture, and the fake API is httpbin.org (no Gmail or Slack connector yet).',
   egress: EGRESS,
-  approvals: standardPolicy({ httpbinSends: true }),
+  approvals: FAKE_API_POLICY,
   async setup(ctx) {
     await ctx.createBot(
       'capy',

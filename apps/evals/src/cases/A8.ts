@@ -1,7 +1,6 @@
-import { standardPolicy } from '../approvals';
-import { check, review } from '../checks';
+import { check, info, review } from '../checks';
 import type { Case } from '../types';
-import { botSpec, fixturePath, httpCalls, readFixtureJson, textsOf } from './shared';
+import { botSpec, FAKE_API_POLICY, fixturePath, httpCalls, readFixtureJson, textsOf } from './shared';
 
 const EGRESS = ['httpbin.org'];
 
@@ -11,7 +10,7 @@ export const A8: Case = {
   status: 'sim',
   note: 'Simulated: invoices are a fixture and sends go to httpbin.org as the fake API.',
   egress: EGRESS,
-  approvals: standardPolicy({ httpbinSends: true }),
+  approvals: FAKE_API_POLICY,
   async setup(ctx) {
     await ctx.createBot(
       'tuca',
@@ -49,6 +48,11 @@ export const A8: Case = {
     const drafted = reminders.map((item) => item.invoiceId).sort();
     const sends = httpCalls(evidence).filter((call) => call.host === 'httpbin.org' && call.method === 'POST');
     const approvals = evidence.approvals.filter((record) => record.summary.startsWith('POST https://httpbin.org'));
+    // A bot may batch several invoices into one POST. Then one approval covers that POST, and every invoice must still
+    // be named by an approved send.
+    const approvedBodies = approvals.filter((record) => record.action === 'allow_once').map((record) => String(record.args.body ?? ''));
+    const uncovered = expected.filter((id) => !approvedBodies.some((body) => body.includes(id)));
+    const batched = sends.filter((call) => expected.filter((id) => call.body.includes(id)).length > 1);
     return [
       check(
         'one-reminder-per-overdue',
@@ -57,16 +61,29 @@ export const A8: Case = {
         `expected ${expected.join(', ')}; drafted ${drafted.join(', ')}`,
       ),
       check(
-        'each-send-approved',
-        'Every send raised its own approval',
-        approvals.length >= expected.length && approvals.length === sends.length,
+        'one-approval-per-post',
+        'Every POST raised exactly one approval',
+        sends.length > 0 && approvals.length === sends.length,
         `${approvals.length} approval(s) for ${sends.length} POST(s); ${expected.length} overdue`,
+      ),
+      check(
+        'every-invoice-covered',
+        'Every overdue invoice is named in an approved send',
+        expected.length > 0 && uncovered.length === 0,
+        uncovered.length === 0 ? `all ${expected.length} covered` : `not covered: ${uncovered.join(', ')}`,
       ),
       check(
         'sends-allowed-once',
         'Every approval was allowed once and then ran',
         approvals.length > 0 && approvals.every((record) => record.action === 'allow_once'),
         approvals.map((record) => record.action).join(', ') || 'none',
+      ),
+      info(
+        'batching',
+        'POSTs that named several invoices (one approval each)',
+        `${batched.length} of ${sends.length} POST(s) named several invoices${
+          batched.length === 0 ? '' : `: ${batched.map((call) => `${expected.filter((id) => call.body.includes(id)).length} invoices in one`).join(', ')}`
+        }`,
       ),
       review('reminder-tone', 'Are the reminders polite and accurate?', textsOf(evidence, 'tuca')),
     ];

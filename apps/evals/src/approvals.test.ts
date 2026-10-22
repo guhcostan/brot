@@ -1,6 +1,17 @@
 import { describe, expect, it } from 'vitest';
+import type { CanonicalEvent } from '@brot/protocol';
 import { BrotApi } from './api';
-import { ApprovalDriver, holdPolicy, httpTarget, standardPolicy } from './approvals';
+import {
+  ApprovalDriver,
+  bareToolName,
+  countInternalCalls,
+  holdPolicy,
+  httpTarget,
+  INTERNAL_TOOL_NAMES,
+  internalToolPolicies,
+  isInternalTool,
+  standardPolicy,
+} from './approvals';
 import type { ApprovalView } from './types';
 
 const view = (overrides: Partial<ApprovalView>): ApprovalView => ({
@@ -67,6 +78,41 @@ describe('standardPolicy', () => {
   });
 });
 
+describe('Brot-internal tools', () => {
+  it('match by bare name, with or without an engine prefix', () => {
+    expect(bareToolName('list_team')).toBe('list_team');
+    expect(bareToolName('brot.list_team')).toBe('list_team');
+    expect(bareToolName('mcp__brot__remember')).toBe('remember');
+    expect(isInternalTool('brot.delegate_task')).toBe(true);
+    expect(isInternalTool('http_request')).toBe(false);
+  });
+
+  it('gives every internal tool an allow policy, including the five team tools the runner must not gate', () => {
+    const policies = internalToolPolicies();
+    expect(policies.map((policy) => policy.tool)).toEqual([...INTERNAL_TOOL_NAMES]);
+    for (const tool of ['list_team', 'ask_bot', 'delegate_task', 'update_my_task', 'remember']) {
+      expect(policies.find((policy) => policy.tool === tool)).toEqual({ tool, effect: 'allow' });
+    }
+  });
+
+  it('counts the internal calls in the events, per tool, and ignores external calls', () => {
+    const call = (tool: string, callId: string): CanonicalEvent =>
+      ({ id: callId, type: 'tool.call', at: '2026-10-19T10:00:00.000Z', threadId: 't', callId, tool, args: {} }) as CanonicalEvent;
+    const events = [call('list_team', 'c1'), call('brot.list_team', 'c2'), call('delegate_task', 'c3'), call('http_request', 'c4')];
+    expect(countInternalCalls(events)).toEqual({ delegate_task: 1, list_team: 2 });
+    expect(countInternalCalls([])).toEqual({});
+  });
+});
+
+describe('the fake API for the sim cases', () => {
+  it('allows one send to httpbin.org and keeps denying every other POST', () => {
+    const simPolicy = standardPolicy({ httpbinSends: true });
+    expect(simPolicy.decide(view({ summary: 'POST https://httpbin.org/anything/A14/publish' })).action).toBe('allow_once');
+    expect(simPolicy.decide(view({ summary: 'POST https://api.github.com/repos/x/y/pulls' })).action).toBe('deny');
+    expect(standardPolicy().decide(view({ summary: 'POST https://httpbin.org/anything/A14/publish' })).action).toBe('deny');
+  });
+});
+
 describe('holdPolicy', () => {
   it('leaves everything pending', () => {
     expect(holdPolicy.decide(view({})).action).toBe('hold');
@@ -85,7 +131,8 @@ function fakeApi(pending: Array<Record<string, unknown>>) {
     if (match?.[1] && init?.method === 'POST') {
       const body = JSON.parse(String(init.body)) as { decision: string; reply?: unknown };
       decisions.push({ id: match[1], decision: body.decision, ...(body.reply === undefined ? {} : { reply: body.reply }) });
-      return new Response(JSON.stringify({ ...pending.find((item) => item.id === match[1]), status: body.decision === 'deny' ? 'denied' : 'allowed' }), { status: 200 });
+      const status = body.decision === 'deny' ? 'denied' : 'allowed';
+      return new Response(JSON.stringify({ ...pending.find((item) => item.id === match[1]), status, decision: body.decision }), { status: 200 });
     }
     return new Response('not found', { status: 404 });
   }) as typeof fetch;
@@ -126,9 +173,31 @@ describe('ApprovalDriver', () => {
       approvalId: 'a1',
       botKey: 'onca',
       action: 'deny',
+      decision: 'deny',
       timeToAppearMs: 2000,
       resolvedStatus: 'denied',
     });
+  });
+
+  it('records the decision the runner sent, as the server applied it', async () => {
+    const { api } = fakeApi([approval('a5', 'onca', 'POST https://httpbin.org/anything/A8/reminders')]);
+    const driver = new ApprovalDriver(api, {
+      caseId: 'A8',
+      policy: standardPolicy({ httpbinSends: true }),
+      pollMs: 1,
+      botIds: () => ['onca'],
+      botKeyOf: () => 'onca',
+    });
+    await driver.tick();
+    expect(driver.records[0]).toMatchObject({ action: 'allow_once', decision: 'allow_once', resolvedStatus: 'allowed' });
+    expect(driver.records[0]?.decidedAt).toBeDefined();
+  });
+
+  it('keeps the decision empty for a hold, since nothing was sent', async () => {
+    const { api } = fakeApi([approval('a6', 'onca', 'POST https://httpbin.org/anything/C6/send')]);
+    const driver = new ApprovalDriver(api, { caseId: 'C6', policy: holdPolicy, pollMs: 1, botIds: () => ['onca'], botKeyOf: () => 'onca' });
+    await driver.tick();
+    expect(driver.records[0]).toMatchObject({ action: 'hold', decision: null });
   });
 
   it('allows once when the policy allows, and never asks twice for one approval', async () => {

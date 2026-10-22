@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { Repos } from '@brot/db';
-import { modelHostsFor, type EngineRegistry } from '@brot/engines';
+import { modelHostsFor, type BrotRunContext, type EngineRegistry } from '@brot/engines';
 import type {
   Bot,
   ComputerHandle,
@@ -11,7 +11,6 @@ import type {
   LlmRoute,
   Message,
   Run,
-  RunContext,
   ToolDecision,
   ToolRequest,
 } from '@brot/protocol';
@@ -23,7 +22,7 @@ import type { ServerMode } from './config';
 import type { LlmRelay, ResolvedRoute, RunUsage } from './llm';
 import type { BrotMcp } from './mcp/types';
 import type { ChainLedger } from './rooms/chains';
-import { buildTurn } from './rooms/context';
+import { buildTurn, roomFor } from './rooms/context';
 import type { BotRunOutcome, BotRunRequest } from './team/types';
 
 /** Providers by the computer kind they serve. A `none` bot has no computer, so it has no entry. */
@@ -43,6 +42,8 @@ export interface HarnessDeps {
   chains: ChainLedger;
   /** Relays model requests of `RELAYED_ENGINES` runs, so the provider key never reaches the engine. */
   llm: LlmRelay;
+  /** Whether the Brot team tools are attached to runs that have the Brot MCP server. Shown to the engine in the prompt. */
+  teamTools?: boolean;
 }
 
 /**
@@ -116,6 +117,7 @@ type TerminalStatus = 'completed' | 'failed' | 'cancelled';
 
 export function createHarness(deps: HarnessDeps): Harness {
   const { repos, bus, broker, engines, computers, mcp, llm, mode, computerImage, loopbackUrl, chains } = deps;
+  const teamTools = deps.teamTools ?? false;
   /** Every run that has not ended, queued ones included, by run id. */
   const active = new Map<string, ActiveRun>();
   /**
@@ -159,7 +161,8 @@ export function createHarness(deps: HarnessDeps): Harness {
     if (!thread) throw new Error(`Thread ${req.threadId} does not exist`);
     const bot = await repos.bots.get(req.botId);
     if (!bot) throw new Error(`Bot ${req.botId} does not exist`);
-    if (req.chain) chains.assertCanStart(req.chain, bot);
+    const inRoom = thread.kind === 'room';
+    if (req.chain) chains.assertCanStart(req.chain, bot, inRoom);
     const key = laneKeyOf(thread.id, bot.id);
     if (req.queue === false && lanes.has(key)) throw new Error(busyMessage(bot.name));
 
@@ -171,12 +174,12 @@ export function createHarness(deps: HarnessDeps): Harness {
         content: req.input,
         ...(req.fromBotId === undefined ? {} : { authorBotId: req.fromBotId, viaBotId: bot.id }),
       }));
-    const ownSession = thread.kind === 'room' || bot.id !== thread.botId;
+    const ownSession = inRoom || bot.id !== thread.botId;
     const previousTriggerId = lastTrigger.get(key);
     lastTrigger.set(key, trigger.id);
 
     const run = await repos.runs.create({ threadId: thread.id, botId: bot.id, engine: bot.engine, model: bot.model });
-    if (req.chain) chains.enter(run.id, req.chain, bot);
+    if (req.chain) chains.enter(run.id, req.chain, bot, inRoom);
 
     let finish: (outcome: BotRunOutcome) => void = () => undefined;
     const settled = new Promise<BotRunOutcome>((resolve) => {
@@ -265,7 +268,8 @@ export function createHarness(deps: HarnessDeps): Harness {
       const mcpServers = mcp
         ? [mcp.specForRun({ botId: bot.id, threadId: state.threadId, runId: state.runId }, place.brotBaseUrl)]
         : undefined;
-      const ctx: RunContext = {
+      const room = await roomFor(repos, thread);
+      const ctx: BrotRunContext = {
         runId: state.runId,
         threadId: state.threadId,
         bot,
@@ -279,6 +283,8 @@ export function createHarness(deps: HarnessDeps): Harness {
         ...(place.computer === undefined ? {} : { computer: place.computer }),
         ...(mcpServers === undefined ? {} : { mcpServers }),
         ...(llmRoute === undefined ? {} : { llm: llmRoute }),
+        ...(room === undefined ? {} : { room }),
+        ...(teamTools && mcpServers !== undefined ? { teamTools: true } : {}),
       };
       for await (const event of driver.run(ctx)) {
         if (state.controller.signal.aborted) break;

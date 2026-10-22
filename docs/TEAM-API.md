@@ -34,3 +34,11 @@ Repo rule violations (depth, chain size, terminal status) map to `409`.
 | `handoff` | In a room, passes the baton: the target becomes the next responder. Emits `handoff` | write |
 
 Guards: `TEAM_MAX_DEPTH`, `TEAM_MAX_TASKS_PER_CHAIN`, `TEAM_MAX_ASK_HOPS`, a bot cannot ask/delegate to itself, no cycles within one ask chain, `teamBudgetUsd` (smallest cap in the chain) stops new work in the chain once spent. Delegation never widens permissions: the target runs with its own policies, egress and computer. A bot never answers another bot's approval.
+
+## Identity, guidance and limits
+
+- Every DSH session starts with an identity preamble: "You are <name>, <job>", the bot's instructions, and in rooms the room title, members with jobs, the lead, the responder mode, and "Messages labeled [Name] were written by that bot". Resumed room turns are prefixed with `[You are <name>]`. Without this, bots in a room took each other's identity (found in eval B6).
+- When team tools are attached, the preamble explains when to use each one; the tool descriptions say the same.
+- Per-run caps (a tool error past the cap): `list_team` 1, `ask_bot` 3, `delegate_task` 6, `update_my_task` 5, `handoff` 3.
+- Each room message opens one chain shared by all its replies and the work they delegate. Budget: the smallest `teamBudgetUsd` in the chain, else `BROT_TEAM_CHAIN_BUDGET_USD` (default 1.00). When it is spent, new work in the chain stops and a system note is posted in the room.
+- A task ends exactly once, either through `update_my_task` or when its work run settles (done with the final text, or failed/cancelled). Its result is posted to the task's thread and the delegator is notified once, queued behind any run it already has in that thread.
