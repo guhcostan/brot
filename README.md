@@ -23,7 +23,7 @@ Every bot has a job, a model, its own computer, and your apps. Talk to them like
 | 🧠 **Any brain** | One runtime, the DeepSeek Harness, with any provider: DeepSeek, Anthropic, OpenAI, OpenRouter, local models |
 | ✋ **You hold the keys** | Payments, posts, and deletions wait for your approval. Secrets never reach the model |
 | 📱 **Pair your phone** | Scan a QR code and control bots on your laptop or in the cloud |
-| 🔬 **Teardowns** | Built-in [REA](https://github.com/morluto/rea): point a bot at an app and get an evidence-backed explanation of how it works |
+| 🔬 **Teardowns** | *Planned:* [REA](https://github.com/morluto/rea) teardowns — point a bot at an app and get an evidence-backed explanation of how it works ([spec](docs/REA-INTEGRATION.md)) |
 
 ## Quick start
 

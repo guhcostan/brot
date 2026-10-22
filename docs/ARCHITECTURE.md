@@ -1,5 +1,14 @@
 # Architecture
 
+> **As built today (2026-10-22):** a single Node server (`apps/server`, Hono) on 127.0.0.1 with
+> SQLite/libSQL, one runtime (DSH over ACP), Docker sandbox computers with per-bot egress sidecars, a
+> host computer on macOS, a permission broker, an AES-256-GCM vault, routines on croner, and a React web
+> app plus Electron shell, Expo app and CLI. **Not built yet:** Postgres, multi-tenant Cloud, Better Auth,
+> Firecracker, the MCP client hub (Composio/user MCP/REA), embeddings, pg-boss, `computerd`, noVNC/KasmVNC,
+> and the cloud control plane. The diagrams and tables below describe the target shape; see
+> `docs/STATUS.md` for current state and `docs/MAUSBOT-PARITY.md` for the plan.
+
+
 ## One codebase, three deployment shapes
 
 ```
@@ -21,12 +30,12 @@ The **server is the product**. Desktop and Cloud are packaging. A self-hoster ru
         │ typed HTTP   │ SSE (canonical events)
  ┌──────▼──────────────┴──────────────────────────────────────────┐
  │ apps/server  (Hono, Node 24)                                   │
- │  ├─ api/          REST + SSE, auth (Better Auth), zod contracts │
+ │  ├─ api/          REST + SSE, loopback trust + device tokens       │
  │  ├─ harness/      run loop, event bus, thread log, cost meter   │
  │  ├─ engines/      drivers: dsh (ACP) · mock (tests)          │
  │  ├─ broker/       permission broker → approvals, policies       │
  │  ├─ computers/    host(Cua) · docker · firecracker · remote     │
- │  ├─ tools/        MCP client hub (Composio, user MCP, REA)      │
+ │  ├─ tools/        MCP server for bots (no client hub yet)       │
  │  ├─ memory/       facts, summaries, embeddings (sqlite-vec/pgvector) │
  │  ├─ scheduler/    routines, triggers (croner local / pg-boss)   │
  │  ├─ hooks/        webhook receiver (separate port, secret URLs) │

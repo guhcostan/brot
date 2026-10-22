@@ -1,5 +1,9 @@
 # REA Integration: Teardowns
 
+> **Status: planned, not implemented.** No REA code, image layer or MCP server exists in this repository
+> yet; `docs/STATUS.md` and `docs/MAUSBOT-PARITY.md` are the source of truth for what runs. This document
+> is the design we intend to build.
+
 [REA — Reverse Engineer Anything](https://github.com/morluto/rea) (MIT) is an MCP server + CLI that lets agents analyze software and return **findings with evidence and stated limitations**. Brot ships it as a first-class tool so a bot can study how a feature works and hand that understanding to an engineer bot to rebuild it.
 
 > **Responsible use.** REA is for lawful work: interoperability, education, software preservation, security research, and analysis of software the user owns or is authorized to examine. Brot surfaces REA's own responsible-use notice and requires the user to acknowledge authorization before a teardown runs (feature H6 in [`PRODUCT.md`](./PRODUCT.md)). Teardowns are not used to defeat protections or site access controls.
