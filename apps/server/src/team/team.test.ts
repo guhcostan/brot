@@ -20,6 +20,7 @@ interface FakeRunner extends TeamRunner {
   readonly runs: BotRunRequest[];
   readonly starts: BotRunRequest[];
   readonly chains: Map<string, ChainRef>;
+  readonly attached: Array<[runId: string, chainId: string]>;
   onRun: (req: BotRunRequest) => Promise<BotRunOutcome>;
   failStart?: Error;
   /** How the run started by `startBot` ends. Defaults to a completed run. */
@@ -35,11 +36,16 @@ function createFakeRunner(spentUsd?: (chainId: string) => number): FakeRunner {
   const runs: BotRunRequest[] = [];
   const starts: BotRunRequest[] = [];
   const chains = new Map<string, ChainRef>();
+  const attached: Array<[string, string]> = [];
   const held = new Map<string, (outcome: BotRunOutcome) => void>();
   const runner: FakeRunner = {
     runs,
     starts,
     chains,
+    attached,
+    attachSpend(runId, chainId) {
+      attached.push([runId, chainId]);
+    },
     onRun: async () => ({ runId: 'run-target', status: 'completed', text: 'Ship it' }),
     async runBot(req) {
       runs.push(req);
@@ -442,6 +448,78 @@ describe('delegate_task', () => {
     const [task] = await f.repos.tasks.list({ assigneeBotId: bo.id });
     expect(task).toMatchObject({ status: 'failed', result: 'Could not start Bo: engine offline' });
     expect(f.events.map((event) => event.type)).toEqual(['task.created', 'task.updated', 'task.updated']);
+  });
+
+  it('makes every delegation from one top-level run share one chain, and counts the run once', async () => {
+    const f = await setup();
+    f.runner.holdRuns = true;
+    const ada = await f.bot('Ada');
+    const bo = await f.bot('Bo');
+    const cy = await f.bot('Cy');
+    const scope = await f.scope(ada, await f.thread(ada));
+
+    await invoke(f.tool('delegate_task'), scope, { botName: 'Bo', title: 'First' });
+    await invoke(f.tool('delegate_task'), scope, { botName: 'Cy', title: 'Second' });
+
+    const [first] = await f.repos.tasks.list({ assigneeBotId: bo.id });
+    const [second] = await f.repos.tasks.list({ assigneeBotId: cy.id });
+    expect(first).toMatchObject({ chainId: first?.id, depth: 1, parentTaskId: undefined });
+    expect(second).toMatchObject({ chainId: first?.chainId, depth: 1, parentTaskId: undefined });
+    expect(f.runner.attached).toEqual([[scope.runId, first?.chainId]]);
+  });
+
+  it('shares one chain between delegations that run at the same time', async () => {
+    const f = await setup();
+    f.runner.holdRuns = true;
+    const ada = await f.bot('Ada');
+    const bo = await f.bot('Bo');
+    const cy = await f.bot('Cy');
+    const scope = await f.scope(ada, await f.thread(ada));
+
+    const results = await Promise.all([
+      invoke(f.tool('delegate_task'), scope, { botName: 'Bo', title: 'Parallel one' }),
+      invoke(f.tool('delegate_task'), scope, { botName: 'Cy', title: 'Parallel two' }),
+    ]);
+
+    expect(results.map((result) => result.ok)).toEqual([true, true]);
+    const [first] = await f.repos.tasks.list({ assigneeBotId: bo.id });
+    const [second] = await f.repos.tasks.list({ assigneeBotId: cy.id });
+    expect(second?.chainId).toBe(first?.chainId);
+    expect(f.runner.attached).toHaveLength(1);
+  });
+
+  it('starts a separate chain for delegations from two different top-level runs', async () => {
+    const f = await setup();
+    f.runner.holdRuns = true;
+    const ada = await f.bot('Ada');
+    const bo = await f.bot('Bo');
+    const cy = await f.bot('Cy');
+    const thread = await f.thread(ada);
+
+    await invoke(f.tool('delegate_task'), await f.scope(ada, thread), { botName: 'Bo', title: 'From one run' });
+    await invoke(f.tool('delegate_task'), await f.scope(ada, thread), { botName: 'Cy', title: 'From another run' });
+
+    const [first] = await f.repos.tasks.list({ assigneeBotId: bo.id });
+    const [second] = await f.repos.tasks.list({ assigneeBotId: cy.id });
+    expect(first?.chainId).toBeDefined();
+    expect(second?.chainId).toBeDefined();
+    expect(second?.chainId).not.toBe(first?.chainId);
+  });
+
+  it('keeps a work run delegating under its own task, in that task chain', async () => {
+    const f = await setup();
+    f.runner.holdRuns = true;
+    const ada = await f.bot('Ada');
+    const bo = await f.bot('Bo');
+    const cy = await f.bot('Cy');
+    const thread = await f.thread(ada);
+    const root = await f.repos.tasks.create({ title: 'Root', assigneeBotId: bo.id, threadId: thread.id, createdByBotId: ada.id });
+    const working = await f.scope(bo, thread, { chainId: root.chainId, depth: root.depth, askHops: 0 });
+
+    await invoke(f.tool('delegate_task'), working, { botName: 'Cy', title: 'Under root', parentTaskId: root.id });
+
+    const [child] = await f.repos.tasks.list({ assigneeBotId: cy.id });
+    expect(child).toMatchObject({ chainId: root.chainId, parentTaskId: root.id, depth: root.depth + 1 });
   });
 });
 

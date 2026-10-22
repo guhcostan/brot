@@ -36,4 +36,14 @@ describe('chain ledger', () => {
     expect(() => ledger.assertCanStart(root, {})).toThrow(/budget/);
     expect(() => ledger.assertCanStart({ ...root, chainId: 'other' }, {})).not.toThrow();
   });
+
+  it('counts a top-level run once toward the chain it starts, with the cost it had already run up', () => {
+    const ledger = createChainLedger();
+    ledger.recordUsage('caller', 0.4);
+    ledger.attachSpend('caller', 'chain-1');
+    ledger.attachSpend('caller', 'chain-1');
+    ledger.recordUsage('caller', 0.1);
+    expect(ledger.spentUsd('chain-1')).toBeCloseTo(0.5);
+    expect(ledger.chainOf('caller')).toBeUndefined();
+  });
 });

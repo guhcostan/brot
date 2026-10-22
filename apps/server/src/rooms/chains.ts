@@ -16,12 +16,19 @@ export interface ChainLedger {
   enter(runId: string, chain: ChainRef, bot: Budgeted): void;
   /** Adds what a run has cost so far to its chain. Runs outside a chain are ignored. */
   recordUsage(runId: string, costUsd: number): void;
+  /**
+   * Counts a run that is not a chain member toward `chainId`: its cost so far, then each later report. A run
+   * already in a chain, or already attached, is left as it is.
+   */
+  attachSpend(runId: string, chainId: string): void;
   chainOf(runId: string): ChainRef | undefined;
   spentUsd(chainId: string): number;
 }
 
 export function createChainLedger(): ChainLedger {
   const runChains = new Map<string, ChainRef>();
+  const runSpend = new Map<string, number>();
+  const attached = new Map<string, string>();
   const spent = new Map<string, number>();
   const caps = new Map<string, number>();
 
@@ -52,9 +59,18 @@ export function createChainLedger(): ChainLedger {
     },
 
     recordUsage(runId, costUsd) {
-      const chain = runChains.get(runId);
-      if (!chain || costUsd === 0) return;
-      spent.set(chain.chainId, (spent.get(chain.chainId) ?? 0) + costUsd);
+      if (costUsd === 0) return;
+      runSpend.set(runId, (runSpend.get(runId) ?? 0) + costUsd);
+      const chainId = runChains.get(runId)?.chainId ?? attached.get(runId);
+      if (chainId === undefined) return;
+      spent.set(chainId, (spent.get(chainId) ?? 0) + costUsd);
+    },
+
+    attachSpend(runId, chainId) {
+      if (runChains.has(runId) || attached.has(runId)) return;
+      attached.set(runId, chainId);
+      const prior = runSpend.get(runId) ?? 0;
+      if (prior > 0) spent.set(chainId, (spent.get(chainId) ?? 0) + prior);
     },
 
     chainOf(runId) {

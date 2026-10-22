@@ -87,6 +87,7 @@ async function seedFirstBot(repos: Repos): Promise<void> {
   await repos.bots.create({
     name: 'Capy',
     job: 'Chief of Staff',
+    avatar: 'capivara:black',
     engine: 'mock',
     // The mock engine runs no tools, so the seeded bot needs no computer until a real engine is chosen.
     computer: 'none',

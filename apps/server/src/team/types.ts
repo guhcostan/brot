@@ -42,4 +42,9 @@ export interface TeamRunner {
   startBot(req: BotRunRequest): Promise<StartedRun>;
   /** The chain the given run belongs to, if any. */
   chainOf(runId: string): ChainRef | undefined;
+  /**
+   * Counts what a run that is not a chain member has cost, and what it spends from now on, toward `chainId`.
+   * Idempotent per run, so a run that delegates several times is counted once.
+   */
+  attachSpend?(runId: string, chainId: string): void;
 }

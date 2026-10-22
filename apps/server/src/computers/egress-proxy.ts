@@ -11,8 +11,8 @@ import { pathToFileURL } from 'node:url';
  * other member and also sits on the default bridge, which is the only route to the internet. The sidecar serves:
  * - a proxy (HTTP CONNECT to port 443, plain HTTP to port 80) for allowlisted names whose resolved addresses
  *   are all public. It connects to the address it validated and never resolves the name a second time.
- * - a relay on the Brot port to `internal`, so the computer reaches the Brot MCP endpoint and nothing else on
- *   the host.
+ * - a relay on the Brot port to `internal`. It forwards only the run's MCP and model-relay requests, checked
+ *   request by request at the HTTP level, so the computer reaches nothing else on the host.
  * Both listeners accept clients only from the internal network's subnet.
  */
 
@@ -441,9 +441,154 @@ export function createEgressProxy(config: EgressPolicyConfig, deps: EgressDeps =
   });
 }
 
+const MCP_METHODS = new Set(['GET', 'POST', 'DELETE']);
+const LLM_METHODS = new Set(['GET', 'POST']);
+
 /**
- * The Brot endpoint relay. Forwards every connection to `target` and nothing else. The computer reaches the
- * Brot MCP server through it without a route to the host.
+ * True when a request names a path the relay forwards: the MCP endpoint of a run (`/mcp/runs/<id>...`) or the
+ * model relay of a run (`/llm/runs/<id>/v1/...`), with the methods those routes use. Everything else, including
+ * `/api/*`, is refused. Dot segments and encoded separators are refused rather than normalized.
+ */
+export function relayRouteAllowed(method: string, target: string): boolean {
+  if (!target.startsWith('/') || target.startsWith('//') || /[#\s\\]/.test(target)) return false;
+  const path = target.split('?')[0] ?? '';
+  let segments: string[];
+  try {
+    segments = path.slice(1).split('/').map((segment) => decodeURIComponent(segment));
+  } catch {
+    return false;
+  }
+  if (segments.some((segment) => segment === '.' || segment === '..' || segment.includes('/'))) return false;
+  const [root, runs, runId, version] = segments;
+  if (runs !== 'runs' || runId === undefined || runId === '') return false;
+  if (root === 'mcp') return MCP_METHODS.has(method);
+  if (root === 'llm') return version === 'v1' && LLM_METHODS.has(method);
+  return false;
+}
+
+type Framing = { kind: 'none' } | { kind: 'length'; length: number } | { kind: 'chunked' };
+
+interface RequestHead {
+  method: string;
+  target: string;
+  framing: Framing;
+}
+
+/** Parses an HTTP/1.x request head (without its final blank line's CRLF pair). Undefined when it is malformed. */
+function parseRequestHead(head: string): RequestHead | undefined {
+  const lines = head.slice(0, -4).split('\r\n');
+  const [method = '', target = '', version = ''] = (lines[0] ?? '').split(' ');
+  if (!/^[A-Z]+$/.test(method) || !/^HTTP\/1\.[01]$/.test(version) || target === '') return undefined;
+  let length: number | undefined;
+  let chunked = false;
+  for (const line of lines.slice(1)) {
+    const colon = line.indexOf(':');
+    if (colon <= 0 || /\s/.test(line.slice(0, colon))) return undefined;
+    const name = line.slice(0, colon).toLowerCase();
+    const value = line.slice(colon + 1).trim();
+    if (name === 'upgrade') return undefined;
+    if (name === 'transfer-encoding') {
+      if (chunked || value.toLowerCase() !== 'chunked') return undefined;
+      chunked = true;
+    }
+    if (name === 'content-length') {
+      if (!/^\d+$/.test(value)) return undefined;
+      if (length !== undefined && length !== Number(value)) return undefined;
+      length = Number(value);
+    }
+  }
+  if (chunked && length !== undefined) return undefined;
+  const framing: Framing = chunked ? { kind: 'chunked' } : length === undefined ? { kind: 'none' } : { kind: 'length', length };
+  return { method, target, framing };
+}
+
+type Step = { kind: 'request'; method: string; target: string; bytes: Buffer } | { kind: 'data'; bytes: Buffer };
+
+type FramerMode =
+  | { kind: 'head' }
+  | { kind: 'length'; remaining: number }
+  | { kind: 'chunk-size' }
+  | { kind: 'chunk-data'; remaining: number }
+  | { kind: 'chunk-end' }
+  | { kind: 'trailer' };
+
+/**
+ * Splits a client's bytes into requests and their bodies, byte for byte, so the relay can check each request
+ * line before it is forwarded and keep a keep-alive connection's later requests under the same check. Bodies
+ * are streamed through as they arrive; nothing waits for a response.
+ */
+class RequestFramer {
+  private pending = Buffer.alloc(0);
+  private mode: FramerMode = { kind: 'head' };
+
+  /** Returns the steps for these bytes, or undefined when they are not HTTP/1.x requests. */
+  feed(chunk: Buffer): Step[] | undefined {
+    const steps: Step[] = [];
+    let buf = this.pending.length === 0 ? chunk : Buffer.concat([this.pending, chunk]);
+    this.pending = Buffer.alloc(0);
+    for (;;) {
+      const mode = this.mode;
+      if (mode.kind === 'head') {
+        const end = buf.indexOf('\r\n\r\n');
+        if (end === -1) {
+          if (buf.length > MAX_HEAD_BYTES) return undefined;
+          this.pending = Buffer.from(buf);
+          return steps;
+        }
+        const bytes = buf.subarray(0, end + 4);
+        buf = buf.subarray(end + 4);
+        const head = parseRequestHead(bytes.toString('latin1'));
+        if (head === undefined) return undefined;
+        steps.push({ kind: 'request', method: head.method, target: head.target, bytes });
+        if (head.framing.kind === 'chunked') this.mode = { kind: 'chunk-size' };
+        else if (head.framing.kind === 'length' && head.framing.length > 0) this.mode = { kind: 'length', remaining: head.framing.length };
+        else this.mode = { kind: 'head' };
+      } else if (mode.kind === 'length' || mode.kind === 'chunk-data') {
+        if (buf.length === 0) return steps;
+        const n = Math.min(mode.remaining, buf.length);
+        steps.push({ kind: 'data', bytes: buf.subarray(0, n) });
+        buf = buf.subarray(n);
+        const remaining = mode.remaining - n;
+        if (remaining > 0) this.mode = { kind: mode.kind, remaining } as FramerMode;
+        else this.mode = mode.kind === 'length' ? { kind: 'head' } : { kind: 'chunk-end' };
+      } else if (mode.kind === 'chunk-size' || mode.kind === 'trailer') {
+        const end = buf.indexOf('\r\n');
+        if (end === -1) {
+          if (buf.length > MAX_HEAD_BYTES) return undefined;
+          this.pending = Buffer.from(buf);
+          return steps;
+        }
+        const line = buf.subarray(0, end).toString('latin1');
+        steps.push({ kind: 'data', bytes: buf.subarray(0, end + 2) });
+        buf = buf.subarray(end + 2);
+        if (mode.kind === 'trailer') {
+          this.mode = line === '' ? { kind: 'head' } : { kind: 'trailer' };
+        } else {
+          const match = /^([0-9a-fA-F]+)(;.*)?$/.exec(line);
+          if (match === null) return undefined;
+          const size = Number.parseInt(match[1] ?? '', 16);
+          this.mode = size === 0 ? { kind: 'trailer' } : { kind: 'chunk-data', remaining: size };
+        }
+      } else {
+        if (buf.length < 2) {
+          this.pending = Buffer.from(buf);
+          return steps;
+        }
+        if (buf[0] !== 0x0d || buf[1] !== 0x0a) return undefined;
+        steps.push({ kind: 'data', bytes: buf.subarray(0, 2) });
+        buf = buf.subarray(2);
+        this.mode = { kind: 'chunk-size' };
+      }
+    }
+  }
+}
+
+const FORBIDDEN_RESPONSE = 'HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n';
+
+/**
+ * The Brot endpoint relay. Forwards to `target` only the requests `relayRouteAllowed` accepts. A refused request
+ * (or anything that is not HTTP/1.x) gets a bare 403 and the connection closes. Accepted requests keep their
+ * bytes exactly, so streamed responses (SSE, chunked) and long-lived MCP connections pass through unchanged.
  */
 export function createRelay(
   target: { host: string; port: number },
@@ -454,19 +599,95 @@ export function createRelay(
   const dial = deps.dial ?? dialAddress;
   const fromInternal = sourceFilter(config.sourceCidr);
   const host = normalizeHost(target.host);
+
+  async function connectTarget(): Promise<Socket | undefined> {
+    let resolved: ResolvedAddress[];
+    try {
+      resolved = await resolve(host);
+    } catch {
+      return undefined;
+    }
+    if (resolved.length === 0) return undefined;
+    return openUpstream(
+      resolved.map((entry) => entry.address),
+      target.port,
+      dial,
+    );
+  }
+
   return makeServer((client) => {
     if (!fromInternal(client.remoteAddress)) {
       client.destroy();
       return;
     }
+    client.setTimeout(IDLE_TIMEOUT_MS, () => client.destroy());
     client.on('error', () => client.destroy());
-    resolve(host)
-      .then((resolved) => openUpstream(resolved.map((entry) => entry.address), target.port, dial))
-      .then((upstream) => {
-        if (upstream === undefined) client.destroy();
-        else tunnel(client, upstream);
-      })
-      .catch(() => client.destroy());
+
+    const framer = new RequestFramer();
+    let upstream: Socket | undefined;
+    let refused = false;
+
+    const refuse = (): void => {
+      if (refused) return;
+      refused = true;
+      upstream?.destroy();
+      client.once('finish', () => client.destroy());
+      client.end(FORBIDDEN_RESPONSE);
+    };
+
+    const waitForDrain = (socket: Socket): Promise<void> =>
+      new Promise((done) => {
+        socket.once('drain', done);
+        socket.once('close', done);
+      });
+
+    const process = async (chunk: Buffer): Promise<void> => {
+      if (refused) return;
+      const steps = framer.feed(chunk);
+      if (steps === undefined) return refuse();
+      for (const step of steps) {
+        if (refused) return;
+        if (step.kind === 'request' && !relayRouteAllowed(step.method, step.target)) return refuse();
+        if (upstream === undefined) {
+          if (step.kind !== 'request') return refuse();
+          const connected = await connectTarget();
+          if (connected === undefined) {
+            client.end('HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n');
+            refused = true;
+            return;
+          }
+          upstream = connected;
+          upstream.setTimeout(IDLE_TIMEOUT_MS, () => upstream?.destroy());
+          upstream.on('error', () => upstream?.destroy());
+          upstream.on('end', () => client.end());
+          upstream.on('close', () => {
+            if (!refused) client.end();
+          });
+          upstream.pipe(client, { end: false });
+        }
+        if (!upstream.write(step.bytes)) await waitForDrain(upstream);
+      }
+    };
+
+    let queue: Promise<void> = Promise.resolve();
+    client.on('data', (chunk: Buffer) => {
+      client.pause();
+      queue = queue.then(() => process(chunk)).then(
+        () => {
+          if (!refused) client.resume();
+        },
+        () => {
+          client.destroy();
+        },
+      );
+    });
+    client.on('end', () => {
+      queue = queue.then(() => {
+        if (upstream === undefined) client.end();
+        else upstream.end();
+      });
+    });
+    client.on('close', () => upstream?.destroy());
   });
 }
 

@@ -10,10 +10,55 @@ interface DelegationPlan {
   parent?: Task;
   depth: number;
   askHops: number;
+  /** True when the caller is a top-level run (not a work run), so its delegations share one chain. */
+  topLevel: boolean;
+  /** The chain a top-level run's earlier delegation started. Undefined until the run's first delegation. */
+  rootChainId?: string;
+}
+
+/**
+ * The chain each top-level run's delegations share. The run's first delegation starts the chain with its own
+ * id and records it here; later delegations from the same run join it. Keyed by run, so two runs never share.
+ */
+interface RootChains {
+  get(runId: string): string | undefined;
+  set(runId: string, chainId: string): void;
+  /** Runs `work` after earlier work for the same run, so parallel delegations from one run settle one chain. */
+  exclusive<T>(runId: string, work: () => Promise<T>): Promise<T>;
+}
+
+const MAX_TRACKED_RUNS = 1024;
+
+function createRootChains(): RootChains {
+  const chains = new Map<string, string>();
+  const queues = new Map<string, Promise<unknown>>();
+  return {
+    get: (runId) => chains.get(runId),
+    set(runId, chainId) {
+      if (!chains.has(runId) && chains.size >= MAX_TRACKED_RUNS) {
+        const oldest = chains.keys().next();
+        if (!oldest.done) chains.delete(oldest.value);
+      }
+      chains.set(runId, chainId);
+    },
+    exclusive<T>(runId: string, work: () => Promise<T>): Promise<T> {
+      const next = (queues.get(runId) ?? Promise.resolve()).then(work, work);
+      const tail = next.then(
+        () => undefined,
+        () => undefined,
+      );
+      queues.set(runId, tail);
+      void tail.then(() => {
+        if (queues.get(runId) === tail) queues.delete(runId);
+      });
+      return next;
+    },
+  };
 }
 
 /** Hands a task to another bot. It starts in that bot's DM thread and runs without waiting. */
 export function createDelegateTaskTool(deps: TeamDeps): BrotTool {
+  const roots = createRootChains();
   return {
     spec: {
       name: 'delegate_task',
@@ -32,17 +77,19 @@ export function createDelegateTaskTool(deps: TeamDeps): BrotTool {
       if (target.id === scope.botId) return { error: 'A bot cannot delegate a task to itself.' };
 
       const { title, description, parentTaskId } = parsed.data;
-      const plan = await planDelegation(deps, scope, target, parentTaskId);
+      const plan = await planDelegation(deps, scope, target, parentTaskId, roots);
       if ('error' in plan) return plan;
 
       return {
         risk: 'write',
         kind: 'other',
         summary: `Delegate to ${target.name}: ${title}`.replace(/\s+/g, ' ').slice(0, 300),
-        async run() {
-          const current = await planDelegation(deps, scope, target, parentTaskId);
-          if ('error' in current) return { ok: false, output: current.error };
-          return delegate(deps, scope, target, { title, description }, current);
+        run() {
+          return roots.exclusive(scope.runId, async () => {
+            const current = await planDelegation(deps, scope, target, parentTaskId, roots);
+            if ('error' in current) return { ok: false, output: current.error };
+            return delegate(deps, scope, target, { title, description }, current, roots);
+          });
         },
       };
     },
@@ -51,14 +98,16 @@ export function createDelegateTaskTool(deps: TeamDeps): BrotTool {
 
 /**
  * Where a new delegation sits. Under a named parent it joins the parent's chain one level deeper. Without
- * one, a bot at the top of its chain gets a child in that chain, and a bot deeper than that must name
- * its parent, so a delegation can never reset the depth.
+ * one, a work run's delegation is a child in its own chain, and a top-level run's delegations all share the
+ * chain its first delegation started. A work run deeper than the top must name its parent, so a delegation
+ * can never reset the depth.
  */
 async function planDelegation(
   deps: TeamDeps,
   scope: ApprovalScope,
   target: Bot,
   parentTaskId: string | undefined,
+  roots: RootChains,
 ): Promise<DelegationPlan | { error: string }> {
   const { repos, runner } = deps;
   const callerChain = runner.chainOf(scope.runId);
@@ -78,20 +127,22 @@ async function planDelegation(
     }
   }
 
+  const topLevel = callerChain === undefined;
+  const rootChainId = parent === undefined && topLevel ? roots.get(scope.runId) : undefined;
   const depth = parent ? parent.depth + 1 : 1;
   if (depth > TEAM_MAX_DEPTH) {
     return {
       error: `A delegated task may be at most depth ${TEAM_MAX_DEPTH}; this one would be depth ${depth}. Do this part yourself.`,
     };
   }
-  if (parent && (await repos.tasks.list({ chainId: parent.chainId })).length >= TEAM_MAX_TASKS_PER_CHAIN) {
+  const chainId = parent?.chainId ?? callerChain?.chainId ?? rootChainId;
+  if (chainId !== undefined && (await repos.tasks.list({ chainId })).length >= TEAM_MAX_TASKS_PER_CHAIN) {
     return { error: `This chain already holds ${TEAM_MAX_TASKS_PER_CHAIN} tasks.` };
   }
-  const chainId = parent?.chainId ?? callerChain?.chainId;
   if (chainId !== undefined && (await chainBudgetSpent(deps, chainId, [scope.botId, target.id]))) {
     return { error: 'The team budget for this chain is spent, so no new work can start.' };
   }
-  return { parent, depth, askHops: parent && callerChain ? callerChain.askHops : 0 };
+  return { parent, depth, askHops: parent && callerChain ? callerChain.askHops : 0, topLevel, rootChainId };
 }
 
 async function delegate(
@@ -100,6 +151,7 @@ async function delegate(
   target: Bot,
   input: { title: string; description?: string },
   plan: DelegationPlan,
+  roots: RootChains,
 ): Promise<ToolResult> {
   const { repos, bus, runner } = deps;
 
@@ -112,9 +164,15 @@ async function delegate(
       threadId: scope.threadId,
       createdByBotId: scope.botId,
       parentTaskId: plan.parent?.id,
+      chainId: plan.parent === undefined ? plan.rootChainId : undefined,
     });
   } catch (error) {
     return { ok: false, output: errorMessage(error) };
+  }
+  if (plan.topLevel && plan.rootChainId === undefined) {
+    roots.set(scope.runId, task.chainId);
+    // The caller run's spend now counts toward this chain, once, whatever number of delegations it makes.
+    runner.attachSpend?.(scope.runId, task.chainId);
   }
   await bus.publish({ type: 'task.created', threadId: task.threadId, runId: scope.runId, task });
 

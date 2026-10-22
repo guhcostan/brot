@@ -137,7 +137,8 @@ describe.skipIf(!imagesBuilt)('docker provider against a real daemon', () => {
     try {
       const handle = await provider.ensure(botFor(botId), quiet);
       const endpoint = provider.internalEndpoint().url;
-      expect(await run(handle, ['sh', '-c', `curl -sS --max-time 8 ${endpoint}/`])).toContain('brot-endpoint-ok');
+      expect(await run(handle, ['sh', '-c', `curl -sS --max-time 8 ${endpoint}/mcp/runs/run_1`])).toContain('brot-endpoint-ok');
+      expect(await run(handle, ['sh', '-c', `curl -sS -o /dev/null -w '%{http_code}' --max-time 8 ${endpoint}/api/threads`])).toBe('403');
     } finally {
       await provider.stop(botId);
       await provider.close();

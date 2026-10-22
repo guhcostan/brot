@@ -25,6 +25,10 @@ export function createTeamRunner(deps: { harness: () => Harness; chains: ChainLe
       return deps.chains.chainOf(runId);
     },
 
+    attachSpend(runId: string, chainId: string): void {
+      deps.chains.attachSpend(runId, chainId);
+    },
+
     chainSpentUsd(chainId: string): number {
       return deps.chains.spentUsd(chainId);
     },

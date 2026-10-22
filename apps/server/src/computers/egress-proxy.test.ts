@@ -14,6 +14,7 @@ import {
   normalizeHost,
   parseCidr,
   parseSidecarConfig,
+  relayRouteAllowed,
   type ResolvedAddress,
 } from './egress-proxy';
 
@@ -318,37 +319,170 @@ describe('egress proxy: plain HTTP', () => {
   });
 });
 
+describe('relay routes', () => {
+  it.each([
+    ['GET', '/mcp/runs/run_1'],
+    ['POST', '/mcp/runs/run_1/'],
+    ['DELETE', '/mcp/runs/run_1?session=abc'],
+    ['POST', '/llm/runs/run_1/v1/chat/completions'],
+    ['GET', '/llm/runs/run_1/v1/models'],
+  ])('forwards %s %s', (method, target) => {
+    expect(relayRouteAllowed(method, target)).toBe(true);
+  });
+
+  it.each([
+    ['GET', '/api/threads'],
+    ['POST', '/api/runs/run_1/cancel'],
+    ['GET', '/mcp/runs/'],
+    ['GET', '/mcp/runsx/run_1'],
+    ['GET', '//mcp/runs/run_1'],
+    ['DELETE', '/llm/runs/run_1/v1/models'],
+    ['GET', '/llm/runs/run_1/api/threads'],
+    ['GET', '/mcp/runs/run_1/%2e%2e/%2e%2e/api/threads'],
+    ['GET', '/mcp/runs/run_1/../../api/threads'],
+    ['GET', 'http://brot.internal.test/mcp/runs/run_1'],
+    ['CONNECT', 'brot.internal.test:8799'],
+    ['GET', '/mcp/runs/run_1#fragment'],
+  ])('refuses %s %s', (method, target) => {
+    expect(relayRouteAllowed(method, target)).toBe(false);
+  });
+});
+
 describe('egress relay', () => {
-  it('forwards the Brot endpoint and nothing else', async () => {
-    const echo = await echoServer();
+  /** A relay to a local HTTP server that echoes the request path. Records every dial. */
+  async function relayToWeb(): Promise<{ port: number; dialed: Array<[string, number]> }> {
+    const web = await httpServer();
     const dialed: Array<[string, number]> = [];
     const relay = createRelay({ host: 'brot.internal.test', port: 8799 }, { sourceCidr: null }, {
       resolve: resolveFake,
-      dial: dialLocal({ 8799: echo }, dialed),
+      dial: dialLocal({ 8799: web }, dialed),
     });
     const port = await relay.listen(0, '127.0.0.1');
     cleanups.push(() => relay.close());
-    const socket = connect({ host: '127.0.0.1', port });
-    socket.on('error', () => undefined);
-    cleanups.push(async () => {
-    socket.destroy();
-  });
-    await once(socket, 'connect');
-    expect(await echoRoundTrip(socket, 'mcp-call')).toBe('mcp-call');
-    expect(dialed).toEqual([['10.0.0.9', 8799]]);
+    return { port, dialed };
+  }
+
+  /** Sends raw bytes and resolves with everything the relay returns before it closes the connection. */
+  function exchange(port: number, bytes: string): Promise<string> {
+    return new Promise((resolve) => {
+      const socket = connect({ host: '127.0.0.1', port });
+      let received = '';
+      socket.setEncoding('latin1');
+      socket.on('data', (chunk: string) => (received += chunk));
+      socket.on('error', () => undefined);
+      socket.on('close', () => resolve(received));
+      socket.write(bytes);
+    });
+  }
+
+  it('forwards the MCP endpoint and the model relay of a run', async () => {
+    const { port, dialed } = await relayToWeb();
+    const mcp = await exchange(port, 'POST /mcp/runs/run_1 HTTP/1.1\r\nHost: brot\r\nContent-Length: 4\r\nConnection: close\r\n\r\nping');
+    const llm = await exchange(port, 'POST /llm/runs/run_1/v1/chat/completions HTTP/1.1\r\nHost: brot\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}');
+    expect(mcp).toContain('HTTP/1.1 200');
+    expect(mcp).toContain('path=/mcp/runs/run_1');
+    expect(llm).toContain('path=/llm/runs/run_1/v1/chat/completions');
+    expect(dialed).toEqual([
+      ['10.0.0.9', 8799],
+      ['10.0.0.9', 8799],
+    ]);
   });
 
-  it('drops clients outside the internal subnet', async () => {
-    const relay = createRelay({ host: 'brot.internal.test', port: 8799 }, { sourceCidr: '10.250.0.0/16' }, {
+  it('refuses /api/* through the relay and never dials the Brot server for it', async () => {
+    const { port, dialed } = await relayToWeb();
+    const response = await exchange(port, 'GET /api/threads HTTP/1.1\r\nHost: brot\r\nConnection: close\r\n\r\n');
+    expect(response).toBe('HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n');
+    expect(dialed).toEqual([]);
+  });
+
+  it.each([
+    ['a traversal out of the run route', 'GET /mcp/runs/run_1/../../api/threads HTTP/1.1\r\nHost: brot\r\nConnection: close\r\n\r\n'],
+    ['an absolute-form target', 'GET http://brot.internal.test/api/threads HTTP/1.1\r\nHost: brot\r\nConnection: close\r\n\r\n'],
+    ['a CONNECT tunnel', 'CONNECT brot.internal.test:8799 HTTP/1.1\r\nHost: brot.internal.test:8799\r\n\r\n'],
+    ['a request that is not HTTP', 'SSH-2.0-OpenSSH_9.9\r\n\r\n'],
+    ['both Content-Length and chunked framing', 'POST /mcp/runs/run_1 HTTP/1.1\r\nHost: brot\r\nContent-Length: 2\r\nTransfer-Encoding: chunked\r\n\r\n'],
+    ['an upgrade request', 'GET /mcp/runs/run_1 HTTP/1.1\r\nHost: brot\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n'],
+  ])('refuses %s with 403 and closes', async (_label, request) => {
+    const { port, dialed } = await relayToWeb();
+    const response = await exchange(port, request);
+    expect(response.startsWith('HTTP/1.1 403 Forbidden\r\n')).toBe(true);
+    expect(dialed).toEqual([]);
+  });
+
+  it('checks every request on a kept-alive connection, not only the first', async () => {
+    const { port, dialed } = await relayToWeb();
+    const socket = connect({ host: '127.0.0.1', port });
+    let received = '';
+    socket.setEncoding('latin1');
+    socket.on('data', (chunk: string) => (received += chunk));
+    socket.on('error', () => undefined);
+    cleanups.push(async () => {
+      socket.destroy();
+    });
+    socket.write('POST /mcp/runs/run_1 HTTP/1.1\r\nHost: brot\r\nContent-Length: 4\r\n\r\nping');
+    await waitFor(() => received.includes('path=/mcp/runs/run_1'));
+    socket.write('GET /api/threads HTTP/1.1\r\nHost: brot\r\n\r\n');
+    await closed(socket);
+    expect(received).toContain('path=/mcp/runs/run_1');
+    expect(received).toContain('HTTP/1.1 403 Forbidden');
+    expect(received).not.toContain('/api/threads');
+    expect(dialed).toHaveLength(1);
+  });
+
+  it('keeps a chunked request body as body, so text inside it is not read as a request', async () => {
+    const { port } = await relayToWeb();
+    const socket = connect({ host: '127.0.0.1', port });
+    let received = '';
+    socket.setEncoding('latin1');
+    socket.on('data', (chunk: string) => (received += chunk));
+    socket.on('error', () => undefined);
+    cleanups.push(async () => {
+      socket.destroy();
+    });
+    const body = 'GET /api/evil HTTP/1.1\r\nHost: brot\r\n\r\n';
+    socket.write(`POST /mcp/runs/run_1 HTTP/1.1\r\nHost: brot\r\nTransfer-Encoding: chunked\r\n\r\n${body.length.toString(16)}\r\n${body}\r\n0\r\n\r\n`);
+    await waitFor(() => received.includes('path=/mcp/runs/run_1'));
+    socket.write('GET /mcp/runs/run_2 HTTP/1.1\r\nHost: brot\r\nConnection: close\r\n\r\n');
+    await closed(socket);
+    expect(received).toContain('path=/mcp/runs/run_2');
+    expect(received).not.toContain('403');
+  });
+
+  it('streams a response as the Brot server produces it', async () => {
+    const release: { open?: () => void } = {};
+    const gate = new Promise<void>((resolve) => {
+      release.open = resolve;
+    });
+    const web: HttpServer = createHttpServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      res.write('data: first\n\n');
+      void gate.then(() => res.end('data: second\n\n'));
+    });
+    cleanups.push(() => closeHttp(web));
+    web.listen(0, '127.0.0.1');
+    await once(web, 'listening');
+    const webPort = (web.address() as AddressInfo).port;
+    const dialed: Array<[string, number]> = [];
+    const relay = createRelay({ host: 'brot.internal.test', port: 8799 }, { sourceCidr: null }, {
       resolve: resolveFake,
-      dial: dialLocal({}, []),
+      dial: dialLocal({ 8799: webPort }, dialed),
     });
     const port = await relay.listen(0, '127.0.0.1');
     cleanups.push(() => relay.close());
+
     const socket = connect({ host: '127.0.0.1', port });
+    let received = '';
+    socket.setEncoding('latin1');
+    socket.on('data', (chunk: string) => (received += chunk));
     socket.on('error', () => undefined);
-    await closed(socket);
-    expect(socket.destroyed).toBe(true);
+    cleanups.push(async () => {
+      socket.destroy();
+    });
+    socket.write('GET /mcp/runs/run_1 HTTP/1.1\r\nHost: brot\r\n\r\n');
+    await waitFor(() => received.includes('data: first'));
+    expect(received).not.toContain('second');
+    release.open?.();
+    await waitFor(() => received.includes('data: second'));
   });
 });
 
