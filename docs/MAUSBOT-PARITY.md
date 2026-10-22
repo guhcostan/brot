@@ -71,7 +71,7 @@ Legend: ✅ parity or better · 🟡 partial · ❌ absent · 🎯 current wave.
 | Browser per bot, persistent login profiles | ✅ | ✅ per-bot and shared profiles, persistent logins, egress-gated | W1 done |
 | Live browser view and take-over | ✅ | ✅ JPEG live panel with click/scroll/type input and takeover for host browsers | W7 done |
 | Host browser (My Chrome) attach | ✅ | ❌ | W5 |
-| Saved logins vault + `fill_login` | ✅ | ❌ (shared profiles cover the everyday case) | W7 |
+| Saved logins vault + `fill_login` | ✅ | ✅ vault-backed logins, host-gated fill_login with TOTP; settings UI next | W7 |
 | Connected apps (Composio marketplace) + per-bot tool grants | ✅ | ❌ | W3 |
 | Custom MCP servers (stdio/HTTP, per-bot) | ✅ | ✅ stdio/HTTP servers with vault secrets, handshake test and Settings panel; per-bot grants pending | W5 done |
 | Approval levels per bot/thread + decision log | ✅ | 🟡 per-bot ask/edits modes with an irreversible safety floor; decision log/export next | W6 |

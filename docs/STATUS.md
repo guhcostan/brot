@@ -264,6 +264,21 @@ mapped in `docs/MAUSBOT-PARITY.md` (34 bots / 7 teams, 33 bots with a browser an
   approvals, and after switching to ask the same action paused for approval (deny completed the run).
 - Suite: 1919 tests (181 files), typecheck 12/12, lint clean.
 
+## Wave 19: approval mode UI, saved logins vault (2026-10-22)
+
+- **Approval mode in the bot dialog.** An Approvals control offers Ask before risky actions (default) or
+  Auto-approve edits, with the exact split spelled out and a safety note that irreversible actions always
+  require a person and deny policies win. Create sends the mode only for edits; edit patches only on change.
+- **Saved logins + fill_login.** Saved logins keep username/password/TOTP in the AES vault under per-login
+  secret names; the API returns only id/name/host/label/hasTotp, and DELETE removes the vault values.
+  `fill_login` is host-browser-only, validates that the page host matches the login, declares the
+  credentials as secret references so the broker decides first, then types them as real keystrokes (with a
+  dependency-free RFC 6238 TOTP) and submits; arguments, summary, output and errors are value-free, and the
+  host is re-checked right before typing. Migration 0013 adds saved_logins. Verified live: an approval card
+  appeared for a DSH run, allow produced a value-free failure on a page without a form, and zero credential
+  bytes reached the event log; deleting the login removed its vault entries.
+- Suite: 1959 tests (186 files), typecheck 12/12, lint clean.
+
 ## Next
 
 1. Re-run the eval suite on a live model once OpenCode Go has quota (`apps/evals`, `--base` to the server), including B8 and C; the 2026-10-20 results predate the read auto-allow and the fixes above.
