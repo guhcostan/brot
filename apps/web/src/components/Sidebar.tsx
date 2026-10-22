@@ -5,7 +5,7 @@ import type { Room } from '../data/client';
 import { avatarOf } from '../format';
 import { t, type Locale } from '../i18n';
 import type { Selection } from '../state/store';
-import { Board, ChevronRight, Gear, Inbox, Pencil, Plus } from './icons';
+import { Board, ChevronRight, Clock, Gear, Inbox, Pencil, Plus } from './icons';
 import { useLiveMood } from './mood';
 import { memberSummary } from './RoomView';
 import { botStatusLabel } from './taskLabels';
@@ -221,6 +221,17 @@ export function Sidebar({
               {activeTasks}
             </span>
           ) : null}
+        </button>
+        <button
+          type="button"
+          aria-current={selection?.kind === 'routines' ? 'true' : undefined}
+          onClick={() => onSelect({ kind: 'routines' })}
+          className={cx(rowClass, 'py-1.5')}
+        >
+          <span className="flex size-8 flex-none items-center justify-center text-ink">
+            <Clock />
+          </span>
+          <span className="flex-1 text-base font-medium text-ink">{t('routines.title')}</span>
         </button>
         </div>
 

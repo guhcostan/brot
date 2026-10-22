@@ -84,6 +84,14 @@ describe('sidebar threads', () => {
     expect(text).toContain(t('sidebar.expandThreads', { name: 'Capy' }));
   });
 
+  it('offers the Routines pane next to the task board and the approvals inbox', () => {
+    const html = render();
+
+    expect(html).toContain(t('routines.title'));
+    expect(html.indexOf(t('approvals.title'))).toBeLessThan(html.indexOf(t('board.title')));
+    expect(html.indexOf(t('board.title'))).toBeLessThan(html.indexOf(t('routines.title')));
+  });
+
   it('shows the live status of a thread that is working or waiting', () => {
     const text = textOf(
       render({

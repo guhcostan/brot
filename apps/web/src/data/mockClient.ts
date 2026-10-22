@@ -9,6 +9,9 @@ import type {
   Message,
   PostMessage,
   ResolveApproval,
+  Routine,
+  RoutineRun,
+  RoutineRunStatus,
   Takeover,
   Task,
   Team,
@@ -16,6 +19,7 @@ import type {
 } from '@brot/protocol';
 import {
   CreateBot,
+  CreateRoutine,
   CreateTeam,
   CreateThread,
   DESKTOP_HEIGHT,
@@ -24,6 +28,7 @@ import {
   MIN_ROOM_BOTS,
   UpdateBot,
   UpdateRoomMembers,
+  UpdateRoutine,
   UpdateTeam,
   UpdateThread,
   defaultEgressPolicy,
@@ -48,6 +53,8 @@ import {
   DEMO_HISTORY,
   DEMO_ROOM_HISTORY,
   DEMO_ROOMS,
+  DEMO_ROUTINE_RUNS,
+  DEMO_ROUTINES,
   DEMO_TASKS,
   DEMO_TEAMS,
   DEMO_THREAD_TITLES,
@@ -139,6 +146,53 @@ const byRecent = (threads: readonly Thread[]): Thread[] =>
   [...threads].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt) || a.id.localeCompare(b.id));
 
 /**
+ * The next occurrence of the cron presets the routine dialog writes, for the mock's schedule preview.
+ * Anything fancier keeps no next run, like a disabled routine.
+ */
+function nextMockRunAt(cron: string, from = Date.now()): string | undefined {
+  const [minuteField, hourField, dayField, monthField, weekdayField] = cron.trim().split(/\s+/);
+  if (minuteField === undefined || hourField === undefined || dayField === undefined || monthField === undefined || weekdayField === undefined) return undefined;
+  if (dayField !== '*' || monthField !== '*') return undefined;
+  const date = new Date(from);
+  date.setSeconds(0, 0);
+
+  const step = /^\*\/(\d+)$/.exec(minuteField);
+  if (step) {
+    const size = Number(step[1]);
+    if (!Number.isFinite(size) || size < 1 || size > 60) return undefined;
+    date.setMinutes(date.getMinutes() + (size - (date.getMinutes() % size)), 0, 0);
+    return date.toISOString();
+  }
+  if (hourField === '*') {
+    const minute = Number(minuteField);
+    if (!Number.isInteger(minute) || minute < 0 || minute > 59) return undefined;
+    date.setMinutes(minute, 0, 0);
+    if (date.getTime() <= from) date.setHours(date.getHours() + 1);
+    return date.toISOString();
+  }
+
+  const minute = Number(minuteField);
+  const hour = Number(hourField);
+  if (!Number.isInteger(minute) || minute < 0 || minute > 59 || !Number.isInteger(hour) || hour < 0 || hour > 23) return undefined;
+  const target = (daysAhead: number) => {
+    const next = new Date(from);
+    next.setDate(next.getDate() + daysAhead);
+    next.setHours(hour, minute, 0, 0);
+    return next.getTime() > from ? next.toISOString() : undefined;
+  };
+  if (weekdayField === '*') return target(1);
+  const weekdays = /^1-5$/.test(weekdayField) ? [1, 2, 3, 4, 5] : /^[0-6]$/.test(weekdayField) ? [Number(weekdayField)] : undefined;
+  if (weekdays === undefined) return undefined;
+  for (let ahead = 1; ahead <= 8; ahead += 1) {
+    const day = (new Date(from).getDay() + ahead) % 7;
+    if (!weekdays.includes(day)) continue;
+    const next = target(ahead);
+    if (next !== undefined) return next;
+  }
+  return undefined;
+}
+
+/**
  * An in-process stand-in for the server and its mock engine. It emits the same canonical events a
  * real run would, so the UI exercises the full fold, approval, streaming and team paths without a
  * backend. Every bot has any number of DM threads; a message answers in the thread it was posted to.
@@ -183,6 +237,17 @@ export function createMockClient(): BrotClient {
   const tasks = new Map<string, Task>(DEMO_TASKS.map((task) => [task.id, { ...task }]));
   const taskTimers = new Map<string, Array<ReturnType<typeof setTimeout>>>();
   const batons = new Map<string, string>();
+  const routines = new Map<string, Routine>(DEMO_ROUTINES.map((routine) => [routine.id, structuredClone(routine)]));
+  /** Runs per routine, newest first. */
+  const routineRuns = new Map<string, RoutineRun[]>();
+  /** Routines with a run still in flight, for the 409 the server answers with. */
+  const runningRoutines = new Set<string>();
+
+  for (const run of DEMO_ROUTINE_RUNS) {
+    const list = routineRuns.get(run.routineId) ?? [];
+    list.push(structuredClone(run));
+    routineRuns.set(run.routineId, list);
+  }
 
   const dmThreadsOf = (botId: string): Thread[] => threadsOfBot.get(botId) ?? [];
   const defaultThreadOf = (botId: string): Thread | undefined => dmThreadsOf(botId)[0];
@@ -241,6 +306,11 @@ export function createMockClient(): BrotClient {
     if (!bots.has(botId)) throw new Error(`Unknown bot: ${botId}`);
     return createThreadFor(botId);
   }
+
+  const routineThreadOf = (botId: string) => defaultThreadOf(botId)?.id ?? createThreadFor(botId).id;
+
+  const scheduledRuns = (): RoutineRun[] =>
+    [...routineRuns.values()].flat().sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt) || b.id.localeCompare(a.id));
 
   function seededThread(botId: string): Thread {
     const at = SEEDED_AT;
@@ -891,6 +961,115 @@ export function createMockClient(): BrotClient {
       if (current.status === 'done' || current.status === 'failed' || current.status === 'cancelled') return { ...current };
       updateTask(taskId, { status: 'cancelled' });
       return { ...tasks.get(taskId)! };
+    },
+
+    async listRoutines(botId?: string) {
+      return [...routines.values()]
+        .filter((routine) => botId === undefined || routine.botId === botId)
+        .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt) || a.id.localeCompare(b.id))
+        .map((routine) => structuredClone(routine));
+    },
+
+    async createRoutine(input) {
+      const data = CreateRoutine.parse(input);
+      if (!bots.has(data.botId)) throw new Error(`Unknown bot: ${data.botId}`);
+      const at = now();
+      const created: Routine = {
+        id: nextId('routine'),
+        botId: data.botId,
+        name: data.name,
+        instruction: data.instruction,
+        trigger: data.trigger,
+        enabled: data.enabled,
+        catchUp: data.catchUp,
+        rememberLastRun: data.rememberLastRun,
+        createdAt: at,
+        updatedAt: at,
+      };
+      const nextRunAt = data.enabled && data.trigger.type === 'cron' ? nextMockRunAt(data.trigger.cron) : undefined;
+      if (nextRunAt !== undefined) created.nextRunAt = nextRunAt;
+      routines.set(created.id, created);
+      routineRuns.set(created.id, []);
+      return structuredClone(created);
+    },
+
+    async updateRoutine(routineId, patch) {
+      const current = routines.get(routineId);
+      if (!current) throw new Error(`Unknown routine: ${routineId}`);
+      const data = UpdateRoutine.parse(patch);
+      const next: Routine = {
+        ...current,
+        ...(data.name === undefined ? {} : { name: data.name }),
+        ...(data.instruction === undefined ? {} : { instruction: data.instruction }),
+        ...(data.trigger === undefined ? {} : { trigger: data.trigger }),
+        ...(data.enabled === undefined ? {} : { enabled: data.enabled }),
+        ...(data.catchUp === undefined ? {} : { catchUp: data.catchUp }),
+        ...(data.rememberLastRun === undefined ? {} : { rememberLastRun: data.rememberLastRun }),
+        updatedAt: now(),
+      };
+      const nextRunAt = next.enabled && next.trigger.type === 'cron' ? nextMockRunAt(next.trigger.cron) : undefined;
+      if (nextRunAt === undefined) delete next.nextRunAt;
+      else next.nextRunAt = nextRunAt;
+      routines.set(routineId, next);
+      return structuredClone(next);
+    },
+
+    async deleteRoutine(routineId) {
+      if (!routines.delete(routineId)) throw new Error(`Unknown routine: ${routineId}`);
+      routineRuns.delete(routineId);
+      runningRoutines.delete(routineId);
+    },
+
+    async runRoutineNow(routineId) {
+      const routine = routines.get(routineId);
+      if (!routine) throw new Error('404 Routine not found');
+      if (runningRoutines.has(routineId)) throw new Error('409 Routine is already running');
+      runningRoutines.add(routineId);
+      const startedAt = now();
+      const runId = nextId('run');
+      const started: RoutineRun = {
+        id: nextId('rr'),
+        routineId,
+        botId: routine.botId,
+        threadId: routineThreadOf(routine.botId),
+        runId,
+        trigger: 'manual',
+        status: 'running',
+        startedAt,
+        createdAt: startedAt,
+      };
+      routineRuns.set(routineId, [started, ...(routineRuns.get(routineId) ?? [])]);
+      // Finish on the next tick: a second request in the same moment still hits the overlap guard.
+      setTimeout(() => {
+        const endedAt = now();
+        const completed: RoutineRun = {
+          ...started,
+          status: 'completed',
+          result: `Ran ${routine.name} on demand. The routine finished its instruction and reported back in its thread.`,
+          endedAt,
+        };
+        routineRuns.set(routineId, (routineRuns.get(routineId) ?? []).map((run) => (run.id === started.id ? completed : run)));
+        const current = routines.get(routineId);
+        if (current) {
+          const next: Routine = { ...current, lastRunAt: endedAt, updatedAt: endedAt };
+          const nextRunAt = current.enabled && current.trigger.type === 'cron' ? nextMockRunAt(current.trigger.cron, Date.parse(endedAt)) : undefined;
+          if (nextRunAt === undefined) delete next.nextRunAt;
+          else next.nextRunAt = nextRunAt;
+          routines.set(routineId, next);
+        }
+        runningRoutines.delete(routineId);
+      }, 0);
+      return { runId };
+    },
+
+    async listRoutineRuns(filter: { routineId?: string; botId?: string; status?: RoutineRunStatus; limit?: number } = {}) {
+      const matching = scheduledRuns().filter(
+        (run) =>
+          (filter.routineId === undefined || run.routineId === filter.routineId) &&
+          (filter.botId === undefined || run.botId === filter.botId) &&
+          (filter.status === undefined || run.status === filter.status),
+      );
+      return matching.slice(0, filter.limit ?? 50).map((run) => structuredClone(run));
     },
 
     async listProviders() {

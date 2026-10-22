@@ -69,6 +69,14 @@ export const ArrowRight = ({ size = 12 }: { size?: number }) => (
   </Icon>
 );
 
+/** A clock: routines and scheduled runs. */
+export const Clock = ({ size }: { size?: number }) => (
+  <Icon size={size}>
+    <circle cx="10" cy="10" r="6.75" />
+    <path d="M10 6v4.25l2.75 1.75" />
+  </Icon>
+);
+
 export const Gear = ({ size }: { size?: number }) => (
   <Icon size={size}>
     <circle cx="10" cy="10" r="2.5" />

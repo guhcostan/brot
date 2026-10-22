@@ -1,4 +1,4 @@
-import type { Approval, Bot, CanonicalEvent, Message, Task, Team, Thread } from '@brot/protocol';
+import type { Approval, Bot, CanonicalEvent, Message, Routine, RoutineRun, Task, Team, Thread } from '@brot/protocol';
 
 const CREATED = '2026-10-01T09:00:00.000Z';
 
@@ -433,3 +433,134 @@ export const DEMO_ROOM_HISTORY: Record<string, CanonicalEvent[]> = {
   [LAUNCH_ROOM]: launchRoom(),
   [WEEK_ROOM]: weekRoom(),
 };
+
+const minutesFromNow = (minutes: number) => new Date(Date.now() + minutes * 60_000).toISOString();
+const hoursAgo = (hours: number) => new Date(Date.now() - hours * 3_600_000).toISOString();
+
+export const ROUTINE_MORNING = 'routine_morning';
+export const ROUTINE_WEEKLY = 'routine_weekly';
+export const ROUTINE_SWEEP = 'routine_sweep';
+
+/** Three demo routines so the Routines page shows schedules, a pause, and run receipts. */
+export const DEMO_ROUTINES: Routine[] = [
+  {
+    id: ROUTINE_MORNING,
+    botId: 'bot_sol',
+    name: 'Morning brief',
+    instruction: 'Summarize overnight email and Slack, then list the three things I should do first today.',
+    trigger: { type: 'cron', cron: '0 8 * * 1-5', timezone: 'America/Sao_Paulo' },
+    enabled: true,
+    catchUp: true,
+    rememberLastRun: true,
+    lastRunAt: hoursAgo(26),
+    nextRunAt: minutesFromNow(95),
+    createdAt: CREATED,
+    updatedAt: CREATED,
+  },
+  {
+    id: ROUTINE_WEEKLY,
+    botId: 'bot_capy',
+    name: 'Weekly plan',
+    instruction: 'Read the task board and the rooms, then draft next week plan with owners and deadlines.',
+    trigger: { type: 'cron', cron: '0 9 * * 1', timezone: 'America/Sao_Paulo' },
+    enabled: true,
+    catchUp: false,
+    rememberLastRun: false,
+    lastRunAt: hoursAgo(50),
+    nextRunAt: minutesFromNow(60 * 24 * 2),
+    createdAt: CREATED,
+    updatedAt: CREATED,
+  },
+  {
+    id: ROUTINE_SWEEP,
+    botId: 'bot_tuca',
+    name: 'Follow-up sweep',
+    instruction: 'Check for unanswered customer emails older than two days and draft a short reply for each.',
+    trigger: { type: 'cron', cron: '*/15 * * * *', timezone: 'America/Sao_Paulo' },
+    enabled: false,
+    catchUp: false,
+    rememberLastRun: false,
+    lastRunAt: hoursAgo(4),
+    createdAt: CREATED,
+    updatedAt: CREATED,
+  },
+];
+
+/** Run receipts for the demo routines, newest first. */
+export const DEMO_ROUTINE_RUNS: RoutineRun[] = [
+  {
+    id: 'rr_morning_3',
+    routineId: ROUTINE_MORNING,
+    botId: 'bot_sol',
+    threadId: dmThreadOf('bot_sol'),
+    runId: 'run_routine_3',
+    trigger: 'schedule',
+    status: 'completed',
+    result: 'Three things today: finish the Acme renewal call notes, review Tamu export fix, and send Tuca the pricing update.',
+    startedAt: hoursAgo(26),
+    endedAt: hoursAgo(26 - 0.05),
+    createdAt: hoursAgo(26),
+  },
+  {
+    id: 'rr_morning_2',
+    routineId: ROUTINE_MORNING,
+    botId: 'bot_sol',
+    threadId: dmThreadOf('bot_sol'),
+    runId: 'run_routine_2',
+    trigger: 'schedule',
+    status: 'failed',
+    error: 'Gmail returned 401 Unauthorized. The connection needs to be renewed.',
+    startedAt: hoursAgo(50),
+    endedAt: hoursAgo(50 - 0.03),
+    createdAt: hoursAgo(50),
+  },
+  {
+    id: 'rr_morning_1',
+    routineId: ROUTINE_MORNING,
+    botId: 'bot_sol',
+    threadId: dmThreadOf('bot_sol'),
+    runId: 'run_routine_1',
+    trigger: 'manual',
+    status: 'completed',
+    result: 'Two things: standup notes and the Acme renewal call. Nothing urgent in the inbox.',
+    startedAt: hoursAgo(74),
+    endedAt: hoursAgo(74 - 0.04),
+    createdAt: hoursAgo(74),
+  },
+  {
+    id: 'rr_weekly_2',
+    routineId: ROUTINE_WEEKLY,
+    botId: 'bot_capy',
+    threadId: dmThreadOf('bot_capy'),
+    runId: 'run_weekly_2',
+    trigger: 'schedule',
+    status: 'completed',
+    result: 'Drafted next week: export fix ships Tuesday, renewal call Wednesday, launch posts Monday/Wednesday/Friday.',
+    startedAt: hoursAgo(50),
+    endedAt: hoursAgo(50 - 0.06),
+    createdAt: hoursAgo(50),
+  },
+  {
+    id: 'rr_weekly_1',
+    routineId: ROUTINE_WEEKLY,
+    botId: 'bot_capy',
+    threadId: dmThreadOf('bot_capy'),
+    status: 'skipped',
+    trigger: 'schedule',
+    startedAt: hoursAgo(218),
+    endedAt: hoursAgo(218),
+    createdAt: hoursAgo(218),
+  },
+  {
+    id: 'rr_sweep_1',
+    routineId: ROUTINE_SWEEP,
+    botId: 'bot_tuca',
+    threadId: dmThreadOf('bot_tuca'),
+    status: 'cancelled',
+    trigger: 'schedule',
+    error: 'You paused the routine while it was running.',
+    startedAt: hoursAgo(4),
+    endedAt: hoursAgo(4 - 0.01),
+    createdAt: hoursAgo(4),
+  },
+];

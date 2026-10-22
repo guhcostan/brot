@@ -18,6 +18,7 @@ export type Selection =
   | { kind: 'room'; id: string }
   | { kind: 'tasks' }
   | { kind: 'approvals' }
+  | { kind: 'routines' }
   | { kind: 'settings' };
 
 export interface AppState {

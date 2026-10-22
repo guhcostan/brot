@@ -8,6 +8,7 @@ import { ContextPanel, type ContextSubject } from './components/ContextPanel';
 import { Close, Plus } from './components/icons';
 import { NewRoomDialog } from './components/NewRoomDialog';
 import { RoomView } from './components/RoomView';
+import { RoutinesView } from './components/RoutinesView';
 import { SettingsView } from './components/SettingsView';
 import { Sidebar } from './components/Sidebar';
 import { TaskBoard } from './components/TaskBoard';
@@ -211,6 +212,8 @@ export function App(): ReactElement {
     main = <TaskBoard tasks={allTasks} bots={state.bots} onNewTask={() => setNewTaskOpen(true)} onOpenBots={openBots} />;
   } else if (selection?.kind === 'approvals') {
     main = <ApprovalsView entries={pending} onDecide={decide} onOpenBots={openBots} />;
+  } else if (selection?.kind === 'routines') {
+    main = <RoutinesView bots={state.bots} onOpenBots={openBots} onNewBot={newBot} />;
   } else if (selection?.kind === 'settings') {
     main = <SettingsView locale={locale} onLocaleChange={changeLocale} theme={theme} onThemeChange={changeTheme} onOpenBots={openBots} />;
   } else if (room) {
@@ -263,7 +266,7 @@ export function App(): ReactElement {
     );
   }
 
-  const fullWidth = selection?.kind === 'tasks' || selection?.kind === 'approvals' || selection?.kind === 'settings';
+  const fullWidth = selection?.kind === 'tasks' || selection?.kind === 'approvals' || selection?.kind === 'routines' || selection?.kind === 'settings';
   const taskRoom = room ? { id: room.thread.id, title: room.thread.title, memberIds: membersOf(state, room.thread.id) } : undefined;
   const noticeVisible = notice !== null && !(selection !== null && selectionKey(selection) === selectionKey(notice.selection) && (wide || pane === 'context'));
 

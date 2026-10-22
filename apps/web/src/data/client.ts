@@ -4,12 +4,16 @@ import type {
   ComputerInput,
   ComputerState,
   CreateBotInput,
+  CreateRoutineInput,
   CreateTeamInput,
   Device,
   PairingStartResponse,
   PostMessage,
   ResolveApproval,
   ResponderMode,
+  Routine,
+  RoutineRun,
+  RoutineRunStatus,
   SetTakeover,
   Takeover,
   Task,
@@ -18,9 +22,11 @@ import type {
   Thread,
   UpdateBot,
   UpdateRoomMembers,
+  UpdateRoutine,
   UpdateTeam,
 } from '@brot/protocol';
 
+export type { CreateRoutineInput, Routine, RoutineRun, RoutineRunStatus, UpdateRoutine } from '@brot/protocol';
 export type { Team } from '@brot/protocol';
 
 /**
@@ -66,6 +72,19 @@ export interface TaskFilter {
   status?: TaskStatus;
   chainId?: string;
   threadId?: string;
+}
+
+/** What `GET /api/routine-runs` can narrow down. */
+export interface RoutineRunFilter {
+  routineId?: string;
+  botId?: string;
+  status?: RoutineRunStatus;
+  limit?: number;
+}
+
+/** The run a `POST /api/routines/:id/run` started. */
+export interface RoutineRunStarted {
+  runId: string;
 }
 
 export interface ProviderModel {
@@ -160,6 +179,17 @@ export interface BrotClient {
   listTasks(filter?: TaskFilter): Promise<Task[]>;
   createTask(input: NewTask): Promise<Task>;
   cancelTask(taskId: string): Promise<Task>;
+
+  /** Every routine, or one bot's routines. */
+  listRoutines(botId?: string): Promise<Routine[]>;
+  createRoutine(input: CreateRoutineInput): Promise<Routine>;
+  updateRoutine(routineId: string, patch: UpdateRoutine): Promise<Routine>;
+  /** Deletes the routine and its run history. */
+  deleteRoutine(routineId: string): Promise<void>;
+  /** Starts a run now. Rejects with the server's 409 message when the routine is already running. */
+  runRoutineNow(routineId: string): Promise<RoutineRunStarted>;
+  /** Run history, newest first. */
+  listRoutineRuns(filter?: RoutineRunFilter): Promise<RoutineRun[]>;
 
   listProviders(): Promise<Provider[]>;
   /** Stores a secret in the vault. The value is never read back. */

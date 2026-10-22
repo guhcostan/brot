@@ -6,6 +6,7 @@ import {
   ComputerState,
   CreateBot,
   CreateRoom,
+  CreateRoutine,
   CreateTask,
   CreateTeam,
   CreateThread,
@@ -15,6 +16,8 @@ import {
   PostMessage,
   ResolveApproval,
   RoomMember,
+  Routine,
+  RoutineRun,
   Run,
   SetTakeover,
   Takeover,
@@ -23,6 +26,7 @@ import {
   Thread,
   UpdateBot,
   UpdateRoomMembers,
+  UpdateRoutine,
   UpdateTask,
   UpdateTeam,
   UpdateThread,
@@ -30,7 +34,18 @@ import {
   DESKTOP_WIDTH,
   type CanonicalEventType,
 } from '@brot/protocol';
-import { ScreenUnavailable, type BotEvent, type BrotClient, type BrowserStatus, type ComputerInfo, type Provider, type Room, type TaskFilter } from './client';
+import {
+  ScreenUnavailable,
+  type BotEvent,
+  type BrotClient,
+  type BrowserStatus,
+  type ComputerInfo,
+  type Provider,
+  type Room,
+  type RoutineRunFilter,
+  type RoutineRunStarted,
+  type TaskFilter,
+} from './client';
 
 /** The slice of EventSource this client uses. The browser's EventSource satisfies it; tests pass a fake. */
 export interface EventStream {
@@ -425,6 +440,39 @@ export function createHttpClient({
       return Task.parse(await response.json());
     },
 
+    listRoutines(botId) {
+      const suffix = botId === undefined ? '' : `?${new URLSearchParams({ botId }).toString()}`;
+      return read(`/api/routines${suffix}`, Routine.array());
+    },
+
+    async createRoutine(input) {
+      const body = CreateRoutine.parse(input);
+      const response = await write('POST', '/api/routines', body);
+      return Routine.parse(await response.json());
+    },
+
+    async updateRoutine(routineId, patch) {
+      const body = UpdateRoutine.parse(patch);
+      const response = await write('PATCH', `/api/routines/${encodeURIComponent(routineId)}`, body);
+      return Routine.parse(await response.json());
+    },
+
+    async deleteRoutine(routineId) {
+      await request(`/api/routines/${encodeURIComponent(routineId)}`, { method: 'DELETE' });
+    },
+
+    async runRoutineNow(routineId) {
+      const response = await write('POST', `/api/routines/${encodeURIComponent(routineId)}/run`, {});
+      return parseRunStarted(await response.json());
+    },
+
+    listRoutineRuns(filter: RoutineRunFilter = {}) {
+      const query = new URLSearchParams();
+      for (const [name, value] of Object.entries(filter)) if (value !== undefined) query.set(name, String(value));
+      const suffix = query.size > 0 ? `?${query.toString()}` : '';
+      return read(`/api/routine-runs${suffix}`, RoutineRun.array());
+    },
+
     async listProviders() {
       const response = await request('/api/providers', { headers: { Accept: 'application/json' } });
       return parseProviders(await response.json());
@@ -547,12 +595,26 @@ async function describeFailure(response: Response): Promise<string> {
   try {
     const body: unknown = JSON.parse(text);
     if (typeof body === 'object' && body !== null && 'error' in body && typeof body.error === 'string') {
-      return `${response.status} ${body.error}`;
+      const message = `${response.status} ${body.error}`;
+      // A validation 400 carries the specific issue (e.g. an invalid cron pattern); show it.
+      if ('issues' in body && Array.isArray(body.issues)) {
+        const first = body.issues.find((issue: unknown): issue is { message: string } =>
+          typeof issue === 'object' && issue !== null && 'message' in issue && typeof issue.message === 'string',
+        );
+        if (first !== undefined) return `${message}: ${first.message}`;
+      }
+      return message;
     }
   } catch {
     // Not JSON: fall through to the status line.
   }
   return `${response.status} ${response.statusText}`.trim();
+}
+
+/** Validates the `{ runId }` body of `POST /api/routines/:id/run`. */
+export function parseRunStarted(value: unknown): RoutineRunStarted {
+  if (!isRecord(value)) throw new Error('Expected a routine run object');
+  return { runId: textField(value.runId, 'runId') };
 }
 
 interface HistoryRecords {
