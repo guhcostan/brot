@@ -58,6 +58,7 @@ import { BrowserError } from './browser/service';
 import type { HostBrowserService } from './browser/types';
 import { mountAttachmentRoutes, type AttachmentStorage } from './attachments';
 import { mountTeamPackageRoutes } from './team-packages';
+import { mountTodayRoutes } from './today';
 import { mountUsageRoutes } from './usage';
 import { mountDesktopRoutes, type DesktopService } from './desktop';
 import { testMcpServer } from './mcp-servers';
@@ -1014,6 +1015,8 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
   mountUsageRoutes(app, { repos, ...(deps.now === undefined ? {} : { now: deps.now }) });
 
   mountTeamPackageRoutes(app, { repos, ...(deps.now === undefined ? {} : { now: deps.now }) });
+
+  mountTodayRoutes(app, { repos, ...(deps.now === undefined ? {} : { now: deps.now }) });
 
   if (deps.desktop) mountDesktopRoutes(app, { repos, desktop: deps.desktop });
 
