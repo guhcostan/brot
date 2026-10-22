@@ -9,6 +9,7 @@ import {
   Computer,
   Device,
   Memory,
+  MemoryScope,
   Message,
   Policy,
   ResponderMode,
@@ -153,7 +154,15 @@ describe('entity schemas', () => {
       createdAt: at,
     };
     const policy = { id: 'p1', botId: 'bot_1', tool: 'bash', argPattern: 'ls *', effect: 'allow', createdAt: at };
-    const memory = { id: 'mem1', botId: 'bot_1', kind: 'fact', content: 'Likes tea', createdAt: at, updatedAt: at };
+    const memory = {
+      id: 'mem1',
+      botId: 'bot_1',
+      scope: 'bot' as const,
+      kind: 'fact',
+      content: 'Likes tea',
+      createdAt: at,
+      updatedAt: at,
+    };
     const skill = {
       id: 's1',
       name: 'summarize',
@@ -213,6 +222,25 @@ describe('entity schemas', () => {
     expect(() => RoutineRun.parse({ ...run, status: 'paused' })).toThrow();
     expect(() => RoutineRun.parse({ ...run, trigger: 'timer' })).toThrow();
     expect(RoutineRun.parse({ ...run, runId: undefined, result: undefined, endedAt: undefined }).runId).toBeUndefined();
+  });
+
+  it('round-trips bot and workspace memories, defaulting the scope to bot', () => {
+    const botMemory = { id: 'm1', botId: 'bot_1', kind: 'fact', content: 'Likes tea', createdAt: at, updatedAt: at };
+    expect(Memory.parse(botMemory).scope).toBe('bot');
+    expect(roundTrip(Memory, botMemory)).toEqual({ ...botMemory, scope: 'bot' });
+
+    const workspaceMemory = {
+      id: 'm2',
+      scope: 'workspace' as const,
+      kind: 'preference',
+      content: 'Works in Lisbon on Tuesdays',
+      createdAt: at,
+      updatedAt: at,
+    };
+    expect(roundTrip(Memory, workspaceMemory)).toEqual(workspaceMemory);
+    expect(Memory.parse(workspaceMemory)).not.toHaveProperty('botId');
+    expect(MemoryScope.options).toEqual(['bot', 'workspace']);
+    expect(() => Memory.parse({ ...botMemory, scope: 'team' })).toThrow();
   });
 
   it('round-trips a bot with a host browser flag and a notification toggle', () => {

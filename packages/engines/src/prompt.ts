@@ -1,4 +1,4 @@
-import type { Bot, Message, ResponderMode, RunContext, Skill } from '@brot/protocol';
+import type { Bot, Memory, Message, ResponderMode, RunContext, Skill } from '@brot/protocol';
 
 export const HISTORY_LIMIT = 20;
 
@@ -61,8 +61,8 @@ const TEAM_GUIDANCE = [
 
 /**
  * Flattens a run into one prompt for the first turn of a session: who the bot is, its instructions, its team and room
- * when it has them, its memories, its skills, the earlier messages, and this run's input. Later turns of a session
- * send `sessionInput`, because the session keeps this text.
+ * when it has them, the workspace facts about the person, its own memories, its skills, the earlier messages, and
+ * this run's input. Later turns of a session send `sessionInput`, because the session keeps this text.
  */
 export function buildPrompt(ctx: PromptInput): string {
   const sections: string[] = [identityOf(ctx.bot)];
@@ -71,8 +71,11 @@ export function buildPrompt(ctx: PromptInput): string {
   if (ctx.team) sections.push(teamSection(ctx.team));
   if (ctx.room) sections.push(roomSection(ctx.room, ctx.bot));
   if (ctx.teamTools) sections.push(TEAM_GUIDANCE);
-  if (ctx.memories.length > 0) {
-    sections.push(`Memories:\n${ctx.memories.map((memory) => `- ${memory.content}`).join('\n')}`);
+  const workspace = ctx.memories.filter((memory) => memory.scope === 'workspace');
+  if (workspace.length > 0) sections.push(workspaceSection(workspace));
+  const memories = ctx.memories.filter((memory) => memory.scope !== 'workspace');
+  if (memories.length > 0) {
+    sections.push(`Memories:\n${memories.map((memory) => `- ${memory.content}`).join('\n')}`);
   }
   const skills = skillsSection(ctx.skills);
   if (skills !== '') sections.push(skills);
@@ -90,6 +93,14 @@ export function buildPrompt(ctx: PromptInput): string {
  */
 export function sessionInput(ctx: PromptInput): string {
   return ctx.room ? `[You are ${ctx.bot.name}]\n${ctx.input}` : ctx.input;
+}
+
+/** Workspace facts are about the person, not about the bot answering, so they open the prompt's memory part. */
+const WORKSPACE_MEMORIES_INTRO = 'Workspace-wide facts about the person, shared by every bot.';
+
+function workspaceSection(memories: readonly Memory[]): string {
+  const lines = memories.map((memory) => `- ${memory.content}`).join('\n');
+  return `About the person:\n${WORKSPACE_MEMORIES_INTRO}\n${lines}`;
 }
 
 function identityOf(bot: Bot): string {

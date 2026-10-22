@@ -710,6 +710,39 @@ describe('memories', () => {
   });
 });
 
+describe('workspace memories', () => {
+  it('keeps bot and workspace memories apart', async () => {
+    const { bot } = await seed();
+    const botMemory = await repos.memories.create(bot.id, { kind: 'fact', content: 'Likes tea' });
+    const workspace = await repos.memories.create({ scope: 'workspace', kind: 'preference', content: 'Works in Lisbon' });
+
+    expect(botMemory).toMatchObject({ botId: bot.id, scope: 'bot' });
+    expect(workspace).toMatchObject({ scope: 'workspace', kind: 'preference' });
+    expect(workspace.botId).toBeUndefined();
+    expect((await repos.memories.listByBot(bot.id)).map((memory) => memory.id)).toEqual([botMemory.id]);
+    expect((await repos.memories.listWorkspace()).map((memory) => memory.id)).toEqual([workspace.id]);
+    expect((await repos.memories.get(workspace.id))?.scope).toBe('workspace');
+
+    expect((await repos.memories.update(workspace.id, { content: 'Lives in Lisbon' }))).toMatchObject({
+      content: 'Lives in Lisbon',
+      scope: 'workspace',
+    });
+    expect(await repos.memories.remove(workspace.id)).toBe(true);
+    expect(await repos.memories.listWorkspace()).toEqual([]);
+  });
+
+  it('requires a bot for a bot memory and refuses one for a workspace memory', async () => {
+    const { bot } = await seed();
+
+    await expect(repos.memories.create({ kind: 'fact', content: 'x' })).rejects.toThrow(/needs a botId/);
+    await expect(
+      repos.memories.create({ scope: 'workspace', botId: bot.id, kind: 'fact', content: 'x' }),
+    ).rejects.toThrow(/has no botId/);
+    expect(await repos.memories.listWorkspace()).toEqual([]);
+    expect(await repos.memories.listByBot(bot.id)).toEqual([]);
+  });
+});
+
 describe('skills', () => {
   it('starts at version 1 and bumps the version on every update', async () => {
     const skill = await repos.skills.create({ name: 'summarize', description: 'Summarize', body: 'v1' });
@@ -985,7 +1018,12 @@ describe('cascade on bot delete', () => {
       summary: 'ls',
       args: {},
     });
-    await repos.memories.create(bot.id, { kind: 'fact', content: 'x', sourceRunId: run.id });
+    const botMemory = await repos.memories.create(bot.id, { kind: 'fact', content: 'x', sourceRunId: run.id });
+    const workspaceMemory = await repos.memories.create({
+      scope: 'workspace',
+      kind: 'preference',
+      content: 'Works in Lisbon',
+    });
     await repos.policies.create(bot.id, { tool: 'bash', effect: 'deny' });
     await repos.routines.create({
       botId: bot.id,
@@ -1011,6 +1049,8 @@ describe('cascade on bot delete', () => {
     expect(await repos.runs.listByThread(thread.id)).toEqual([]);
     expect(await repos.approvals.list()).toEqual([]);
     expect(await repos.memories.listByBot(bot.id)).toEqual([]);
+    expect(await repos.memories.get(botMemory.id)).toBeUndefined();
+    expect((await repos.memories.listWorkspace()).map((memory) => memory.id)).toEqual([workspaceMemory.id]);
     expect(await repos.policies.listByBot(bot.id)).toEqual([]);
     expect(await repos.routines.list({ botId: bot.id })).toEqual([]);
     expect(await repos.routines.findByWebhookSecret('cascade-secret')).toBeUndefined();

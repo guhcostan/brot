@@ -9,6 +9,7 @@ import type {
   EngineDriver,
   EngineEvent,
   LlmRoute,
+  Memory,
   Message,
   Run,
   Thread,
@@ -60,6 +61,27 @@ export interface HarnessDeps {
  * bots need a provider and a vault secret, and the computer needs no model hosts.
  */
 const RELAYED_ENGINES: ReadonlySet<string> = new Set(['dsh']);
+
+/** Caps for the workspace facts a run carries. Bot memories have their own recall caps in memory/recall.ts. */
+const WORKSPACE_MEMORY_ITEMS = 20;
+const WORKSPACE_MEMORY_CHARS = 3000;
+
+/**
+ * The workspace facts a run's prompt carries, newest first within the caps (`listWorkspace` returns oldest first).
+ * Together with the bot's recalled memories (12 items, 6000 characters) the prompt holds at most 32 memories and
+ * 9000 characters.
+ */
+function workspaceMemoriesForPrompt(memories: readonly Memory[]): Memory[] {
+  const selected: Memory[] = [];
+  let chars = 0;
+  for (const memory of [...memories].reverse()) {
+    if (selected.length >= WORKSPACE_MEMORY_ITEMS) break;
+    if (chars + memory.content.length > WORKSPACE_MEMORY_CHARS) continue;
+    selected.push(memory);
+    chars += memory.content.length;
+  }
+  return selected;
+}
 
 /**
  * A run for one bot in one thread. `inputMessage` is the stored message the run answers. When it is absent,
@@ -334,14 +356,23 @@ export function createHarness(deps: HarnessDeps): Harness {
         ? [mcp.specForRun({ botId: bot.id, threadId: state.threadId, runId: state.runId }, place.brotBaseUrl)]
         : [];
       const mcpServers = [...brotMcpServers, ...userMcpServers];
-      const [room, team] = await Promise.all([roomFor(repos, thread), teamFor(bot)]);
+      const [room, team, workspaceMemoryRows, ownMemoryRows] = await Promise.all([
+        roomFor(repos, thread),
+        teamFor(bot),
+        repos.memories.listWorkspace(),
+        repos.memories.listByBot(bot.id),
+      ]);
+      const memories = [
+        ...workspaceMemoriesForPrompt(workspaceMemoryRows),
+        ...selectForPrompt(ownMemoryRows, turn.input),
+      ];
       const ctx: BrotRunContext = {
         runId: state.runId,
         threadId: state.threadId,
         bot,
         history: turn.history,
         input,
-        memories: selectForPrompt(await repos.memories.listByBot(bot.id), turn.input),
+        memories,
         skills: await repos.skills.listForBot(bot.id),
         signal: state.controller.signal,
         requestTool: (req) => requestTool(state, req),

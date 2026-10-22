@@ -1,5 +1,5 @@
-import { asc, eq } from 'drizzle-orm';
-import { CreateMemory, UpdateMemory, type Memory } from '@brot/protocol';
+import { and, asc, eq } from 'drizzle-orm';
+import { CreateMemory, UpdateMemory, type CreateMemory as CreateMemoryBody, type Memory, type MemoryScope } from '@brot/protocol';
 import type { Db } from '../client';
 import { memories } from '../schema';
 import { newId, nowIso, required } from './common';
@@ -9,7 +9,8 @@ type MemoryRow = typeof memories.$inferSelect;
 export function toMemory(row: MemoryRow): Memory {
   return {
     id: row.id,
-    botId: row.botId,
+    ...(row.botId === null ? {} : { botId: row.botId }),
+    scope: row.scope,
     kind: row.kind,
     content: row.content,
     sourceRunId: row.sourceRunId ?? undefined,
@@ -18,13 +19,32 @@ export function toMemory(row: MemoryRow): Memory {
   };
 }
 
+export interface CreateMemoryInput extends CreateMemoryBody {
+  /** Defaults to `bot`. */
+  scope?: MemoryScope;
+  /** The bot for a bot memory. Required there, refused for a workspace memory. */
+  botId?: string;
+  sourceRunId?: string;
+}
+
 export function createMemoryRepo(db: Db) {
   return {
+    /** The memories a bot owns. Workspace memories are shared, so they are not included; see `listWorkspace`. */
     async listByBot(botId: string): Promise<Memory[]> {
       const rows = await db
         .select()
         .from(memories)
-        .where(eq(memories.botId, botId))
+        .where(and(eq(memories.botId, botId), eq(memories.scope, 'bot')))
+        .orderBy(asc(memories.createdAt), asc(memories.id));
+      return rows.map(toMemory);
+    },
+
+    /** Facts about the person, shared by every bot. Oldest first. */
+    async listWorkspace(): Promise<Memory[]> {
+      const rows = await db
+        .select()
+        .from(memories)
+        .where(eq(memories.scope, 'workspace'))
         .orderBy(asc(memories.createdAt), asc(memories.id));
       return rows.map(toMemory);
     },
@@ -34,18 +54,36 @@ export function createMemoryRepo(db: Db) {
       return row ? toMemory(row) : undefined;
     },
 
-    async create(botId: string, input: CreateMemory & { sourceRunId?: string }): Promise<Memory> {
-      const data = CreateMemory.parse(input);
+    /**
+     * Stores a bot memory (the `botId`, `input` form) or a workspace memory (the `{ scope: 'workspace', kind,
+     * content }` form). A bot memory needs its bot; a workspace memory refuses one.
+     */
+    async create(
+      first: string | CreateMemoryInput,
+      second?: CreateMemoryBody & { sourceRunId?: string },
+    ): Promise<Memory> {
+      const data = CreateMemory.parse(typeof first === 'string' ? second : first);
+      let scope: MemoryScope = 'bot';
+      let owner: string | null;
+      if (typeof first === 'string') {
+        owner = first;
+      } else {
+        scope = first.scope ?? 'bot';
+        owner = first.botId ?? null;
+        if (scope === 'bot' && owner === null) throw new Error('a bot memory needs a botId');
+        if (scope === 'workspace' && owner !== null) throw new Error('a workspace memory has no botId');
+      }
+      const sourceRunId = typeof first === 'string' ? second?.sourceRunId : first.sourceRunId;
       const timestamp = nowIso();
-      const sourceRunId = input.sourceRunId ?? null;
       const [row] = await db
         .insert(memories)
         .values({
           id: newId(),
-          botId,
+          botId: owner,
+          scope,
           kind: data.kind,
           content: data.content,
-          sourceRunId,
+          sourceRunId: sourceRunId ?? null,
           createdAt: timestamp,
           updatedAt: timestamp,
         })

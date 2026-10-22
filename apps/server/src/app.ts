@@ -8,6 +8,7 @@ import {
   CreateBrowserProfile,
   CreateMcpServer,
   CreateMemory,
+  CreateWorkspaceMemory,
   CreatePolicy,
   CreateRoom,
   CreateRoutine,
@@ -797,6 +798,7 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     (await repos.policies.remove(c.req.param('id'))) ? c.body(null, 204) : notFound(c, 'Policy'),
   );
 
+  /** The bot's own memories. Workspace memories live under /api/profile/memories instead. */
   app.get('/api/bots/:id/memories', async (c) => {
     const id = c.req.param('id');
     if (!(await repos.bots.get(id))) return notFound(c, 'Bot');
@@ -809,6 +811,15 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     const body = await parseBody(c, CreateMemory);
     if (!body.ok) return body.response;
     return c.json(await repos.memories.create(id, body.data), 201);
+  });
+
+  /** Facts about the person, shared by every bot ("About me"). */
+  app.get('/api/profile/memories', async (c) => c.json(await repos.memories.listWorkspace()));
+
+  app.post('/api/profile/memories', async (c) => {
+    const body = await parseBody(c, CreateWorkspaceMemory);
+    if (!body.ok) return body.response;
+    return c.json(await repos.memories.create({ ...body.data, scope: 'workspace' }), 201);
   });
 
   app.patch('/api/memories/:id', async (c) => {

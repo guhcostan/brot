@@ -71,7 +71,7 @@ describe('migrate', () => {
     ]);
 
     const applied = await handle.client.execute('SELECT COUNT(*) AS count FROM __drizzle_migrations');
-    expect(Number(applied.rows[0]?.count)).toBe(16);
+    expect(Number(applied.rows[0]?.count)).toBe(17);
   });
 
   it('adds saved logins on a fresh database', async () => {
@@ -807,6 +807,62 @@ describe('migrate', () => {
       provider: 'system',
       voice: '',
     });
+  });
+
+  it('adds memory scopes and a nullable bot id in place, keeping existing memories as bot memories', async () => {
+    const { handle } = await tempDb();
+    const journal = JSON.parse(await readFile(join(migrationsFolder, 'meta', '_journal.json'), 'utf8')) as {
+      entries: Array<{ tag: string; when: number }>;
+    };
+    const applied = journal.entries.slice(0, 16);
+    if (applied.length !== 16 || applied[15]?.tag !== '0015_youthful_ultimates') {
+      throw new Error('journal must start with the 0000 to 0015 migrations');
+    }
+
+    for (const entry of applied) {
+      await handle.client.executeMultiple(await readFile(join(migrationsFolder, `${entry.tag}.sql`), 'utf8'));
+    }
+    await handle.client.execute(
+      'CREATE TABLE "__drizzle_migrations" ("id" INTEGER PRIMARY KEY AUTOINCREMENT, "hash" text NOT NULL, "created_at" numeric)',
+    );
+    for (const entry of applied) {
+      await handle.client.execute({
+        sql: 'INSERT INTO "__drizzle_migrations" ("hash", "created_at") VALUES (?, ?)',
+        args: [entry.tag, entry.when],
+      });
+    }
+    await handle.client.execute(
+      `INSERT INTO bots (id, name, job, instructions, engine, computer, pinned, archived, created_at, updated_at)
+       VALUES ('bot_old', 'Ada', 'Researcher', '', 'mock', 'none', 0, 0, '2026-10-19T10:00:00.000Z', '2026-10-19T10:00:00.000Z')`,
+    );
+    await handle.client.execute(
+      `INSERT INTO memories (id, bot_id, kind, content, created_at, updated_at)
+       VALUES ('mem_old', 'bot_old', 'fact', 'Likes tea', '2026-10-19T10:00:00.000Z', '2026-10-19T10:00:00.000Z')`,
+    );
+
+    await migrate(handle.db);
+
+    expect(await columnNames(handle, 'memories')).toContain('scope');
+    const columns = await handle.client.execute("PRAGMA table_info('memories')");
+    const botIdColumn = columns.rows.find((row) => row.name === 'bot_id');
+    const scopeColumn = columns.rows.find((row) => row.name === 'scope');
+    expect(Number(botIdColumn?.notnull)).toBe(0);
+    expect(Number(scopeColumn?.notnull)).toBe(1);
+    expect(String(scopeColumn?.dflt_value)).toContain('bot');
+
+    const repos = createRepos(handle.db);
+    expect(await repos.memories.get('mem_old')).toMatchObject({ scope: 'bot', botId: 'bot_old' });
+    expect((await repos.memories.listByBot('bot_old')).map((memory) => memory.id)).toEqual(['mem_old']);
+    expect(await repos.memories.listWorkspace()).toEqual([]);
+
+    const workspace = await repos.memories.create({
+      scope: 'workspace',
+      kind: 'preference',
+      content: 'Works in Lisbon',
+    });
+    expect(workspace.botId).toBeUndefined();
+    expect((await repos.memories.listWorkspace()).map((memory) => memory.id)).toEqual([workspace.id]);
+    expect((await repos.memories.listByBot('bot_old')).map((memory) => memory.id)).toEqual(['mem_old']);
   });
 
   it('enables foreign keys on the connection', async () => {

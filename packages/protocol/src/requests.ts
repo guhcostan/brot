@@ -256,6 +256,13 @@ export const CreateMemory = z.object({
 });
 export type CreateMemory = z.infer<typeof CreateMemory>;
 
+/** A fact about the person, stored for the whole workspace. A bot id does not belong in this body. */
+export const CreateWorkspaceMemory = z.strictObject({
+  kind: MemoryKind,
+  content: z.string(),
+});
+export type CreateWorkspaceMemory = z.infer<typeof CreateWorkspaceMemory>;
+
 export const UpdateMemory = z.object({
   content: z.string().optional(),
   kind: MemoryKind.optional(),

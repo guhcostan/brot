@@ -64,7 +64,7 @@ describe('buildPrompt', () => {
   it('orders identity, instructions, memories, history and the current message', () => {
     const prompt = buildPrompt({
       bot: { ...testBot, instructions: 'Be brief.' },
-      memories: [{ id: 'k1', botId: 'bot_1', kind: 'fact', content: 'Lives in Lisbon', createdAt: AT, updatedAt: AT }],
+      memories: [{ id: 'k1', botId: 'bot_1', scope: 'bot', kind: 'fact', content: 'Lives in Lisbon', createdAt: AT, updatedAt: AT }],
       skills: [],
       history: [message(1, 'user', 'Hi'), message(2, 'assistant', 'Hello')],
       input: 'What is my city?',
@@ -79,6 +79,53 @@ describe('buildPrompt', () => {
         'Current message:\nWhat is my city?',
       ].join('\n\n'),
     );
+  });
+
+  it('puts workspace facts under About the person before the bot memories and skills', () => {
+    const prompt = buildPrompt({
+      bot: testBot,
+      memories: [
+        { id: 'k1', botId: 'bot_1', scope: 'bot', kind: 'fact', content: 'Lives in Lisbon', createdAt: AT, updatedAt: AT },
+        { id: 'w1', scope: 'workspace', kind: 'preference', content: 'Works in Lisbon on Tuesdays', createdAt: AT, updatedAt: AT },
+      ],
+      skills: [skill({ name: 'deploy' })],
+      history: [],
+      input: 'go',
+    });
+
+    expect(prompt).toContain(
+      'About the person:\nWorkspace-wide facts about the person, shared by every bot.\n- Works in Lisbon on Tuesdays',
+    );
+    expect(prompt).toContain('Memories:\n- Lives in Lisbon');
+    const order = ['About the person:', 'Memories:', 'Skills:'].map((label) => prompt.indexOf(label));
+    expect(order.every((index) => index >= 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+  });
+
+  it('renders only the About the person section for workspace memories', () => {
+    const prompt = buildPrompt({
+      bot: testBot,
+      memories: [{ id: 'w1', scope: 'workspace', kind: 'fact', content: 'Prefers morning calls', createdAt: AT, updatedAt: AT }],
+      skills: [],
+      history: [],
+      input: 'go',
+    });
+
+    expect(prompt).toContain('About the person:');
+    expect(prompt).not.toContain('Memories:');
+  });
+
+  it('leaves the prompt byte-identical when there are no workspace memories', () => {
+    const prompt = buildPrompt({
+      bot: testBot,
+      memories: [{ id: 'k1', botId: 'bot_1', scope: 'bot', kind: 'fact', content: 'Lives in Lisbon', createdAt: AT, updatedAt: AT }],
+      skills: [],
+      history: [],
+      input: 'go',
+    });
+
+    expect(prompt).toBe(`${IDENTITY}\n\nMemories:\n- Lives in Lisbon\n\nCurrent message:\ngo`);
+    expect(prompt).not.toContain('About the person:');
   });
 
   it('leaves out empty sections, and still names the bot first', () => {
@@ -218,7 +265,7 @@ describe('buildPrompt skills', () => {
   it('puts skills after memories and before the conversation so far', () => {
     const prompt = buildPrompt({
       bot: testBot,
-      memories: [{ id: 'k1', botId: 'bot_1', kind: 'fact', content: 'Lives in Lisbon', createdAt: AT, updatedAt: AT }],
+      memories: [{ id: 'k1', botId: 'bot_1', scope: 'bot', kind: 'fact', content: 'Lives in Lisbon', createdAt: AT, updatedAt: AT }],
       skills: [skill({ name: 'deploy', body: 'Run the tests.' })],
       history: [message(1, 'user', 'Hi')],
       input: 'go',

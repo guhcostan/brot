@@ -393,9 +393,19 @@ export type Policy = z.infer<typeof Policy>;
 export const MemoryKind = z.enum(['fact', 'preference', 'summary']);
 export type MemoryKind = z.infer<typeof MemoryKind>;
 
+/**
+ * Who a memory belongs to. `bot` memories belong to one bot; `workspace` memories are facts about the person,
+ * shared by every bot in the workspace ("About me").
+ */
+export const MemoryScope = z.enum(['bot', 'workspace']);
+export type MemoryScope = z.infer<typeof MemoryScope>;
+
 export const Memory = z.object({
   id: z.string(),
-  botId: z.string(),
+  /** The bot a bot memory belongs to. Absent for a workspace memory. */
+  botId: z.string().optional(),
+  /** Absent means `bot`, for memories written before scopes existed. */
+  scope: MemoryScope.default('bot'),
   kind: MemoryKind,
   content: z.string(),
   sourceRunId: z.string().optional(),

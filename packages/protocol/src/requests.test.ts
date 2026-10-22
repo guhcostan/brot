@@ -3,10 +3,12 @@ import {
   BrowserStatus,
   CreateBot,
   CreateBrowserProfile,
+  CreateMemory,
   CreateRoom,
   CreateSavedLogin,
   CreateTeam,
   CreateThread,
+  CreateWorkspaceMemory,
   CreateRoutine,
   CreateTask,
   PairingComplete,
@@ -195,6 +197,16 @@ describe('request schemas', () => {
     expect(() => PostMessage.parse({ content: 'x', attachmentIds: [...full, 'att_extra'] })).toThrow();
     expect(() => PostMessage.parse({ content: 'x', attachmentIds: [''] })).toThrow();
     expect(() => PostMessage.parse({ content: 'x', attachmentIds: [1] })).toThrow();
+  });
+
+  it('creates memories for a bot or for the whole workspace', () => {
+    expect(CreateMemory.parse({ kind: 'fact', content: 'Likes tea' })).toEqual({ kind: 'fact', content: 'Likes tea' });
+    expect(CreateWorkspaceMemory.parse({ kind: 'preference', content: 'Works in Lisbon' })).toEqual({
+      kind: 'preference',
+      content: 'Works in Lisbon',
+    });
+    expect(() => CreateWorkspaceMemory.parse({ kind: 'fact', content: 'x', botId: 'bot_1' })).toThrow();
+    expect(() => CreateWorkspaceMemory.parse({ kind: 'other', content: 'x' })).toThrow();
   });
 
   it('validates approval decisions', () => {

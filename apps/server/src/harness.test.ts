@@ -570,6 +570,53 @@ describe('contained runs: memory recall', () => {
   });
 });
 
+describe('contained runs: workspace memories', () => {
+  it("puts workspace facts before the bot's own recalled memories", async () => {
+    const engine = fakeEngine(replies);
+    const ctx = await contextWith({ engines: createEngineRegistry([engine.driver]) });
+    const { bot, threadId } = await botAndThread(ctx, { computer: 'none' });
+    const workspace = await ctx.services.repos.memories.create({
+      scope: 'workspace',
+      kind: 'preference',
+      content: 'Works in Lisbon on Tuesdays',
+    });
+    const own = await ctx.services.repos.memories.create(bot.id, { kind: 'fact', content: 'Likes tea' });
+
+    await runToEnd(ctx, threadId, 'plan my week');
+
+    const memories = engine.contexts[0]?.memories ?? [];
+    expect(memories.map((memory) => memory.scope)).toEqual(['workspace', 'bot']);
+    expect(memories.map((memory) => memory.id)).toEqual([workspace.id, own.id]);
+  });
+
+  it('caps workspace facts at 20 items and 3000 characters, and the whole list at 32 items and 9000 characters', async () => {
+    const engine = fakeEngine(replies);
+    const ctx = await contextWith({ engines: createEngineRegistry([engine.driver]) });
+    const { bot, threadId } = await botAndThread(ctx, { computer: 'none' });
+    for (let index = 0; index < 25; index += 1) {
+      await ctx.services.repos.memories.create({
+        scope: 'workspace',
+        kind: 'fact',
+        content: `Workspace fact ${index} ${'x'.repeat(180)}`,
+      });
+    }
+    for (let index = 0; index < 13; index += 1) {
+      await ctx.services.repos.memories.create(bot.id, { kind: 'fact', content: `Stored fact number ${index}` });
+    }
+
+    await runToEnd(ctx, threadId, 'hello');
+
+    const memories = engine.contexts[0]?.memories ?? [];
+    const workspace = memories.filter((memory) => memory.scope === 'workspace');
+    expect(workspace).toHaveLength(15);
+    expect(workspace[0]?.content).toContain('Workspace fact 24');
+    expect(workspace.reduce((total, memory) => total + memory.content.length, 0)).toBeLessThanOrEqual(3000);
+    expect(memories.length).toBeLessThanOrEqual(32);
+    expect(memories.reduce((total, memory) => total + memory.content.length, 0)).toBeLessThanOrEqual(9000);
+    expect(memories.filter((memory) => memory.scope === 'bot')).toHaveLength(12);
+  });
+});
+
 describe('services shutdown', () => {
   it('closes engines and computer providers once, however often close is called', async () => {
     const engine = fakeEngine(replies);

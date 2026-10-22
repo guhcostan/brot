@@ -9,7 +9,7 @@ let sequence = 0;
 
 function memory(content: string, createdAt: string, overrides: Partial<Memory> = {}): Memory {
   sequence += 1;
-  return { id: `mem_${sequence}`, botId: 'bot_1', kind: 'fact', content, createdAt, updatedAt: createdAt, ...overrides };
+  return { id: `mem_${sequence}`, botId: 'bot_1', scope: 'bot', kind: 'fact', content, createdAt, updatedAt: createdAt, ...overrides };
 }
 
 function daysAgo(days: number): string {

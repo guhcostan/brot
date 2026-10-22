@@ -20,6 +20,7 @@ import type {
   DeviceRole,
   EgressPolicy,
   MemoryKind,
+  MemoryScope,
   McpServerTransport,
   NotificationKind,
   MessageRole,
@@ -258,9 +259,9 @@ export const memories = sqliteTable(
   'memories',
   {
     id: text('id').primaryKey(),
-    botId: text('bot_id')
-      .notNull()
-      .references(() => bots.id, { onDelete: 'cascade' }),
+    /** The bot a bot memory belongs to. Null for a workspace memory, which belongs to the person. */
+    botId: text('bot_id').references(() => bots.id, { onDelete: 'cascade' }),
+    scope: text('scope').$type<MemoryScope>().notNull().default('bot'),
     kind: text('kind').$type<MemoryKind>().notNull(),
     content: text('content').notNull(),
     sourceRunId: text('source_run_id').references(() => runs.id, { onDelete: 'set null' }),
