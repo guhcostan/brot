@@ -1,5 +1,5 @@
 import { useEffect, useId, useState, type FormEvent, type KeyboardEvent, type ReactElement } from 'react';
-import { EgressHost, type Bot, type CreateBotInput, type Team, type UpdateBot } from '@brot/protocol';
+import { EgressHost, type ApprovalMode, type Bot, type CreateBotInput, type Team, type UpdateBot } from '@brot/protocol';
 import {
   AVATAR_COLOR_NAMES,
   AVATAR_SPECIES,
@@ -104,6 +104,7 @@ interface FormState {
   budget: string;
   pinned: boolean;
   notifications: boolean;
+  approvalMode: ApprovalMode;
 }
 
 function computerOf(bot: Pick<Bot, 'computer' | 'desktop'>): ComputerChoice {
@@ -128,6 +129,7 @@ function initialState(bot: Bot | undefined): FormState {
       budget: '',
       pinned: false,
       notifications: true,
+      approvalMode: 'ask',
     };
   }
   const avatar = avatarOf(bot);
@@ -146,6 +148,7 @@ function initialState(bot: Bot | undefined): FormState {
     budget: bot.teamBudgetUsd === undefined ? '' : String(bot.teamBudgetUsd),
     pinned: bot.pinned,
     notifications: bot.notifications !== false,
+    approvalMode: bot.approvalMode ?? 'ask',
   };
 }
 
@@ -324,6 +327,7 @@ function BotForm({
           ...(computer === 'host' ? { hostAcknowledged: true } : {}),
           browser,
           notifications: form.notifications,
+          ...(form.approvalMode === 'edits' ? { approvalMode: 'edits' as const } : {}),
           egress,
           ...(form.teamId === '' ? {} : { teamId: form.teamId }),
           ...(form.model ? { engine: DSH_ENGINE, model: form.model } : {}),
@@ -358,6 +362,7 @@ function BotForm({
         if (budget !== bot.teamBudgetUsd) patch.teamBudgetUsd = budget ?? null;
         if (form.pinned !== bot.pinned) patch.pinned = form.pinned;
         if (form.notifications !== (bot.notifications !== false)) patch.notifications = form.notifications;
+        if (form.approvalMode !== (bot.approvalMode ?? 'ask')) patch.approvalMode = form.approvalMode;
         const profileId = bot.browserProfileId ?? '';
         if (form.browserProfileId !== profileId) {
           patch.browserProfileId = form.browserProfileId === '' ? null : form.browserProfileId;
@@ -480,6 +485,36 @@ function BotForm({
         onChange={(event) => set('budget', event.target.value)}
         error={tried && !budgetOk ? t('botForm.budgetInvalid') : undefined}
       />
+
+      <fieldset className="m-0 flex flex-col gap-2 border-0 p-0">
+        <legend className="mb-1 p-0 text-sm font-medium">{t('botForm.approvals')}</legend>
+        <div className="grid gap-2 sm:grid-cols-2">
+          {(['ask', 'edits'] as const).map((mode) => (
+            <label
+              key={mode}
+              className={
+                form.approvalMode === mode
+                  ? 'flex cursor-pointer items-start gap-2 rounded-lg border border-ink bg-surface-2 p-3'
+                  : 'flex cursor-pointer items-start gap-2 rounded-lg border border-line p-3 transition-colors duration-[var(--dur-fast)] hover:bg-surface-2'
+              }
+            >
+              <input
+                type="radio"
+                name="approvalMode"
+                value={mode}
+                className="room-check mt-0.5"
+                checked={form.approvalMode === mode}
+                onChange={() => set('approvalMode', mode)}
+              />
+              <span className="flex flex-col gap-0.5">
+                <span className="text-sm font-medium">{t(mode === 'ask' ? 'botForm.approvalAsk' : 'botForm.approvalEdits')}</span>
+                <span className="text-xs text-ink-2">{t(mode === 'ask' ? 'botForm.approvalAskHint' : 'botForm.approvalEditsHint')}</span>
+              </span>
+            </label>
+          ))}
+        </div>
+        <p className="m-0 text-xs text-ink-3">{t('botForm.approvalSafety')}</p>
+      </fieldset>
 
       <label className="flex cursor-pointer items-start gap-2.5 rounded-md px-1 py-1 text-sm hover:bg-surface-2">
         <input

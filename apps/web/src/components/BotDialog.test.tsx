@@ -172,3 +172,37 @@ describe('BotDialog browser profiles', () => {
     expect(textOf(html)).not.toContain(t('botForm.browserProfile'));
   });
 });
+
+describe('BotDialog approval mode', () => {
+  const radio = (html: string, mode: 'ask' | 'edits'): string =>
+    html.match(new RegExp(`<input[^>]*name="approvalMode"[^>]*value="${mode}"[^>]*>`))?.[0] ?? '';
+
+  it('defaults a new bot to asking before risky actions', () => {
+    const html = render();
+    const text = textOf(html);
+
+    expect(text).toContain(t('botForm.approvals'));
+    expect(text).toContain(t('botForm.approvalAsk'));
+    expect(text).toContain(t('botForm.approvalAskHint'));
+    expect(text).toContain(t('botForm.approvalEdits'));
+    expect(text).toContain(t('botForm.approvalSafety'));
+    expect(radio(html, 'ask')).toContain('checked=""');
+    expect(radio(html, 'edits')).not.toContain('checked=""');
+  });
+
+  it('shows the auto-approve hint and selects edits when editing such a bot', () => {
+    const html = render({ bot: { ...bot, approvalMode: 'edits' } });
+    const text = textOf(html);
+
+    expect(text).toContain(t('botForm.approvalEditsHint'));
+    expect(radio(html, 'edits')).toContain('checked=""');
+    expect(radio(html, 'ask')).not.toContain('checked=""');
+  });
+
+  it('treats a bot without an approval mode as the ask default', () => {
+    const html = render({ bot });
+
+    expect(radio(html, 'ask')).toContain('checked=""');
+    expect(radio(html, 'edits')).not.toContain('checked=""');
+  });
+});

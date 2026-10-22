@@ -785,9 +785,10 @@ export function createMockClient(): BrotClient {
         throw new Error(`Unknown browser profile: ${parsed.browserProfileId}`);
       }
       const at = now();
-      const { hostAcknowledged: _ack, ...fields } = parsed;
+      const { hostAcknowledged: _ack, approvalMode, ...fields } = parsed;
       const created: Bot = {
         ...fields,
+        ...(approvalMode === 'edits' ? { approvalMode } : {}),
         id: nextId('bot'),
         egress: parsed.egress ?? defaultEgressPolicy(),
         pinned: false,
@@ -803,11 +804,13 @@ export function createMockClient(): BrotClient {
     async updateBot(botId, patch) {
       const current = bots.get(botId);
       if (!current) throw new Error(`Unknown bot: ${botId}`);
-      const { teamBudgetUsd, teamId, hostAcknowledged: _ack, browserProfileId, ...rest } = UpdateBot.parse(patch);
+      const { teamBudgetUsd, teamId, hostAcknowledged: _ack, browserProfileId, approvalMode, ...rest } = UpdateBot.parse(patch);
       if (browserProfileId !== undefined && browserProfileId !== null && !browserProfiles.has(browserProfileId)) {
         throw new Error(`Unknown browser profile: ${browserProfileId}`);
       }
       let next: Bot = { ...current, ...rest, updatedAt: now() };
+      if (approvalMode === 'edits') next.approvalMode = 'edits';
+      else if (approvalMode === 'ask') delete next.approvalMode;
       if (teamBudgetUsd === null) delete next.teamBudgetUsd;
       else if (teamBudgetUsd !== undefined) next.teamBudgetUsd = teamBudgetUsd;
       if (teamId === null) delete next.teamId;
