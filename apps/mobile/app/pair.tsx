@@ -22,7 +22,7 @@ import { useLocale } from '../src/i18n/useLocale';
 
 type Step = { kind: 'scan' } | { kind: 'code' } | { kind: 'confirm'; target: PairingTarget };
 
-function Scanner({ onCode, onManual }: { onCode: (raw: string) => void; onManual: () => void }): ReactElement {
+function Scanner({ onCode }: { onCode: (raw: string) => void }): ReactElement {
   const theme = useTheme();
   const [permission, requestPermission] = useCameraPermissions();
   const handled = useRef(false);
@@ -48,7 +48,6 @@ function Scanner({ onCode, onManual }: { onCode: (raw: string) => void; onManual
           {permission.canAskAgain ? t('pair.cameraNeeded') : t('pair.cameraOff')}
         </Text>
         {permission.canAskAgain ? <Button label={t('pair.allowCamera')} size="sm" onPress={() => void requestPermission()} /> : null}
-        <Button label={t('pair.enterCode')} size="sm" variant="ghost" onPress={onManual} />
       </View>
     );
   }
@@ -169,7 +168,7 @@ export default function PairScreen(): ReactElement {
 
           {step.kind === 'scan' ? (
             <Animated.View key="scan" entering={riseIn(reduced)} style={{ gap: theme.space[4] }}>
-              <Scanner onCode={accept} onManual={() => setStep({ kind: 'code' })} />
+              <Scanner onCode={accept} />
               {scanError ? (
                 <Text variant="small" tone="ink" accessibilityLiveRegion="polite">
                   {scanError}

@@ -2,13 +2,27 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "jsx": "react-jsx",
-    "lib": ["ES2023", "DOM"],
-    "customConditions": ["react-native"],
+    "lib": [
+      "ES2023",
+      "DOM"
+    ],
+    "customConditions": [
+      "react-native"
+    ],
     "types": [],
     "paths": {
-      "@brot/ui/avatar": ["../../packages/ui/src/avatar.ts"],
-      "@brot/ui/blink": ["../../packages/ui/src/blink.ts"]
+      "@brot/ui/avatar": [
+        "../../packages/ui/src/avatar.ts"
+      ],
+      "@brot/ui/blink": [
+        "../../packages/ui/src/blink.ts"
+      ]
     }
   },
-  "include": ["app/**/*.ts", "app/**/*.tsx", "src/**/*.ts", "src/**/*.tsx", "expo-env.d.ts"]
+  "include": [
+    "app/**/*.ts",
+    "app/**/*.tsx",
+    "src/**/*.ts",
+    "src/**/*.tsx"
+  ]
 }

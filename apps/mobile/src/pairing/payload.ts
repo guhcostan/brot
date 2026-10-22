@@ -42,7 +42,8 @@ export function serverUrlFrom(host: string, port: number): string {
 
 /** Reads a scanned QR. A raw token (pasted by hand) is accepted too; the server address then comes from the user. */
 export function parsePairingCode(raw: string): ParseResult<PairingTarget> {
-  const text = raw.trim();
+  // iOS "smart punctuation" turns typed straight quotes into curly ones, which JSON does not accept.
+  const text = raw.trim().replace(/[\u201C\u201D\u201E\u201F\u2033]/g, '"').replace(/[\u2018\u2019\u201A\u201B\u2032]/g, "'");
   if (text === '') return { ok: false, error: t('pair.error.empty') };
 
   if (text.startsWith('{')) {

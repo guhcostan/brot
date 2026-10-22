@@ -59,3 +59,10 @@ describe('normalizeServerUrl', () => {
     expect(normalizeServerUrl('http://').ok).toBe(false);
   });
 });
+
+describe('pairing text typed on iOS', () => {
+  it('accepts curly quotes from smart punctuation', () => {
+    const typed = '{\u201Cv\u201D:1,\u201Chost\u201D:\u201C127.0.0.1\u201D,\u201Cport\u201D:8799,\u201Ctoken\u201D:\u201Cabcdefghijklmnopqrstuvwxyz0123456789ABCDEFG\u201D}';
+    expect(parsePairingCode(typed).ok).toBe(true);
+  });
+});
