@@ -106,6 +106,26 @@ mapped in `docs/MAUSBOT-PARITY.md` (34 bots / 7 teams, 33 bots with a browser an
   no saved-logins vault, no idle stop; the headed login window is unproxied by design. Deleting a bot now
   closes its Chrome and removes its profile. `request_takeover` wording still points desktop bots only.
 
+## Wave 9: teams, many threads, routine runs (2026-10-22)
+
+- **Teams.** A team is a named group with a shared brief and an optional Chief of Staff; bots carry
+  `teamId`, and every member bot's prompt gets `Team: <name>` plus the brief. Routes: `GET/POST /api/teams`,
+  `PATCH/DELETE /api/teams/:id`; deleting a team ungroups its bots. Web: collapsible team sections in the
+  sidebar with counts and a pencil, a team dialog (brief, chief, roster, delete consequences) and a team
+  select in the bot dialog. Migration 0006.
+- **Many threads per bot.** The web client/state are thread-keyed: a bot row expands into its threads,
+  `+ New thread` creates one, the thread header shows the title, and a send refreshes the list so the
+  server auto-title appears. `PATCH /api/threads/:id` renames; the first user message of a default-titled
+  thread names it. Rooms keep their flow.
+- **Routine runs.** Every fire writes a durable run (schedule/webhook/manual) with status and result;
+  a per-routine overlap guard writes `skipped`; completion comes from the bus (last assistant message);
+  catch-up fires at most one missed occurrence within 12h; cron triggers take a timezone; `rememberLastRun`
+  prepends the previous result. `GET /api/routines/:id/runs` and `GET /api/routine-runs` expose history.
+  Migration 0007. The web routines surface comes with the next wave.
+- Verified live: a team brief reached a DSH run ("ABACAXI" rule answered verbatim); two threads on one bot
+  stayed isolated with auto-titles; a real every-minute cron fired, completed and captured its result.
+  1411 tests pass (125 files), typecheck 12/12, lint clean.
+
 ## Next
 
 1. Re-run the eval suite on a live model once OpenCode Go has quota (`apps/evals`, `--base` to the server), including B8 and C; the 2026-10-20 results predate the read auto-allow and the fixes above.

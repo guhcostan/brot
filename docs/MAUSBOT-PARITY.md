@@ -64,9 +64,9 @@ Legend: ✅ parity or better · 🟡 partial · ❌ absent · 🎯 current wave.
 | Area | MausBot | Brot today | Plan |
 |---|---|---|---|
 | Roster of bots, one thread per bot, pin/unread/archive | ✅ | ✅ | — |
-| Multiple independent threads per bot (up to 3 running) | ✅ | 🟡 one DM per bot; rooms + tasks exist | W4 |
+| Multiple independent threads per bot (up to 3 running) | ✅ | ✅ any number, thread header + list | W2 done |
 | Groups/rooms with per-bot state, holds, usage badge | ✅ | 🟡 rooms with sequential responders, task board | W3 |
-| Teams: named section, shared instructions, roster, Chief | ✅ | ❌ (rooms are conversations, not teams) | W2 🎯 |
+| Teams: named section, shared instructions, roster, Chief | ✅ | ✅ teams with brief, chief and roster | W2 done |
 | Per-team working folder (`bot.cwd`) | ✅ | 🟡 sandbox `/workspace` per bot; host computer has the real cwd | W2 |
 | Browser per bot, persistent login profiles | ✅ | ✅ host browser with a per-bot profile; container Chromium profile now persists too | W1 done |
 | Live browser view and take-over | ✅ | 🟡 desktops have it; host browser has no live view yet | W6 |
@@ -75,7 +75,7 @@ Legend: ✅ parity or better · 🟡 partial · ❌ absent · 🎯 current wave.
 | Connected apps (Composio marketplace) + per-bot tool grants | ✅ | ❌ | W3 |
 | Custom MCP servers (stdio/HTTP, per-bot) | ✅ | ❌ (Brot is an MCP server; no client) | W3 |
 | Approval levels per bot/thread + decision log | ✅ | 🟡 per-tool broker + policies, no levels/log export | W4 |
-| Routines: cron/weekday with timezone, receipts, recovery, calendar | ✅ | 🟡 cron routines, no calendar/receipts UI/catch-up rules | W6 |
+| Routines: cron/weekday with timezone, receipts, recovery, calendar | ✅ | 🟡 server runs/receipts/catch-up/timezone done; web surface and calendar next | W3 |
 | Webhook triggers | ✅ | 🟡 receiver exists, no signed secret UX | W6 |
 | App-event triggers | ✅ | ❌ | W6 |
 | Memory: MEMORY.md + topics + recall + upkeep + journal/undo + About me | ✅ | 🟡 bot memories table (CRUD), no recall/upkeep/journal | W7 |
@@ -95,16 +95,16 @@ Legend: ✅ parity or better · 🟡 partial · ❌ absent · 🎯 current wave.
 Ordered by the usage evidence above, cheapest visible value first. Each wave ships green tests, a real
 end-to-end run on this machine, and its own commit on `main`.
 
-- **W1 — Browser with a persistent profile (done, `db7cce9`…`151ef78`).** A bot gets `browser: true` and a Chrome on the
+- **W1 — Browser with a persistent profile (done).** A bot gets `browser: true` and a Chrome on the
   server machine with its own profile under `~/.brot/browser-profiles/<botId>`, reached over CDP. Bot
   browsing goes through the bot's egress policy via the existing HTTP CONNECT proxy; the headed login
   window is unproxied because the person drives it. Bots with a desktop container keep that browser, and
   its Chromium profile now lives on the workspace volume, so logins survive a container restart.
 - **W1b — Browser view.** Live frames and take-over for the host browser, idle stop, profile sign-out and a signed-in-sites list.
-- **W2 — Teams and threads.** Named teams with shared instructions, a roster, a sidebar section and one
+- **W2 — Teams and threads (done).** Named teams with shared instructions, a roster, a sidebar section and one
   Chief; several independent threads per bot with their own transcript, model override and cost; a working
   folder per bot/team (the reference's `bot.cwd`).
-- **W3 — Routines.** Plain-language schedule to cron with confirmation, timezone, run receipts, history and
+- **W3 — Routines (server done; web surface next).** Plain-language schedule to cron with confirmation, timezone, run receipts, history and
   calendar, catch-up and recovery rules, result posted into the bot's thread.
 - **W4 — Memory and skills.** Skills end to end (they are dormant today: `RunContext.skills` is ignored by
   the prompt and the web tab is empty), file-based memory with recall, upkeep, journal/undo and About-me
