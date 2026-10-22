@@ -103,8 +103,8 @@ mapped in `docs/MAUSBOT-PARITY.md` (34 bots / 7 teams, 33 bots with a browser an
   found live (`page.evaluate` serialised functions carrying esbuild's `__name`); snapshot/field page logic
   is now raw source evaluated as an expression, with regression tests.
 - **Known gaps:** no live browser view/takeover for the host browser yet (desktop containers keep theirs);
-  no saved-logins vault, no profile deletion when a bot is deleted, no idle stop; the headed login window
-  is unproxied by design. `request_takeover` wording still points desktop bots only.
+  no saved-logins vault, no idle stop; the headed login window is unproxied by design. Deleting a bot now
+  closes its Chrome and removes its profile. `request_takeover` wording still points desktop bots only.
 
 ## Next
 

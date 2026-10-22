@@ -68,7 +68,8 @@ Legend: ✅ parity or better · 🟡 partial · ❌ absent · 🎯 current wave.
 | Groups/rooms with per-bot state, holds, usage badge | ✅ | 🟡 rooms with sequential responders, task board | W3 |
 | Teams: named section, shared instructions, roster, Chief | ✅ | ❌ (rooms are conversations, not teams) | W2 🎯 |
 | Per-team working folder (`bot.cwd`) | ✅ | 🟡 sandbox `/workspace` per bot; host computer has the real cwd | W2 |
-| Browser per bot, persistent login profiles, live view, takeover | ✅ | ❌ (desktop containers have an ephemeral browser profile) | W1 🎯 |
+| Browser per bot, persistent login profiles | ✅ | ✅ host browser with a per-bot profile; container Chromium profile now persists too | W1 done |
+| Live browser view and take-over | ✅ | 🟡 desktops have it; host browser has no live view yet | W6 |
 | Host browser (My Chrome) attach | ✅ | ❌ | W5 |
 | Saved logins vault + `fill_login` | ✅ | ❌ | W5 |
 | Connected apps (Composio marketplace) + per-bot tool grants | ✅ | ❌ | W3 |
@@ -94,11 +95,12 @@ Legend: ✅ parity or better · 🟡 partial · ❌ absent · 🎯 current wave.
 Ordered by the usage evidence above, cheapest visible value first. Each wave ships green tests, a real
 end-to-end run on this machine, and its own commit on `main`.
 
-- **W1 — Browser with a persistent profile (in progress).** A bot gets `browser: true` and a Chrome on the
+- **W1 — Browser with a persistent profile (done, `db7cce9`…`151ef78`).** A bot gets `browser: true` and a Chrome on the
   server machine with its own profile under `~/.brot/browser-profiles/<botId>`, reached over CDP. Bot
   browsing goes through the bot's egress policy via the existing HTTP CONNECT proxy; the headed login
   window is unproxied because the person drives it. Bots with a desktop container keep that browser, and
   its Chromium profile now lives on the workspace volume, so logins survive a container restart.
+- **W1b — Browser view.** Live frames and take-over for the host browser, idle stop, profile sign-out and a signed-in-sites list.
 - **W2 — Teams and threads.** Named teams with shared instructions, a roster, a sidebar section and one
   Chief; several independent threads per bot with their own transcript, model override and cost; a working
   folder per bot/team (the reference's `bot.cwd`).
