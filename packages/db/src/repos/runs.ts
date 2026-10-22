@@ -1,4 +1,4 @@
-import { asc, eq } from 'drizzle-orm';
+import { and, asc, eq, gte, lt } from 'drizzle-orm';
 import { RunStatus, type Run } from '@brot/protocol';
 import type { Db } from '../client';
 import { runs } from '../schema';
@@ -7,6 +7,13 @@ import { newId, nowIso, required } from './common';
 type RunRow = typeof runs.$inferSelect;
 
 export type RunPatch = Partial<Pick<Run, 'status' | 'engine' | 'model' | 'endedAt' | 'tokensIn' | 'tokensOut' | 'costUsd' | 'error'>>;
+
+/** Runs whose start time falls in [`from`, `to`), optionally narrowed to one bot. */
+export interface RunUsageRange {
+  from: string;
+  to: string;
+  botId?: string;
+}
 
 export function toRun(row: RunRow): Run {
   return {
@@ -47,6 +54,28 @@ export function createRunRepo(db: Db) {
         .select()
         .from(runs)
         .where(eq(runs.threadId, threadId))
+        .orderBy(asc(runs.startedAt), asc(runs.id));
+      return rows.map(toRun);
+    },
+
+    /**
+     * Runs started in the half-open range, oldest first, for the usage ledger. Bounds are normalized to ISO so
+     * that the string comparison in the query matches the timestamps the harness stores. No aggregation here:
+     * the server does that in memory, where it is easy to test and portable to another database.
+     */
+    async usage(range: RunUsageRange): Promise<Run[]> {
+      const from = new Date(range.from).toISOString();
+      const to = new Date(range.to).toISOString();
+      const rows = await db
+        .select()
+        .from(runs)
+        .where(
+          and(
+            gte(runs.startedAt, from),
+            lt(runs.startedAt, to),
+            range.botId === undefined ? undefined : eq(runs.botId, range.botId),
+          ),
+        )
         .orderBy(asc(runs.startedAt), asc(runs.id));
       return rows.map(toRun);
     },

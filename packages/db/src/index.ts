@@ -10,6 +10,7 @@ export type {
   RoutineRunPatch,
   RoutineScheduleUpdate,
   RunPatch,
+  RunUsageRange,
   TaskFilter,
 } from './repos';
 export * as schema from './schema';

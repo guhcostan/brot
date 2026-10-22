@@ -52,7 +52,7 @@ export type { CreateMessageInput } from './messages';
 export type { CreateDeviceInput } from './devices';
 export type { RoutineScheduleUpdate } from './routines';
 export type { CreateRoutineRunInput, RoutineRunFilter, RoutineRunPatch } from './routine-runs';
-export type { RunPatch } from './runs';
+export type { RunPatch, RunUsageRange } from './runs';
 export type { CreateAttachmentRecord, StoredAttachment } from './attachments';
 export type { CreateNotificationInput, NotificationFilter } from './notifications';
 export type { TaskFilter } from './tasks';

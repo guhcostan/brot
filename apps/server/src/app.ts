@@ -50,6 +50,7 @@ import type { LlmRelay, ProviderSpec } from './llm';
 import { botBrowserKind } from './browser/tools';
 import type { HostBrowserService } from './browser/types';
 import { mountAttachmentRoutes, type AttachmentStorage } from './attachments';
+import { mountUsageRoutes } from './usage';
 import { mountDesktopRoutes, type DesktopService } from './desktop';
 import { testMcpServer } from './mcp-servers';
 import { RuleViolation } from './rooms/errors';
@@ -95,6 +96,8 @@ export interface AppDeps {
   attachments: AttachmentStorage;
   /** The model providers the relay knows (seeded plus providers.json). Listed by GET /api/providers. */
   providers?: readonly ProviderSpec[];
+  /** Clock the usage range defaults read. Tests inject a fixed time. */
+  now?: () => Date;
 }
 
 type Parsed<T> = { ok: true; data: T } | { ok: false; response: Response };
@@ -894,6 +897,8 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
   });
 
   mountAttachmentRoutes(app, { repos, storage: attachments });
+
+  mountUsageRoutes(app, { repos, ...(deps.now === undefined ? {} : { now: deps.now }) });
 
   if (deps.desktop) mountDesktopRoutes(app, { repos, desktop: deps.desktop });
 

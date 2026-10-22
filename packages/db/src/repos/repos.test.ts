@@ -322,6 +322,52 @@ describe('runs', () => {
     expect(done).toMatchObject({ status: 'completed', tokensIn: 12, tokensOut: 34, costUsd: 0.5 });
     expect((await repos.runs.listByThread(thread.id)).map((r) => r.id)).toEqual([run.id]);
   });
+
+  it('lists the runs started inside a usage range, oldest first, optionally for one bot', async () => {
+    const { bot, thread } = await seed();
+    const other = await repos.bots.create({ name: 'Grace', job: 'Operations' });
+    const otherThread = await repos.threads.create(other.id, { title: 'Chat' });
+
+    async function runAt(botId: string, threadId: string, startedAt: string): Promise<string> {
+      const run = await repos.runs.create({ threadId, botId, engine: 'mock' });
+      await handle.client.execute({ sql: 'UPDATE runs SET started_at = ? WHERE id = ?', args: [startedAt, run.id] });
+      return run.id;
+    }
+
+    const before = await runAt(bot.id, thread.id, '2026-09-30T23:59:59.999Z');
+    const first = await runAt(bot.id, thread.id, '2026-10-01T00:00:00.000Z');
+    const second = await runAt(bot.id, thread.id, '2026-10-01T12:00:00.000Z');
+    const atTo = await runAt(bot.id, thread.id, '2026-10-02T00:00:00.000Z');
+    const otherBot = await runAt(other.id, otherThread.id, '2026-10-01T06:00:00.000Z');
+    await handle.client.execute({
+      sql: 'UPDATE runs SET status = ?, model = ?, ended_at = ?, tokens_in = ?, tokens_out = ?, cost_usd = ? WHERE id = ?',
+      args: ['completed', 'mock-1', '2026-10-01T12:05:00.000Z', 11, 7, 0.25, second],
+    });
+
+    // A bound without milliseconds still matches the stored `...000Z` timestamp.
+    const range = { from: '2026-10-01T00:00:00Z', to: '2026-10-02T00:00:00Z' };
+    const all = await repos.runs.usage(range);
+    expect(all.map((run) => run.id)).toEqual([first, otherBot, second]);
+    expect(all[1]).toMatchObject({ botId: other.id, threadId: otherThread.id, status: 'running', tokensIn: 0, costUsd: 0 });
+    expect(all[2]).toMatchObject({
+      status: 'completed',
+      engine: 'mock',
+      model: 'mock-1',
+      tokensIn: 11,
+      tokensOut: 7,
+      costUsd: 0.25,
+      endedAt: '2026-10-01T12:05:00.000Z',
+    });
+
+    expect((await repos.runs.usage({ ...range, botId: bot.id })).map((run) => run.id)).toEqual([first, second]);
+    expect((await repos.runs.usage({ from: '2026-09-30T00:00:00Z', to: '2026-10-01T00:00:00Z' })).map((run) => run.id)).toEqual([
+      before,
+    ]);
+    expect((await repos.runs.usage({ from: '2026-10-02T00:00:00Z', to: '2026-10-03T00:00:00Z' })).map((run) => run.id)).toEqual([
+      atTo,
+    ]);
+    expect(await repos.runs.usage({ from: '2026-10-03T00:00:00Z', to: '2026-10-04T00:00:00Z' })).toEqual([]);
+  });
 });
 
 describe('approvals', () => {
