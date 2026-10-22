@@ -11,6 +11,7 @@ import type {
   CreateBrowserProfile,
   CreateMcpServerInput,
   CreateMemory,
+  CreateSavedLogin,
   CreateRoutineInput,
   CreateSkill,
   CreateTeamInput,
@@ -26,6 +27,7 @@ import type {
   Routine,
   RoutineRun,
   RoutineRunStatus,
+  SavedLogin,
   SetBrowserTakeover,
   SetTakeover,
   Skill,
@@ -43,6 +45,7 @@ import type {
   UpdateMemory,
   UpdateRoomMembers,
   UpdateRoutine,
+  UpdateSavedLogin,
   UpdateSkill,
   UpdateTeam,
 } from '@brot/protocol';
@@ -56,6 +59,7 @@ export type {
   CreateBrowserProfile,
   CreateMcpServerInput,
   CreateMemory,
+  CreateSavedLogin,
   CreateRoutineInput,
   CreateSkill,
   McpServer,
@@ -68,6 +72,7 @@ export type {
   Routine,
   RoutineRun,
   RoutineRunStatus,
+  SavedLogin,
   SetBrowserTakeover,
   Skill,
   TodayBot,
@@ -79,6 +84,7 @@ export type {
   UpdateMcpServer,
   UpdateMemory,
   UpdateRoutine,
+  UpdateSavedLogin,
   UpdateSkill,
   UsageGroup,
   UsageGrouping,
@@ -365,4 +371,11 @@ export interface BrotClient {
   getUsage(filter?: UsageFilter): Promise<UsageSummary>;
   /** The same-origin CSV export URL for the same range, for a link or the download helper. */
   usageExportUrl(filter?: Omit<UsageFilter, 'group'>): string;
+
+  /** Saved logins, without their values: the API never returns a username, password or TOTP secret. */
+  listSavedLogins(): Promise<SavedLogin[]>;
+  createSavedLogin(input: CreateSavedLogin): Promise<SavedLogin>;
+  updateSavedLogin(loginId: string, patch: UpdateSavedLogin): Promise<SavedLogin>;
+  /** Deletes the login and the vault values behind it. */
+  deleteSavedLogin(loginId: string): Promise<void>;
 }

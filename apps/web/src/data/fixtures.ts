@@ -1,4 +1,4 @@
-import type { Approval, Bot, CanonicalEvent, McpServer, Memory, Message, Notification, Routine, RoutineRun, Skill, Task, Team, Thread } from '@brot/protocol';
+import type { Approval, Bot, CanonicalEvent, McpServer, Memory, Message, Notification, Routine, RoutineRun, SavedLogin, Skill, Task, Team, Thread } from '@brot/protocol';
 import type { BrowserProfile } from './client';
 
 const CREATED = '2026-10-01T09:00:00.000Z';
@@ -719,6 +719,28 @@ export const DEMO_MCP_SERVERS: McpServer[] = [
     env: {},
     url: 'https://mcp.example.com/search',
     enabled: false,
+    createdAt: CREATED,
+    updatedAt: CREATED,
+  },
+];
+
+/** Saved logins never carry their values: the API returns only this value-free view. */
+export const DEMO_SAVED_LOGINS: SavedLogin[] = [
+  {
+    id: 'login_github',
+    name: 'GitHub',
+    host: 'github.com',
+    label: 'Personal account',
+    hasTotp: true,
+    createdAt: CREATED,
+    updatedAt: CREATED,
+  },
+  {
+    id: 'login_x',
+    name: 'X/Twitter',
+    host: 'x.com',
+    label: 'Work account',
+    hasTotp: false,
     createdAt: CREATED,
     updatedAt: CREATED,
   },

@@ -5,6 +5,7 @@ import type {
   Attachment,
   Bot,
   BrowserTakeover,
+  SavedLogin,
   CanonicalEvent,
   ComputerState,
   Device,
@@ -29,6 +30,7 @@ import {
   CreateBot,
   CreateMcpServer,
   CreateMemory,
+  CreateSavedLogin,
   CreateRoutine,
   CreateSkill,
   CreateTeam,
@@ -45,6 +47,7 @@ import {
   UpdateMemory,
   UpdateRoomMembers,
   UpdateRoutine,
+  UpdateSavedLogin,
   UpdateSkill,
   UpdateTeam,
   UpdateThread,
@@ -77,6 +80,7 @@ import {
   DEMO_BROWSER_PROFILES,
   DEMO_HISTORY,
   DEMO_MCP_SERVERS,
+  DEMO_SAVED_LOGINS,
   DEMO_MEMORIES,
   DEMO_NOTIFICATIONS,
   DEMO_ROOM_HISTORY,
@@ -170,6 +174,9 @@ function pickUrl(content: string, botId: string): string {
   if (/linkedin/i.test(content) || botId === 'bot_ara') return 'https://www.linkedin.com/feed/';
   return `https://duckduckgo.com/?q=${encodeURIComponent(content.slice(0, 60))}`;
 }
+
+/** The RFC 4648 secret without the spacing a person pastes, uppercased like the server stores it. */
+const normalizeTotp = (value: string): string => value.replace(/\s+/g, '').toUpperCase();
 
 /** A download name from a team name: lowercase ASCII words joined by dashes. */
 function teamSlug(name: string): string {
@@ -267,6 +274,12 @@ export function createMockClient(): BrotClient {
   const screens = new Map<string, FakeScreen>();
   const browserProfiles = new Map<string, BrowserProfile>(DEMO_BROWSER_PROFILES.map((profile) => [profile.id, structuredClone(profile)]));
   const mcpServers = new Map<string, McpServer>(DEMO_MCP_SERVERS.map((server) => [server.id, structuredClone(server)]));
+  /** Value-free views the API returns; the credentials live only in `savedLoginSecrets`. */
+  const savedLogins = new Map<string, SavedLogin>(DEMO_SAVED_LOGINS.map((login) => [login.id, structuredClone(login)]));
+  const savedLoginSecrets = new Map<string, { username: string; password: string; totp?: string }>([
+    ['login_github', { username: 'capivara', password: 'fake-password', totp: 'JBSWY3DPEHPK3PXP' }],
+    ['login_x', { username: 'capivara', password: 'fake-password' }],
+  ]);
   /** Browser session state keyed by effective profile: `own:<botId>` or `profile:<id>`. */
   const browserStates = new Map<string, BrowserStatus['state']>();
   /** Browser takeover per effective profile key, like the server's per-profile state. */
@@ -1738,6 +1751,67 @@ export function createMockClient(): BrotClient {
         skills: pkg.skills.length,
       };
     },
+    async listSavedLogins() {
+      return [...savedLogins.values()]
+        .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id))
+        .map((login) => structuredClone(login));
+    },
+
+    async createSavedLogin(input) {
+      const data = CreateSavedLogin.parse(input);
+      if ([...savedLogins.values()].some((login) => login.name === data.name)) {
+        throw new Error('A saved login with this name already exists');
+      }
+      const id = nextId('login');
+      const at = now();
+      const totp = data.totp === undefined ? undefined : normalizeTotp(data.totp);
+      savedLoginSecrets.set(id, { username: data.username, password: data.password, ...(totp === undefined ? {} : { totp }) });
+      const created: SavedLogin = {
+        id,
+        name: data.name,
+        host: data.host,
+        ...(data.label === undefined ? {} : { label: data.label }),
+        hasTotp: totp !== undefined,
+        createdAt: at,
+        updatedAt: at,
+      };
+      savedLogins.set(id, created);
+      return structuredClone(created);
+    },
+
+    async updateSavedLogin(loginId, patch) {
+      const current = savedLogins.get(loginId);
+      if (!current) throw new Error(`Unknown saved login: ${loginId}`);
+      const data = UpdateSavedLogin.parse(patch);
+      if (data.name !== undefined && data.name !== current.name) {
+        if ([...savedLogins.values()].some((login) => login.id !== loginId && login.name === data.name)) {
+          throw new Error('A saved login with this name already exists');
+        }
+      }
+      const secrets = savedLoginSecrets.get(loginId) ?? { username: '', password: '' };
+      if (data.username !== undefined) secrets.username = data.username;
+      if (data.password !== undefined) secrets.password = data.password;
+      if (data.totp === null) delete secrets.totp;
+      else if (data.totp !== undefined) secrets.totp = normalizeTotp(data.totp);
+      savedLoginSecrets.set(loginId, secrets);
+      const next: SavedLogin = {
+        ...current,
+        ...(data.name === undefined ? {} : { name: data.name }),
+        ...(data.host === undefined ? {} : { host: data.host }),
+        hasTotp: secrets.totp !== undefined,
+        updatedAt: now(),
+      };
+      if (data.label === null) delete next.label;
+      else if (data.label !== undefined) next.label = data.label;
+      savedLogins.set(loginId, next);
+      return structuredClone(next);
+    },
+
+    async deleteSavedLogin(loginId) {
+      if (!savedLogins.delete(loginId)) throw new Error(`Unknown saved login: ${loginId}`);
+      savedLoginSecrets.delete(loginId);
+    },
+
     async getToday(filter = {}) {
       const to = filter.to ?? now();
       const from = filter.from ?? new Date(new Date(to).setHours(0, 0, 0, 0)).toISOString();

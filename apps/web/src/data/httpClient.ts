@@ -10,6 +10,7 @@ import {
   CreateBot,
   CreateBrowserProfile,
   CreateMemory,
+  CreateSavedLogin,
   CreateRoom,
   CreateRoutine,
   CreateSkill,
@@ -25,6 +26,7 @@ import {
   McpServer,
   McpServerTestResult,
   Message,
+  SavedLogin,
   Notification,
   PairingStartResponse,
   PostMessage,
@@ -47,6 +49,7 @@ import {
   UpdateMemory,
   UpdateRoomMembers,
   UpdateRoutine,
+  UpdateSavedLogin,
   UpdateSkill,
   UpdateTask,
   UpdateTeam,
@@ -754,6 +757,26 @@ export function createHttpClient({
     usageExportUrl(filter: Omit<UsageFilter, 'group'> = {}) {
       const suffix = querySuffix({ from: filter.from, to: filter.to, botId: filter.botId });
       return `${root}/api/usage/export.csv${suffix}`;
+    },
+
+    listSavedLogins() {
+      return read('/api/logins', SavedLogin.array());
+    },
+
+    async createSavedLogin(input) {
+      const body = CreateSavedLogin.parse(input);
+      const response = await write('POST', '/api/logins', body);
+      return SavedLogin.parse(await response.json());
+    },
+
+    async updateSavedLogin(loginId, patch) {
+      const body = UpdateSavedLogin.parse(patch);
+      const response = await write('PATCH', `/api/logins/${encodeURIComponent(loginId)}`, body);
+      return SavedLogin.parse(await response.json());
+    },
+
+    async deleteSavedLogin(loginId) {
+      await request(`/api/logins/${encodeURIComponent(loginId)}`, { method: 'DELETE' });
     },
   };
 }

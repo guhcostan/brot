@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { createMockClient } from '../data/mockClient';
-import { DEMO_BOTS, DEMO_BROWSER_PROFILES, DEMO_MCP_SERVERS, DEMO_TEAMS } from '../data/fixtures';
+import { DEMO_BOTS, DEMO_BROWSER_PROFILES, DEMO_MCP_SERVERS, DEMO_SAVED_LOGINS, DEMO_TEAMS } from '../data/fixtures';
 import { TEAM_PACKAGE_FORMAT, TEAM_PACKAGE_VERSION, formatTeamPackage, type TeamPackage } from '@brot/protocol';
 import { t } from '../i18n';
 import { ClientProvider } from './client';
@@ -38,6 +38,7 @@ function render(overrides: Partial<SettingsViewProps> = {}, bots = botsRecord): 
     onOpenBots: noop,
     initialBrowserProfiles: DEMO_BROWSER_PROFILES,
     initialMcpServers: DEMO_MCP_SERVERS,
+    initialSavedLogins: DEMO_SAVED_LOGINS,
     ...overrides,
   };
   return renderToStaticMarkup(
@@ -161,5 +162,32 @@ describe('settings team packages', () => {
     expect(text).toContain(t('settings.teamPackageChooseFile'));
     const importButton = html.match(/<button[^>]*>[^<]*Import package<\/button>/)?.[0] ?? '';
     expect(importButton).toContain('disabled=""');
+  });
+});
+
+describe('settings saved logins', () => {
+  it('lists logins with host, label and the TOTP badge', () => {
+    const html = render();
+    const text = textOf(html);
+
+    expect(text).toContain(t('settings.savedLogins'));
+    expect(text).toContain(t('settings.savedLoginsBody'));
+    expect(text).toContain('GitHub');
+    expect(text).toContain('X/Twitter');
+    expect(text).toContain('github.com');
+    expect(text).toContain('x.com');
+    expect(text).toContain('Personal account');
+    expect(text).toContain('Work account');
+    expect(text).toContain(t('settings.savedLoginTotpBadge'));
+    expect(text).toContain(t('settings.savedLoginNew'));
+    expect(text).toContain(t('settings.savedLoginEditNamed', { name: 'GitHub' }));
+    expect(text).toContain(t('settings.savedLoginDeleteNamed', { name: 'X/Twitter' }));
+  });
+
+  it('shows an empty line and the new-login action when none exist', () => {
+    const text = textOf(render({ initialSavedLogins: [] }));
+
+    expect(text).toContain(t('settings.savedLoginsEmpty'));
+    expect(text).toContain(t('settings.savedLoginNew'));
   });
 });
