@@ -322,6 +322,19 @@ mapped in `docs/MAUSBOT-PARITY.md` (34 bots / 7 teams, 33 bots with a browser an
 - Suite: 2051 tests (203 files), typecheck 12/12, lint clean. Follow-ups found: deleting a room leaves its
   attachment rows/files orphaned (the boot sweep only removes files with no row), stale in-memory room baton
   entries, and a narrow new-message-vs-delete race.
+## Wave 23: SKILL.md import/export, desktop build fix (2026-10-22)
+
+- **SKILL.md import/export.** Skills travel as Agent Skills markdown: GET /api/skills/:id/export returns
+  frontmatter + body as an attachment `<slug>.SKILL.md`, and POST /api/skills/import accepts that document
+  (or raw JSON) for one bot or shared, with a forgiving parser (optional frontmatter, CRLF, quotes, ignored
+  keys, caps) and one clear issue per broken field. The Skills tab gains an export action per row and an
+  import dialog with paste/file, a protocol-parser preview, this-bot vs shared target and confirmation.
+  Verified live: export → delete → import round trip preserved name, description and body; invalid content
+  400s.
+- **Desktop production build fixed.** `pnpm build` failed because esbuild followed `playwright-core` (added
+  for the host browser) into its optional `chromium-bidi` requires. `playwright-core` is now external in the
+  desktop server bundle and a production dependency; web, site and desktop builds all pass (main.cjs ~2.2 MB).
+- Suite: 2092 tests (210 files), typecheck 12/12, lint clean; full `pnpm build` green.
 ## Next
 
 1. Re-run the eval suite on a live model once OpenCode Go has quota (`apps/evals`, `--base` to the server), including B8 and C; the 2026-10-20 results predate the read auto-allow and the fixes above.

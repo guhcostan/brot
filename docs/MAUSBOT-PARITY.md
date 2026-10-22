@@ -79,7 +79,7 @@ Legend: ✅ parity or better · 🟡 partial · ❌ absent · 🎯 current wave.
 | Webhook triggers | ✅ | 🟡 receiver exists, no signed secret UX | W6 |
 | App-event triggers | ✅ | ❌ | W6 |
 | Memory: MEMORY.md + topics + recall + upkeep + journal/undo + About me | ✅ | 🟡 recall, caps and an editor are live; no journal/upkeep/about-me | W4 |
-| Skills: SKILL.md import/export, per-bot on/off, learned-skill approval | ✅ | 🟡 prompt + editor with budgets; no SKILL.md import/export or learned-skill review yet | W4 |
+| Skills: SKILL.md import/export, per-bot on/off, learned-skill approval | ✅ | ✅ SKILL.md import/export in the UI with prompt budgets; learned-skill review next | W4 |
 | Voice: TTS providers, spoken replies, voice notes, calls, dictation | ✅ | ❌ | W8 |
 | Message search across threads | ✅ | ✅ GET /api/search and the sidebar Messages section | W8 done |
 | Attachments: images/screenshots/files in transcript, quota | ✅ | ✅ composer, transcript gallery, storage, text-in-prompt and orphan sweep | W6 done |
