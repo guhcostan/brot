@@ -2,7 +2,7 @@
 
 Handoff notes for the next session. Update this file at the end of every wave.
 
-_Last updated: 2026-10-20_
+_Last updated: 2026-10-22_
 
 ## How to resume
 
@@ -81,6 +81,30 @@ Brot was picked over the sibling project guhbot by the use-case benchmark (docs/
 - **Mobile**: live computer with takeover, rooms, @mentions, task board, haptics, en/pt-BR/es. Not run on a device.
 - **Site**: OpenBot-style landing (style only; OpenBot is PolyForm Noncommercial) with a live product demo and a takeover demo.
 - **Fixes from the benchmark**: delegated tasks close with their run; eval cases A1, A6, A8, A9, A14, B1, B5, B6 corrected; `CreateTask.chainId` so one run's delegations share a chain.
+
+## Wave 8: MausBot parity starts with the browser (2026-10-22)
+
+The reference product is installed on this machine; its docs, repo and the person's own workspace were
+mapped in `docs/MAUSBOT-PARITY.md` (34 bots / 7 teams, 33 bots with a browser and 5 login profiles,
+253 threads, 26 routines, 152 memory files).
+
+- **Host browser.** `bot.browser: true` gives a bot a Chrome on the server machine with its own profile
+  in `~/.brot/browser-profiles/<botId>`, driven over CDP with the same tool vocabulary as the desktop
+  container (`browser_open/back/snapshot/click/type/key/scroll`). Browsing goes through the bot's `egress`
+  policy via the existing HTTP CONNECT proxy; a headed login window is unproxied because the person drives
+  it, and the profile keeps the session for later runs. Routes: `GET /api/bots/:id/browser`,
+  `POST /api/bots/:id/browser/login`, `POST /api/bots/:id/browser/close`. Web: a Browser section in the
+  bot dialog with the toggle, status, sign-in and close controls (en/pt-BR/es).
+- **Desktop browser logins.** The container Chromium profile moved to `/workspace/.brot-browser` on the
+  persistent workspace volume, so signed-in sites survive a container restart. Rebuilt and verified with
+  the real daemon.
+- **Tests:** 1316 pass (120 files), including real-Chrome integration tests (open + snapshot + field,
+  egress and loopback refusal through the proxy, crash reaping) and real-Docker suites. A tsx-only bug was
+  found live (`page.evaluate` serialised functions carrying esbuild's `__name`); snapshot/field page logic
+  is now raw source evaluated as an expression, with regression tests.
+- **Known gaps:** no live browser view/takeover for the host browser yet (desktop containers keep theirs);
+  no saved-logins vault, no profile deletion when a bot is deleted, no idle stop; the headed login window
+  is unproxied by design. `request_takeover` wording still points desktop bots only.
 
 ## Next
 
