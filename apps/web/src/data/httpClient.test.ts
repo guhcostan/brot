@@ -149,6 +149,37 @@ describe('listBots and errors', () => {
   });
 });
 
+describe('listProviders', () => {
+  const provider = (id: string, models: Array<{ id: string; label?: string }>) => ({
+    id,
+    label: 'OpenCode Go',
+    configured: true,
+    secretName: 'OPENCODE_API_KEY',
+    models,
+  });
+
+  it('composes each model id as provider/model, the ref the bot model field expects', async () => {
+    const { fetch, calls } = fakeFetch(() =>
+      json([provider('opencode-go', [{ id: 'deepseek-v4.1-flash', label: 'DeepSeek V4.1 Flash' }])]),
+    );
+    const client = createHttpClient({ fetch, EventSource: FakeEventSource });
+
+    const [parsed] = await client.listProviders();
+
+    expect(calls[0]).toMatchObject({ method: 'GET', path: '/api/providers' });
+    expect(parsed?.models).toEqual([{ id: 'opencode-go/deepseek-v4.1-flash', label: 'DeepSeek V4.1 Flash' }]);
+  });
+
+  it('joins once when the model id itself contains a slash, and falls back to the bare model id for the label', async () => {
+    const { fetch } = fakeFetch(() => json([provider('openrouter', [{ id: 'meta-llama/Llama-3' }])]));
+    const client = createHttpClient({ fetch, EventSource: FakeEventSource });
+
+    const [parsed] = await client.listProviders();
+
+    expect(parsed?.models).toEqual([{ id: 'openrouter/meta-llama/Llama-3', label: 'meta-llama/Llama-3' }]);
+  });
+});
+
 describe('history', () => {
   it('returns no events and creates no thread when the bot has none', async () => {
     const { fetch, calls } = fakeFetch(() => json([]));

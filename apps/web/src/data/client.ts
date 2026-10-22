@@ -66,7 +66,10 @@ export interface ProviderModel {
   label: string;
 }
 
-/** A model provider from `GET /api/providers`. `configured` means the vault holds `secretName`. */
+/**
+ * A model provider from `GET /api/providers`. `configured` means the vault holds `secretName`;
+ * `models[].id` is the full `<provider>/<model>` ref the bot's `model` field expects.
+ */
 export interface Provider {
   id: string;
   label: string;

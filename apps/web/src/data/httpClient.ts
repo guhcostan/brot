@@ -428,15 +428,17 @@ export function parseProviders(value: unknown): Provider[] {
   if (!Array.isArray(value)) throw new Error('Expected a list of providers');
   return value.map((entry, index) => {
     if (!isRecord(entry)) throw new Error(`Provider ${index} is not an object`);
+    const id = textField(entry.id, 'provider.id');
     const models = Array.isArray(entry.models) ? entry.models : [];
     return {
-      id: textField(entry.id, 'provider.id'),
+      id,
       label: textField(entry.label, 'provider.label'),
       configured: entry.configured === true,
       secretName: textField(entry.secretName, 'provider.secretName'),
       models: models.map((model) => {
         if (!isRecord(model)) throw new Error('A provider model is not an object');
-        return { id: textField(model.id, 'model.id'), label: textField(model.label ?? model.id, 'model.label') };
+        const modelId = textField(model.id, 'model.id');
+        return { id: `${id}/${modelId}`, label: textField(model.label ?? modelId, 'model.label') };
       }),
     };
   });

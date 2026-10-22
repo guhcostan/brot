@@ -101,7 +101,7 @@ describe('settings routes', () => {
     const { fetch, calls } = fakeFetch((call) =>
       call.method === 'PUT'
         ? json({ name: 'DEEPSEEK_API_KEY' })
-        : json([{ id: 'deepseek', label: 'DeepSeek', models: [{ id: 'deepseek/v4', label: 'V4' }], configured: false, secretName: 'DEEPSEEK_API_KEY' }]),
+        : json([{ id: 'deepseek', label: 'DeepSeek', models: [{ id: 'v4', label: 'V4' }], configured: false, secretName: 'DEEPSEEK_API_KEY' }]),
     );
     const client = createHttpClient({ fetch });
     const [provider] = await client.listProviders();
