@@ -118,7 +118,7 @@ describe('mock threads', () => {
     const listed = await client.listThreads('bot_capy');
     expect(listed.map((thread) => thread.id)).toEqual([created.id, 'thread_bot_capy']);
 
-    const renamed = await client.renameThread(created.id, 'Q4 planning');
+    const renamed = await client.updateThread(created.id, { title: 'Q4 planning' });
     expect(renamed.title).toBe('Q4 planning');
     expect((await client.listThreads('bot_capy')).find((thread) => thread.id === created.id)?.title).toBe('Q4 planning');
 
@@ -126,7 +126,7 @@ describe('mock threads', () => {
     expect(await client.listThreads(bot.id)).toEqual([]);
     const first = await client.createThread(bot.id);
     expect((await client.listThreads(bot.id)).map((thread) => thread.id)).toEqual([first.id]);
-    await expect(client.renameThread(first.id, '')).rejects.toThrow();
+    await expect(client.updateThread(first.id, { title: '' })).rejects.toThrow();
   });
 
   it('creates the first thread when a task needs one for a new bot', async () => {

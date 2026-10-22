@@ -223,6 +223,19 @@ export function App(): ReactElement {
   const editing = botDialog?.botId ? botsById[botDialog.botId] : undefined;
   const editingTeam = teamDialog?.teamId ? teamsById[teamDialog.teamId] : undefined;
 
+  /** Deletes the current room, then keeps a valid selection: its lead bot, else the first bot. */
+  const deleteRoom = useCallback(async () => {
+    if (!room) return;
+    const leadId = room.thread.leadBotId ?? room.memberIds[0];
+    await chat.deleteRoom(room.thread.id);
+    const nextBotId = leadId !== undefined && botsById[leadId] !== undefined ? leadId : state.bots[0]?.id;
+    if (nextBotId === undefined) {
+      select(null);
+      return;
+    }
+    await openBotPane(nextBotId);
+  }, [room, chat, botsById, state.bots, select, openBotPane]);
+
   const subject: ContextSubject | null = bot
     ? { kind: 'bot', bot }
     : room
@@ -277,6 +290,7 @@ export function App(): ReactElement {
         onDecide={decide}
         onOpenBots={openBots}
         onOpenContext={openContext}
+        onDeleteRoom={deleteRoom}
       />
     );
   } else if (bot && selectedThreadId !== null) {
@@ -285,6 +299,9 @@ export function App(): ReactElement {
         key={selectedThreadId}
         bot={bot}
         title={selectedThread?.title ?? bot.name}
+        threadMeta={selectedThread}
+        loadProviders={client.listProviders}
+        onPickThreadModel={(model) => chat.updateThread(selectedThreadId, { model })}
         thread={state.threads[selectedThreadId] ?? emptyThread}
         loaded={state.threads[selectedThreadId] !== undefined}
         status={statusOfBot(state, bot.id)}

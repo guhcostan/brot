@@ -1,12 +1,14 @@
-import { useEffect, useRef, type ReactElement, type ReactNode } from 'react';
-import type { ApprovalDecision, Attachment, Bot } from '@brot/protocol';
+import { useEffect, useRef, useState, type ReactElement, type ReactNode } from 'react';
+import type { ApprovalDecision, Attachment, Bot, Thread } from '@brot/protocol';
 import { BotAvatar, Button, EmptyState, Skeleton, StatusDot, TypingIndicator, type BotStatus } from '@brot/ui';
+import type { Provider } from '../data/client';
 import { avatarOf } from '../format';
 import { t } from '../i18n';
 import type { ThreadState } from '../state/thread';
 import { Composer } from './Composer';
 import { botStatusLabel } from './taskLabels';
-import { ChevronLeft, Pencil } from './icons';
+import { ChevronLeft, Pencil, Sparkle } from './icons';
+import { ThreadModelPicker } from './ThreadModelPicker';
 import { useLiveMood } from './mood';
 import { Timeline } from './Timeline';
 
@@ -14,6 +16,12 @@ export interface ThreadViewProps {
   bot: Bot;
   /** The thread's title, as the sidebar and the server's auto-title show it. */
   title: string;
+  /** The thread entity, when the list has loaded; its model override feeds the header badge. */
+  threadMeta?: Thread;
+  /** Loads the configured providers for the model picker. */
+  loadProviders?: () => Promise<Provider[]>;
+  /** Patches this thread's model; null goes back to the bot's model. */
+  onPickThreadModel?: (model: string | null) => Promise<unknown>;
   thread: ThreadState;
   /** False until the bot's history has loaded. */
   loaded: boolean;
@@ -41,7 +49,9 @@ export function useStickToBottom(deps: readonly unknown[]) {
   return ref;
 }
 
-export function ThreadView({ bot, title, thread, loaded, status, onSend, uploadAttachment, discardAttachment, onEdit, onDecide, onOpenBots, onOpenContext }: ThreadViewProps): ReactElement {
+export function ThreadView({ bot, title, threadMeta, loadProviders, onPickThreadModel, thread, loaded, status, onSend, uploadAttachment, discardAttachment, onEdit, onDecide, onOpenBots, onOpenContext }: ThreadViewProps): ReactElement {
+  const [modelOpen, setModelOpen] = useState(false);
+  const effectiveModel = threadMeta?.model ?? bot.model;
   const lastItem = thread.items.at(-1);
   const streaming = lastItem?.kind === 'message' && lastItem.streaming;
   const typing = thread.run === 'running' && !streaming;
@@ -58,11 +68,28 @@ export function ThreadView({ bot, title, thread, loaded, status, onSend, uploadA
           <h1 className="m-0 truncate text-md leading-tight font-semibold tracking-[var(--tracking-heading)]">{title}</h1>
           <p className="m-0 truncate text-sm text-ink-2">{t('thread.subtitle', { name: bot.name, job: bot.job })}</p>
         </div>
+        {threadMeta !== undefined && loadProviders !== undefined && onPickThreadModel !== undefined ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setModelOpen(true)}
+            aria-label={t('thread.modelChange', { model: effectiveModel ?? t('thread.noModel') })}
+            title={t('thread.modelChange', { model: effectiveModel ?? t('thread.noModel') })}
+            className="inline-flex max-w-[45%] gap-1.5 !px-2 font-mono text-xs sm:max-w-[240px]"
+          >
+            <Sparkle size={13} />
+            <span className="truncate">{effectiveModel ?? t('thread.noModel')}</span>
+            {threadMeta.model === undefined ? <span className="font-sans text-ink-3">· {t('thread.modelDefault')}</span> : null}
+          </Button>
+        ) : null}
         <StatusDot key={status} status={status} label={botStatusLabel(status)} className="hidden animate-[brot-fade_var(--dur-base)_linear_both] sm:inline-flex" />
         <Button variant="ghost" size="sm" onClick={onEdit} aria-label={t('thread.edit', { name: bot.name })} title={t('thread.edit', { name: bot.name })}>
           <Pencil size={16} />
         </Button>
       </PaneHeader>
+      {threadMeta !== undefined && loadProviders !== undefined && onPickThreadModel !== undefined ? (
+        <ThreadModelPicker open={modelOpen} bot={bot} thread={threadMeta} onClose={() => setModelOpen(false)} loadProviders={loadProviders} onPick={onPickThreadModel} />
+      ) : null}
       {bot.archived ? (
         <div className="flex flex-none items-center justify-center gap-2 border-b border-line bg-surface-2 px-4 py-2 text-sm text-ink-2">
           {t('thread.archived', { name: bot.name })}

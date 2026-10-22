@@ -1,12 +1,14 @@
-import type { ReactElement } from 'react';
+import { useState, type ReactElement } from 'react';
 import type { ApprovalDecision, Attachment, Bot } from '@brot/protocol';
-import { AvatarStack, EmptyState, StatusDot, type BotStatus } from '@brot/ui';
+import { AvatarStack, Button, EmptyState, StatusDot, type BotStatus } from '@brot/ui';
 import type { Room, RoomMessage } from '../data/client';
 import { avatarOf } from '../format';
 import { t } from '../i18n';
+import { ConfirmDialog } from './Dialog';
 import { botActivity, type ThreadState } from '../state/thread';
 import { Composer } from './Composer';
 import { botStatusLabel } from './taskLabels';
+import { More } from './icons';
 import { moodOf } from './team';
 import { Timeline, WorkingBots } from './Timeline';
 import { PaneHeader, useStickToBottom } from './ThreadView';
@@ -24,6 +26,12 @@ export interface RoomViewProps {
   onDecide: (approvalId: string, decision: ApprovalDecision, reply?: string) => Promise<void>;
   onOpenBots: () => void;
   onOpenContext: () => void;
+  /** Deletes the room; the caller selects somewhere else afterwards. */
+  onDeleteRoom?: () => Promise<unknown>;
+  /** Starts with the overflow menu open, e.g. in an SSR render. */
+  initialMenuOpen?: boolean;
+  /** Starts with the delete confirmation open, e.g. in an SSR render. */
+  initialDeleteOpen?: boolean;
 }
 
 /** Names a list for screen readers: "Capy, Onça and 2 more". */
@@ -32,7 +40,23 @@ export function memberSummary(names: string[], max = 3): string {
   return t('room.andMore', { names: names.slice(0, max).join(', '), count: String(names.length - max) });
 }
 
-export function RoomView({ room, members, thread, status, onSend, uploadAttachment, discardAttachment, onDecide, onOpenBots, onOpenContext }: RoomViewProps): ReactElement {
+export function RoomView({
+  room,
+  members,
+  thread,
+  status,
+  onSend,
+  uploadAttachment,
+  discardAttachment,
+  onDecide,
+  onOpenBots,
+  onOpenContext,
+  onDeleteRoom,
+  initialMenuOpen = false,
+  initialDeleteOpen = false,
+}: RoomViewProps): ReactElement {
+  const [menuOpen, setMenuOpen] = useState(initialMenuOpen);
+  const [deleting, setDeleting] = useState(initialDeleteOpen);
   const lastItem = thread.items.at(-1);
   const logRef = useStickToBottom([thread.items.length, lastItem, Object.keys(thread.activeRuns).length]);
   const lead = members.find((bot) => bot.id === room.thread.leadBotId);
@@ -55,7 +79,47 @@ export function RoomView({ room, members, thread, status, onSend, uploadAttachme
           </p>
         </div>
         {status === 'idle' ? null : <StatusDot status={status} label={botStatusLabel(status)} className="hidden sm:inline-flex" />}
+        {onDeleteRoom !== undefined ? (
+          <div className="relative" onKeyDown={(event) => (event.key === 'Escape' ? setMenuOpen(false) : undefined)}>
+            <Button
+              variant="ghost"
+              size="sm"
+              aria-label={t('room.actions')}
+              title={t('room.actions')}
+              aria-expanded={menuOpen}
+              onClick={() => setMenuOpen((open) => !open)}
+            >
+              <More size={16} />
+            </Button>
+            {menuOpen ? (
+              <div className="absolute top-full right-0 z-10 mt-1 w-40 rounded-lg border border-line bg-surface p-1 shadow-[var(--shadow-float)]">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="w-full justify-start text-attention-text"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    setDeleting(true);
+                  }}
+                >
+                  {t('room.delete')}
+                </Button>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
       </PaneHeader>
+      {onDeleteRoom !== undefined ? (
+        <ConfirmDialog
+          open={deleting}
+          title={t('room.deleteTitle', { title: room.thread.title })}
+          description={t('room.deleteBody')}
+          confirmLabel={t('room.delete')}
+          tone="danger"
+          onConfirm={onDeleteRoom}
+          onClose={() => setDeleting(false)}
+        />
+      ) : null}
 
       <div ref={logRef} role="log" aria-live="polite" aria-label={t('room.log', { title: room.thread.title })} className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex min-h-full w-full max-w-[720px] flex-col gap-6 px-4 py-8 md:px-6">

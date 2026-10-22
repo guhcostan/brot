@@ -49,6 +49,7 @@ import type {
   UpdateSavedLogin,
   UpdateSkill,
   UpdateTeam,
+  UpdateThread,
 } from '@brot/protocol';
 
 export type {
@@ -298,7 +299,8 @@ export interface BrotClient {
   listThreads(botId: string): Promise<Thread[]>;
   createThread(botId: string, input?: { title?: string }): Promise<Thread>;
   /** Renames a thread (`PATCH /api/threads/:id`) and returns the updated thread. */
-  renameThread(threadId: string, title: string): Promise<Thread>;
+  /** Renames a thread and/or overrides its model (null goes back to the bot's model). DMs only. */
+  updateThread(threadId: string, patch: UpdateThread): Promise<Thread>;
   /** A DM thread's events, oldest first. */
   history(threadId: string): Promise<CanonicalEvent[]>;
   onEvent(listener: (event: BotEvent) => void): () => void;
@@ -360,6 +362,8 @@ export interface BrotClient {
   listBrowserProfiles(): Promise<BrowserProfile[]>;
   createBrowserProfile(input: CreateBrowserProfile): Promise<BrowserProfile>;
   updateBrowserProfile(profileId: string, input: UpdateBrowserProfile): Promise<BrowserProfile>;
+  /** Deletes a room: active runs are cancelled and the conversation goes; the member bots stay. */
+  deleteRoom(roomId: string): Promise<void>;
   /** Deletes the profile's saved logins and ungroups its bots, which fall back to their own profiles. */
   deleteBrowserProfile(profileId: string): Promise<void>;
 

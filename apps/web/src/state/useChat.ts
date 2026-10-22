@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useReducer, useRef } from 'react';
-import type { ApprovalDecision, CreateBotInput, CreateTeamInput, Team, Thread, UpdateBot, UpdateTeam } from '@brot/protocol';
+import type { ApprovalDecision, CreateBotInput, CreateTeamInput, Team, Thread, UpdateBot, UpdateTeam, UpdateThread } from '@brot/protocol';
 import type { BrotClient, NewRoom, NewTask, RoomMessage } from '../data/client';
 import { appReducer, initialAppState, type Selection } from './store';
 
@@ -168,7 +168,7 @@ export function useChat(client: BrotClient) {
     };
   }, [client, loadHistory]);
 
-  const select = useCallback((selection: Selection) => dispatch({ type: 'select', selection }), []);
+  const select = useCallback((selection: Selection | null) => dispatch({ type: 'select', selection }), []);
 
   /** Posts into a thread, then refreshes that bot's thread list so the server's auto-title shows. */
   const send = useCallback(
@@ -192,6 +192,23 @@ export function useChat(client: BrotClient) {
   const decide = useCallback(
     (approvalId: string, decision: ApprovalDecision, reply?: string) =>
       client.resolveApproval(approvalId, reply ? { decision, reply } : { decision }),
+    [client],
+  );
+
+  const updateThread = useCallback(
+    async (threadId: string, patch: UpdateThread) => {
+      const thread = await client.updateThread(threadId, patch);
+      dispatch({ type: 'thread-updated', thread });
+      return thread;
+    },
+    [client],
+  );
+
+  const deleteRoom = useCallback(
+    async (roomId: string) => {
+      await client.deleteRoom(roomId);
+      dispatch({ type: 'room-removed', roomId });
+    },
     [client],
   );
 
@@ -302,6 +319,8 @@ export function useChat(client: BrotClient) {
     loadHistory,
     send,
     sendToRoom,
+    updateThread,
+    deleteRoom,
     decide,
     createRoom,
     createTask,

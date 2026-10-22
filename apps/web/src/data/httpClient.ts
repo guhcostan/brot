@@ -458,8 +458,8 @@ export function createHttpClient({
       return createDmThread(botId, input);
     },
 
-    async renameThread(threadId, title) {
-      const body = UpdateThread.parse({ title });
+    async updateThread(threadId, patch) {
+      const body = UpdateThread.parse(patch);
       const response = await write('PATCH', `/api/threads/${encodeURIComponent(threadId)}`, body);
       const thread = rememberThread(Thread.parse(await response.json()));
       const cached = threadsOfBot.get(thread.botId);
@@ -470,6 +470,10 @@ export function createHttpClient({
         );
       }
       return thread;
+    },
+
+    async deleteRoom(roomId) {
+      await request(`/api/rooms/${encodeURIComponent(roomId)}`, { method: 'DELETE' });
     },
 
     history(threadId) {

@@ -77,6 +77,15 @@ export const Download = ({ size }: { size?: number }) => (
   </Icon>
 );
 
+/** Three dots: the overflow menu. */
+export const More = ({ size }: { size?: number }) => (
+  <Icon size={size}>
+    <circle cx="4.5" cy="10" r="0.9" fill="currentColor" stroke="none" />
+    <circle cx="10" cy="10" r="0.9" fill="currentColor" stroke="none" />
+    <circle cx="15.5" cy="10" r="0.9" fill="currentColor" stroke="none" />
+  </Icon>
+);
+
 /** A paperclip: attach files to a message. */
 export const Paperclip = ({ size }: { size?: number }) => (
   <Icon size={size}>

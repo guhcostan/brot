@@ -54,6 +54,7 @@ export type AppAction =
   | { type: 'bots-loaded'; bots: Bot[] }
   | { type: 'rooms-loaded'; rooms: Room[] }
   | { type: 'room-added'; room: Room }
+  | { type: 'room-removed'; roomId: string }
   | { type: 'teams-loaded'; teams: Team[] }
   | { type: 'team-saved'; team: Team }
   | { type: 'team-removed'; teamId: string }
@@ -67,7 +68,7 @@ export type AppAction =
   | { type: 'bot-saved'; bot: Bot }
   | { type: 'bot-removed'; botId: string }
   | { type: 'room-members'; roomId: string; memberIds: string[] }
-  | { type: 'select'; selection: Selection }
+  | { type: 'select'; selection: Selection | null }
   | { type: 'failed'; message: string };
 
 const isTaskEvent = (event: CanonicalEvent) => event.type === 'task.created' || event.type === 'task.updated';
@@ -108,6 +109,16 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     case 'room-added': {
       const others = state.rooms.filter((room) => room.thread.id !== action.room.thread.id);
       return { ...state, rooms: [action.room, ...others] };
+    }
+    case 'room-removed': {
+      const { [action.roomId]: _thread, ...threads } = state.threads;
+      const selected = state.selection?.kind === 'room' && state.selection.id === action.roomId;
+      return {
+        ...state,
+        rooms: state.rooms.filter((room) => room.thread.id !== action.roomId),
+        threads,
+        selection: selected ? null : state.selection,
+      };
     }
     case 'teams-loaded':
       return { ...state, teams: action.teams };

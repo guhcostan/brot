@@ -206,10 +206,10 @@ describe('threads', () => {
     const { fetch, calls } = fakeFetch(() => json(renamed));
     const client = createHttpClient({ fetch, EventSource: FakeEventSource });
 
-    await expect(client.renameThread('thr_1', 'Planning')).resolves.toEqual(renamed);
+    await expect(client.updateThread('thr_1', { title: 'Planning' })).resolves.toEqual(renamed);
     expect(calls[0]).toMatchObject({ method: 'PATCH', path: '/api/threads/thr_1', body: { title: 'Planning' } });
 
-    await expect(client.renameThread('thr_1', '')).rejects.toThrow();
+    await expect(client.updateThread('thr_1', { title: '' })).rejects.toThrow();
     expect(calls).toHaveLength(1);
   });
 

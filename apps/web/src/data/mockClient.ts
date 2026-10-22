@@ -1069,11 +1069,17 @@ export function createMockClient(): BrotClient {
       return structuredClone(createThreadFor(botId, data.title));
     },
 
-    async renameThread(threadId, title) {
-      const data = UpdateThread.parse({ title });
+    async updateThread(threadId, patch) {
+      const data = UpdateThread.parse(patch);
       const thread = threads.get(threadId);
       if (!thread) throw new Error(`Unknown thread: ${threadId}`);
-      const next = { ...thread, ...(data.title === undefined ? {} : { title: data.title }), updatedAt: now() };
+      if (thread.kind === 'room' && typeof data.model === 'string') {
+        throw new Error('A room has no thread-wide model; each bot keeps its own.');
+      }
+      const next: Thread = { ...thread, updatedAt: now() };
+      if (data.title !== undefined) next.title = data.title;
+      if (data.model === null) delete next.model;
+      else if (data.model !== undefined) next.model = data.model;
       remember(next);
       if (next.kind === 'room') {
         const room = rooms.get(threadId);
@@ -1082,6 +1088,12 @@ export function createMockClient(): BrotClient {
         rememberDm(next);
       }
       return structuredClone(next);
+    },
+
+    async deleteRoom(roomId) {
+      if (!rooms.delete(roomId)) throw new Error(`Unknown room: ${roomId}`);
+      threads.delete(roomId);
+      histories.delete(roomId);
     },
 
     async history(threadId) {
