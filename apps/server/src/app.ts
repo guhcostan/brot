@@ -16,12 +16,15 @@ import {
   CreateTask,
   CreateTeam,
   CreateThread,
+  ImportSkill,
   IsoDateTime,
   MarkNotificationsRead,
   PairingComplete,
   PostMessage,
   PROTOCOL_VERSION,
   ResolveApproval,
+  formatSkillFile,
+  parseSkillFile,
   RoutineRunStatus,
   SetBrowserTakeover,
   TaskStatus,
@@ -66,6 +69,7 @@ import { mountUsageRoutes } from './usage';
 import { mountDesktopRoutes, type DesktopService } from './desktop';
 import { testMcpServer } from './mcp-servers';
 import { RuleViolation } from './rooms/errors';
+import { skillFileName } from './skills';
 import type { RoomService } from './rooms/service';
 import type { TaskService } from './rooms/tasks';
 import { normalizeBase32 } from './browser/totp';
@@ -815,6 +819,44 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     if (!body.ok) return body.response;
     if (body.data.botId !== undefined && !(await repos.bots.get(body.data.botId))) return notFound(c, 'Bot');
     return c.json(await repos.skills.create(body.data), 201);
+  });
+
+  /** A skill as a SKILL.md download, named after the skill. */
+  app.get('/api/skills/:id/export', async (c) => {
+    const skill = await repos.skills.get(c.req.param('id'));
+    if (!skill) return notFound(c, 'Skill');
+    const file = formatSkillFile({ name: skill.name, description: skill.description, body: skill.body });
+    return new Response(file, {
+      status: 200,
+      headers: {
+        'content-type': 'text/markdown; charset=utf-8',
+        'content-disposition': `attachment; filename="${skillFileName(skill.name)}"`,
+        'cache-control': 'no-store',
+      },
+    });
+  });
+
+  /**
+   * Imports a SKILL.md document (or a raw JSON skill). A document with no frontmatter takes its name from
+   * `name` in the body or the `?name=` query parameter. Without a botId the skill is shared.
+   */
+  app.post('/api/skills/import', async (c) => {
+    const body = await parseBody(c, ImportSkill);
+    if (!body.ok) return body.response;
+    const fallback = body.data.name ?? c.req.query('name');
+    const parsed = parseSkillFile(
+      body.data.content,
+      fallback === undefined || fallback === '' ? {} : { name: fallback },
+    );
+    if (!parsed.ok) return c.json({ error: 'Invalid request', issues: parsed.issues }, 400);
+    if (body.data.botId !== undefined && !(await repos.bots.get(body.data.botId))) return notFound(c, 'Bot');
+    const skill = await repos.skills.create({
+      name: parsed.skill.name,
+      description: parsed.skill.description,
+      body: parsed.skill.body,
+      ...(body.data.botId === undefined ? {} : { botId: body.data.botId }),
+    });
+    return c.json(skill, 201);
   });
 
   app.patch('/api/skills/:id', async (c) => {

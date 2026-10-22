@@ -8,6 +8,7 @@ export * from './tools';
 export * from './mcp-servers';
 export * from './attachments';
 export * from './notifications';
+export * from './skill-file';
 export * from './usage';
 export * from './team-package';
 export * from './today';
