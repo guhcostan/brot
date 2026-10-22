@@ -29,8 +29,9 @@ numbered refs. A screenshot tool exists for vision models.
 
 `/usr/local/bin/brot-desktop-start` starts Xvfb, the window manager and Chromium. Chromium runs with
 `--remote-debugging-address=127.0.0.1 --remote-debugging-port=9222 --proxy-server=… --no-first-run
---user-data-dir=/home/node/.brot-browser`, maximized, at `about:blank`. The script is idempotent, so
-running it twice leaves one of each. The container's CMD runs it, then `sleep infinity`.
+--user-data-dir=/workspace/.brot-browser`, maximized, at `about:blank`. The profile lives on the bot's
+persistent workspace volume, so signed-in sites survive a container restart. The script is idempotent,
+so running it twice leaves one of each. The container's CMD runs it, then `sleep infinity`.
 
 `/usr/local/bin/brot-browser <command> [json-args]` is a small Node script that uses playwright-core
 `chromium.connectOverCDP('http://127.0.0.1:9222')`. It prints one JSON object on stdout:

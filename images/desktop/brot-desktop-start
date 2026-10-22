@@ -7,7 +7,8 @@ export DISPLAY=:1
 WIDTH="${DESKTOP_WIDTH:-1280}"
 HEIGHT="${DESKTOP_HEIGHT:-800}"
 PROXY="${HTTPS_PROXY:-http://brot-egress:3128}"
-PROFILE="${HOME}/.brot-browser"
+# The bot's persistent workspace volume, so signed-in sites survive a container restart.
+PROFILE="${BROT_BROWSER_PROFILE:-/workspace/.brot-browser}"
 
 mkdir -p /tmp/.X11-unix
 chmod 1777 /tmp/.X11-unix
