@@ -227,6 +227,24 @@ export const ComputerStateUpdate = z.object({
 export type ComputerStateUpdate = z.infer<typeof ComputerStateUpdate>;
 
 /**
+ * A login the person saved for a site. The username, password and TOTP secret live in the vault; this is the
+ * API view and never carries a value.
+ */
+export const SavedLogin = z.object({
+  id: z.string(),
+  name: z.string(),
+  /** The site's bare hostname, lowercase, e.g. `github.com`. */
+  host: z.string(),
+  /** Free-form note, such as which account it is. Never a value. */
+  label: z.string().optional(),
+  /** Whether the login has a one-time-code secret stored. The secret itself never leaves the vault. */
+  hasTotp: z.boolean(),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+export type SavedLogin = z.infer<typeof SavedLogin>;
+
+/**
  * The person at the keyboard of a bot's desktop. While a takeover is active the bot's browser and
  * input tools refuse with a "the person has control" result, and only the user's input reaches the screen.
  */

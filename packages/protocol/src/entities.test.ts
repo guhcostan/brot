@@ -16,6 +16,7 @@ import {
   Routine,
   RoutineRun,
   Run,
+  SavedLogin,
   Skill,
   Task,
   TaskStatus,
@@ -115,6 +116,20 @@ describe('entity schemas', () => {
     const handedBack = { active: false };
     expect(roundTrip(BrowserTakeover, handedBack)).toEqual(handedBack);
     expect(() => BrowserTakeover.parse({ active: true, reason: 'x'.repeat(501) })).toThrow();
+  });
+
+  it('round-trips a saved login, which never carries values', () => {
+    const login = {
+      id: 'login_1',
+      name: 'GitHub work',
+      host: 'github.com',
+      label: 'Work account',
+      hasTotp: true,
+      createdAt: at,
+      updatedAt: at,
+    };
+    expect(roundTrip(SavedLogin, login)).toEqual(login);
+    expect(roundTrip(SavedLogin, { ...login, hasTotp: false })).toMatchObject({ hasTotp: false });
   });
 
   it('round-trips approval, policy, memory, and skill', () => {

@@ -8,6 +8,22 @@ export const SecretName = z
   .string()
   .regex(/^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/, 'Use letters, digits, dot, dash or underscore');
 
+/** The vault names holding one saved login's three values. The API stores these names, never the values. */
+export interface SavedLoginSecretNames {
+  username: string;
+  password: string;
+  totp: string;
+}
+
+/** The vault names for a saved login's values, derived from its id so they are stable across updates. */
+export function savedLoginSecretNames(loginId: string): SavedLoginSecretNames {
+  return {
+    username: `login.${loginId}.username`,
+    password: `login.${loginId}.password`,
+    totp: `login.${loginId}.totp`,
+  };
+}
+
 export const SecretBody = z.object({
   value: z.string().min(1).max(65_536),
 });

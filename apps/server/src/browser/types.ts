@@ -65,6 +65,16 @@ export interface HostBrowserService extends BrowserDriver {
    * bot's profile, and while a sign-in window is open (that local window is the input surface then).
    */
   browserInput(bot: Bot, input: ComputerInput): Promise<void>;
+  /**
+   * The hostname of the page the bot's browser is on, or null when it is not running or on no http(s) page.
+   * Used to check that a saved login is being filled on its own site.
+   */
+  pageHost(bot: Bot): Promise<string | null>;
+  /**
+   * Types a saved login's values into the current page and submits it. The values never appear in a result or an
+   * error. Refused while a sign-in window is open or the person has taken over the profile.
+   */
+  fillLogin(bot: Bot, credentials: LoginCredentials): Promise<void>;
   /** The state of one profile's browser, by profile key (a shared profile id, or a bot id for an own profile). */
   statusForProfile(profileId: string): Promise<HostBrowserStatus>;
   /** Closes the browser serving a shared profile, saving it. Idempotent. */
@@ -72,6 +82,16 @@ export interface HostBrowserService extends BrowserDriver {
   /** Closes the browser and deletes a shared profile's directory, logins included. Idempotent. */
   deleteProfileDir(profileId: string): Promise<void>;
   closeAll(): Promise<void>;
+}
+
+/** Values a saved login fills in. They come from the vault only after the broker allowed the call. */
+export interface LoginCredentials {
+  /** The site the login was saved for. The page must still be on it when the values are typed. */
+  readonly host: string;
+  readonly username: string;
+  readonly password: string;
+  /** The current RFC 6238 code, when the login has a TOTP secret. */
+  readonly totp?: string;
 }
 
 export interface HostBrowserDeps {

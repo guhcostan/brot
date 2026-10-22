@@ -190,6 +190,70 @@ describe('browser profiles', () => {
   });
 });
 
+describe('saved logins', () => {
+  const secretNames = (id: string) => ({
+    username: `login.${id}.username`,
+    password: `login.${id}.password`,
+    totp: `login.${id}.totp`,
+  });
+  const input = (overrides: Record<string, unknown> = {}) => ({
+    name: 'GitHub work',
+    host: 'github.com',
+    username: 'ada@example.com',
+    password: 'correct horse battery staple',
+    ...overrides,
+  });
+
+  it('creates, lists by name, gets by id and name, and updates', async () => {
+    const first = await repos.savedLogins.create(input(), { id: 'login_1', secretNames: secretNames('login_1') });
+    expect(first).toMatchObject({ id: 'login_1', name: 'GitHub work', host: 'github.com', hasTotp: false });
+    expect(first.label).toBeUndefined();
+
+    const second = await repos.savedLogins.create(
+      input({ name: 'Bank', host: 'bank.example', label: 'Savings', totp: 'JBSWY3DPEHPK3PXP' }),
+      { id: 'login_2', secretNames: secretNames('login_2') },
+    );
+    expect(second).toMatchObject({ name: 'Bank', label: 'Savings', hasTotp: true });
+
+    expect((await repos.savedLogins.list()).map((login) => login.name)).toEqual(['Bank', 'GitHub work']);
+    expect(await repos.savedLogins.get('login_1')).toEqual(first);
+    expect(await repos.savedLogins.getByName('GitHub work')).toEqual(first);
+    expect(await repos.savedLogins.getByName('missing')).toBeUndefined();
+
+    const updated = await repos.savedLogins.update('login_2', { name: 'Bank work', label: null, totp: null }, secretNames('login_2'));
+    expect(updated).toMatchObject({ name: 'Bank work', hasTotp: false });
+    expect(updated?.label).toBeUndefined();
+    expect((updated?.updatedAt ?? '') >= second.updatedAt).toBe(true);
+    expect(await repos.savedLogins.update('missing', { name: 'x' }, secretNames('missing'))).toBeUndefined();
+  });
+
+  it('stores only vault secret names, never values', async () => {
+    await repos.savedLogins.create(input({ totp: 'JBSWY3DPEHPK3PXP' }), { id: 'login_1', secretNames: secretNames('login_1') });
+    const row = await handle.client.execute(
+      "SELECT username_secret, password_secret, totp_secret FROM saved_logins WHERE id = 'login_1'",
+    );
+    expect(row.rows[0]).toEqual({
+      username_secret: 'login.login_1.username',
+      password_secret: 'login.login_1.password',
+      totp_secret: 'login.login_1.totp',
+    });
+    const raw = JSON.stringify(row.rows[0]);
+    expect(raw).not.toContain('ada@example.com');
+    expect(raw).not.toContain('correct horse');
+    expect(raw).not.toContain('JBSWY3DPEHPK3PXP');
+  });
+
+  it('keeps names unique and removes a login', async () => {
+    const created = await repos.savedLogins.create(input(), { id: 'login_1', secretNames: secretNames('login_1') });
+    await expect(
+      repos.savedLogins.create(input(), { id: 'login_2', secretNames: secretNames('login_2') }),
+    ).rejects.toThrow();
+    expect(await repos.savedLogins.remove(created.id)).toBe(true);
+    expect(await repos.savedLogins.remove(created.id)).toBe(false);
+    expect(await repos.savedLogins.get(created.id)).toBeUndefined();
+  });
+});
+
 describe('teams', () => {
   it('creates, lists, updates and removes teams', async () => {
     const growth = await repos.teams.create({ name: 'Growth', instructions: 'Ship one experiment a week.' });

@@ -77,6 +77,8 @@ function expectPrepared(result: PreparedCall | { error: string }): PreparedCall 
 describe('gating', () => {
   it('offers the desktop tools only to a desktop bot', async () => {
     for (const tool of tools.values()) {
+      // fill_login only exists for host browsers; these tools are built without one here.
+      if (tool.spec.name === 'fill_login') continue;
       expect(await tool.enabledFor?.(scope)).toBe(true);
     }
     const plainScope = { ...scope, botId: plain.id };

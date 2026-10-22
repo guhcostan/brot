@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import type { Repos, TaskFilter } from '@brot/db';
 import type { EngineRegistry } from '@brot/engines';
 import {
@@ -11,6 +11,7 @@ import {
   CreatePolicy,
   CreateRoom,
   CreateRoutine,
+  CreateSavedLogin,
   CreateSkill,
   CreateTask,
   CreateTeam,
@@ -31,6 +32,7 @@ import {
   UpdateMemory,
   UpdateRoomMembers,
   UpdateRoutine,
+  UpdateSavedLogin,
   UpdateSkill,
   UpdateTask,
   UpdateTeam,
@@ -65,7 +67,8 @@ import { testMcpServer } from './mcp-servers';
 import { RuleViolation } from './rooms/errors';
 import type { RoomService } from './rooms/service';
 import type { TaskService } from './rooms/tasks';
-import { SecretBody, SecretName, type Vault } from './vault';
+import { normalizeBase32 } from './browser/totp';
+import { savedLoginSecretNames, SecretBody, SecretName, type Vault } from './vault';
 
 export const SERVER_VERSION = '0.1.0';
 
@@ -217,6 +220,12 @@ function invalidReference(c: Context<AppEnv>, path: string, message: string): Re
 async function unknownBrowserProfile(repos: Repos, id: string | null | undefined): Promise<string | undefined> {
   if (id === undefined || id === null) return undefined;
   return (await repos.browserProfiles.get(id)) === undefined ? id : undefined;
+}
+
+/** Deletes a saved login's three vault values. The names derive from the id, so no row is needed. */
+async function dropSavedLoginSecrets(vault: Vault, loginId: string): Promise<void> {
+  const names = savedLoginSecretNames(loginId);
+  await Promise.all([vault.delete(names.username), vault.delete(names.password), vault.delete(names.totp)]);
 }
 
 /** Which profile serves a bot's host browser: its own, or the shared profile it names. */
@@ -971,6 +980,64 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     const name = SecretName.safeParse(c.req.param('name'));
     if (!name.success) return invalid(c, name.error);
     return (await vault.delete(name.data)) ? c.body(null, 204) : notFound(c, 'Secret');
+  });
+
+  /**
+   * Saved logins. The username, password and TOTP secret are sealed in the vault; every response is the value-free
+   * SavedLogin view, exactly like /api/secrets never returns a value.
+   */
+  app.get('/api/logins', async (c) => c.json(await repos.savedLogins.list()));
+
+  app.post('/api/logins', async (c) => {
+    const body = await parseBody(c, CreateSavedLogin);
+    if (!body.ok) return body.response;
+    if ((await repos.savedLogins.getByName(body.data.name)) !== undefined) {
+      return invalidReference(c, 'name', 'a saved login with this name already exists');
+    }
+    const id = randomUUID();
+    const names = savedLoginSecretNames(id);
+    try {
+      await vault.set(names.username, body.data.username);
+      await vault.set(names.password, body.data.password);
+      if (body.data.totp !== undefined) await vault.set(names.totp, normalizeBase32(body.data.totp));
+    } catch (error) {
+      await dropSavedLoginSecrets(vault, id);
+      throw error;
+    }
+    try {
+      return c.json(await repos.savedLogins.create(body.data, { id, secretNames: names }), 201);
+    } catch (error) {
+      await dropSavedLoginSecrets(vault, id);
+      throw error;
+    }
+  });
+
+  app.patch('/api/logins/:id', async (c) => {
+    const id = c.req.param('id');
+    const current = await repos.savedLogins.get(id);
+    if (current === undefined) return notFound(c, 'Saved login');
+    const body = await parseBody(c, UpdateSavedLogin);
+    if (!body.ok) return body.response;
+    if (body.data.name !== undefined && body.data.name !== current.name) {
+      if ((await repos.savedLogins.getByName(body.data.name)) !== undefined) {
+        return invalidReference(c, 'name', 'a saved login with this name already exists');
+      }
+    }
+    const names = savedLoginSecretNames(id);
+    if (body.data.username !== undefined) await vault.set(names.username, body.data.username);
+    if (body.data.password !== undefined) await vault.set(names.password, body.data.password);
+    if (body.data.totp === null) await vault.delete(names.totp);
+    else if (body.data.totp !== undefined) await vault.set(names.totp, normalizeBase32(body.data.totp));
+    const login = await repos.savedLogins.update(id, body.data, names);
+    return login === undefined ? notFound(c, 'Saved login') : c.json(login);
+  });
+
+  app.delete('/api/logins/:id', async (c) => {
+    const id = c.req.param('id');
+    if ((await repos.savedLogins.get(id)) === undefined) return notFound(c, 'Saved login');
+    await dropSavedLoginSecrets(vault, id);
+    await repos.savedLogins.remove(id);
+    return c.body(null, 204);
   });
 
   app.post('/api/pairing/start', (c) => {

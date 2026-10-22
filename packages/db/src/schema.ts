@@ -424,6 +424,22 @@ export const tasks = sqliteTable(
 );
 
 /**
+ * A login the person saved for a site. The three `*_secret` columns hold vault secret names (the values stay in
+ * the vault), so this table never contains a username, password or TOTP secret in plaintext.
+ */
+export const savedLogins = sqliteTable('saved_logins', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull().unique(),
+  host: text('host').notNull(),
+  label: text('label'),
+  usernameSecret: text('username_secret').notNull(),
+  passwordSecret: text('password_secret').notNull(),
+  totpSecret: text('totp_secret'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+});
+
+/**
  * A user MCP server. Brot attaches every enabled one to a run next to its own MCP server. `env` holds
  * configuration and `secret://` references only; the vault resolves a reference into the child process
  * when it is spawned, so a value is never stored in this row.

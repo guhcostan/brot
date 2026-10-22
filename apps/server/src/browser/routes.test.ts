@@ -89,6 +89,12 @@ function fakeHostBrowser(): FakeHostBrowser {
       takeovers.set(profileKeyOf(bot), takeover);
       return takeover;
     },
+    async pageHost() {
+      return null;
+    },
+    async fillLogin() {
+      return undefined;
+    },
     async browserInput(bot, input) {
       fake.inputCalls.push({ botId: bot.id, input });
       if (fake.inputError !== undefined) throw fake.inputError;

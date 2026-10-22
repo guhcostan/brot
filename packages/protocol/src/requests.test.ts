@@ -4,6 +4,7 @@ import {
   CreateBot,
   CreateBrowserProfile,
   CreateRoom,
+  CreateSavedLogin,
   CreateTeam,
   CreateRoutine,
   CreateTask,
@@ -15,6 +16,7 @@ import {
   UpdateBrowserProfile,
   UpdateRoomMembers,
   UpdateRoutine,
+  UpdateSavedLogin,
   UpdateTask,
   UpdateTeam,
   UpdateThread,
@@ -54,6 +56,28 @@ describe('request schemas', () => {
     expect(() => BrowserStatus.parse({ state: 'opening', profile: { kind: 'own' } })).toThrow();
     expect(() => BrowserStatus.parse({ state: 'login' })).toThrow();
     expect(() => BrowserStatus.parse({ state: 'login', profile: { kind: 'team' } })).toThrow();
+  });
+
+  it('validates a saved login, keeping values out of the API but checking their shape', () => {
+    const input = {
+      name: '  GitHub work  ',
+      host: 'GitHub.COM',
+      username: 'ada@example.com',
+      password: 'correct horse battery staple',
+      totp: 'jbswy3dp ehpk3pxp',
+    };
+    const parsed = CreateSavedLogin.parse(input);
+    expect(parsed.name).toBe('GitHub work');
+    expect(parsed.host).toBe('github.com');
+    expect(parsed.totp).toBe('jbswy3dp ehpk3pxp');
+    expect(() => CreateSavedLogin.parse({ ...input, host: 'https://github.com' })).toThrow();
+    expect(() => CreateSavedLogin.parse({ ...input, host: 'github.com/login' })).toThrow();
+    expect(() => CreateSavedLogin.parse({ ...input, host: 'github.com:443' })).toThrow();
+    expect(() => CreateSavedLogin.parse({ ...input, name: 'two\nlines' })).toThrow();
+    expect(() => CreateSavedLogin.parse({ ...input, totp: 'not base32!' })).toThrow();
+    expect(() => CreateSavedLogin.parse({ ...input, password: '' })).toThrow();
+    expect(UpdateSavedLogin.parse({ totp: null })).toEqual({ totp: null });
+    expect(UpdateSavedLogin.parse({ host: 'Example.ORG' })).toEqual({ host: 'example.org' });
   });
 
   it('validates a browser takeover request', () => {

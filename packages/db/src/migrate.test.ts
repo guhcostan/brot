@@ -61,6 +61,7 @@ describe('migrate', () => {
       'routine_runs',
       'routines',
       'runs',
+      'saved_logins',
       'skills',
       'tasks',
       'teams',
@@ -69,7 +70,53 @@ describe('migrate', () => {
     ]);
 
     const applied = await handle.client.execute('SELECT COUNT(*) AS count FROM __drizzle_migrations');
-    expect(Number(applied.rows[0]?.count)).toBe(13);
+    expect(Number(applied.rows[0]?.count)).toBe(14);
+  });
+
+  it('adds saved logins on a fresh database', async () => {
+    const { handle } = await tempDb();
+    await migrate(handle.db);
+
+    expect(await columnNames(handle, 'saved_logins')).toEqual([
+      'id',
+      'name',
+      'host',
+      'label',
+      'username_secret',
+      'password_secret',
+      'totp_secret',
+      'created_at',
+      'updated_at',
+    ]);
+    const indexes = await handle.client.execute("PRAGMA index_list('saved_logins')");
+    expect(indexes.rows.some((row) => row.name === 'saved_logins_name_unique' && Number(row.unique) === 1)).toBe(true);
+  });
+
+  it('upgrades the wave 14 database in place with the saved logins table', async () => {
+    const { handle } = await tempDb();
+    const journal = JSON.parse(await readFile(join(migrationsFolder, 'meta', '_journal.json'), 'utf8')) as {
+      entries: Array<{ tag: string; when: number }>;
+    };
+    const before = journal.entries.slice(0, 13);
+    const latest = journal.entries[13];
+    if (before.length !== 13 || latest === undefined) throw new Error('journal must hold the wave 14 and wave 15 migrations');
+
+    for (const entry of before) {
+      await handle.client.executeMultiple(await readFile(join(migrationsFolder, `${entry.tag}.sql`), 'utf8'));
+    }
+    await handle.client.execute(
+      'CREATE TABLE "__drizzle_migrations" ("id" INTEGER PRIMARY KEY AUTOINCREMENT, "hash" text NOT NULL, "created_at" numeric)',
+    );
+    for (const entry of before) {
+      await handle.client.execute({
+        sql: 'INSERT INTO "__drizzle_migrations" ("hash", "created_at") VALUES (?, ?)',
+        args: [entry.tag, entry.when],
+      });
+    }
+
+    await migrate(handle.db);
+
+    expect(await tableNames(handle)).toContain('saved_logins');
   });
 
   it('adds shared browser profiles and the runs started index on a fresh database', async () => {

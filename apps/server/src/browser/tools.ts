@@ -1,11 +1,14 @@
 import type { Repos } from '@brot/db';
-import type { Bot } from '@brot/protocol';
+import type { Bot, SecretRef } from '@brot/protocol';
 import { z } from 'zod';
 import type { ApprovalScope } from '../broker';
 import type { DesktopService } from '../desktop/service';
 import { TAKEOVER_REFUSAL, type TakeoverState } from '../desktop/takeover';
 import { inputSchemaOf, invalidArguments } from '../mcp/helpers';
 import type { BrotTool, PreparedCall, ToolResult } from '../mcp/types';
+import { savedLoginSecretNames } from '../vault';
+import { hostMatchesLogin } from './driver';
+import { totpCode } from './totp';
 import type { BrowserDriver, HostBrowserService } from './types';
 
 export interface BrowserToolDeps {
@@ -46,6 +49,81 @@ const TypeInput = z.object({
 });
 const KeyInput = z.object({ key: z.string().regex(/^[A-Za-z0-9_+]{1,40}$/) });
 const ScrollInput = z.object({ direction: z.enum(['up', 'down']) });
+/** fill_login names a saved login; the values never appear in the arguments. */
+const FillLoginInput = z.object({ name: z.string().trim().min(1).max(60) });
+
+/**
+ * `fill_login`: fills a saved login on the page of a bot's host browser. The values are declared as secret
+ * references and resolved by the MCP layer only after the broker allowed the call, so neither the model nor the
+ * arguments ever hold them. Only host-browser bots get this tool; a container bot has its own browser.
+ */
+function fillLoginTool(deps: BrowserToolDeps): BrotTool {
+  const host = deps.host;
+  return {
+    spec: {
+      name: 'fill_login',
+      description:
+        'Fill a saved login on the page the browser is on: types the username and the password (and a one-time code when the saved login has one) as real keystrokes, then submits the form. The values never reach you. The page must be on the site the login was saved for.',
+      inputSchema: inputSchemaOf(FillLoginInput),
+      risk: 'write',
+    },
+
+    async enabledFor(scope) {
+      if (host === undefined) return false;
+      const bot = await deps.repos.bots.get(scope.botId);
+      return bot !== undefined && botBrowserKind(bot) === 'host';
+    },
+
+    async prepare(scope, raw) {
+      const bot = await deps.repos.bots.get(scope.botId);
+      if (host === undefined || bot === undefined || botBrowserKind(bot) !== 'host') {
+        return { error: 'This bot has no host browser.' };
+      }
+      const parsed = FillLoginInput.safeParse(raw);
+      if (!parsed.success) return { error: invalidArguments(parsed.error) };
+      const login = await deps.repos.savedLogins.getByName(parsed.data.name);
+      if (login === undefined) return { error: `There is no saved login named "${parsed.data.name}".` };
+      const currentHost = await host.pageHost(bot);
+      if (currentHost === null) {
+        return { error: `Open ${login.host} in the browser first; fill_login fills the current page.` };
+      }
+      if (!hostMatchesLogin(currentHost, login.host)) {
+        return {
+          error: `The saved login "${login.name}" is for ${login.host}, but the browser is on ${currentHost}. Open ${login.host} first.`,
+        };
+      }
+
+      const names = savedLoginSecretNames(login.id);
+      const refs: SecretRef[] = [`secret://${names.username}`, `secret://${names.password}`];
+      if (login.hasTotp) refs.push(`secret://${names.totp}`);
+      return {
+        risk: 'write',
+        kind: 'other',
+        summary: `Fill the saved login "${login.name}" on ${login.host}`,
+        secrets: refs,
+        async run(secrets) {
+          const username = secrets[`secret://${names.username}`];
+          const password = secrets[`secret://${names.password}`];
+          const totpSecret = login.hasTotp ? secrets[`secret://${names.totp}`] : undefined;
+          if (username === undefined || password === undefined || (login.hasTotp && totpSecret === undefined)) {
+            return { ok: false, output: 'Brot could not read the saved login.' };
+          }
+          try {
+            await host.fillLogin(bot, {
+              host: login.host,
+              username,
+              password,
+              ...(totpSecret === undefined ? {} : { totp: totpCode(totpSecret) }),
+            });
+          } catch (error) {
+            return { ok: false, output: error instanceof Error ? error.message : String(error) };
+          }
+          return { ok: true, output: `Filled the saved login for ${login.host} and submitted.` };
+        },
+      };
+    },
+  };
+}
 
 /**
  * The browser tools. They run against the bot's desktop container when it has one, and against the host
@@ -242,5 +320,7 @@ export function createBrowserTools(deps: BrowserToolDeps): BrotTool[] {
         }
       },
     ),
+
+    fillLoginTool(deps),
   ];
 }

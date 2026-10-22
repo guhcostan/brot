@@ -1,10 +1,10 @@
 import { rm } from 'node:fs/promises';
 import type { Bot, BrowserTakeover, ComputerInput } from '@brot/protocol';
-import { applyInput, ensurePage, inputProblem, runBrowserCommand, screenshot } from './driver';
+import { applyInput, ensurePage, fillLogin as fillLoginInPage, inputProblem, pageHost as pageHostOf, runBrowserCommand, screenshot } from './driver';
 import { botAllowlist, createBotEgress, type BotEgress } from './egress';
 import { launchChrome, removeDevToolsState, resolveChromeBinary, type ChromeHandle } from './launch';
 import { ensureProfileDir, profileDir } from './profile';
-import type { HostBrowserDeps, HostBrowserService, HostBrowserState } from './types';
+import type { HostBrowserDeps, HostBrowserService, HostBrowserState, LoginCredentials } from './types';
 
 /** What the bot is told when it asks for the browser while the person's sign-in window is open. */
 const LOGIN_REFUSAL = 'the person is signing in; try again when the window closes';
@@ -239,6 +239,39 @@ export function createHostBrowserService(deps: HostBrowserDeps): HostBrowserServ
       }).finally(() => screenInFlight.delete(key));
       screenInFlight.set(key, capture);
       return capture;
+    },
+
+    pageHost(bot) {
+      const key = profileKey(bot);
+      return serial(key, async () => {
+        requireBrowser(bot);
+        const info = await live(key);
+        return info === undefined ? null : pageHostOf(info.chrome.browser);
+      });
+    },
+
+    fillLogin(bot, credentials: LoginCredentials) {
+      const key = profileKey(bot);
+      return serial(key, async () => {
+        requireBrowser(bot);
+        if (takeoverOf(key).active) throw new BrowserError(409, BROWSER_TAKEOVER_REFUSAL);
+        let info = await live(key);
+        if (info !== undefined && info.state === 'login') throw new BrowserError(409, LOGIN_REFUSAL);
+        if (info === undefined) {
+          try {
+            info = await launchForBrowsing(bot, key);
+          } catch (error) {
+            throw new BrowserError(409, `The browser could not start: ${errorLine(error)}`);
+          }
+        }
+        // The driver checks the page host again itself, so a redirect while waiting for approval cannot make the
+        // credentials land on another site.
+        try {
+          await fillLoginInPage(await ensurePage(info.chrome.browser), credentials);
+        } catch (error) {
+          throw new BrowserError(409, errorLine(error));
+        }
+      });
     },
 
     browserTakeover(bot) {

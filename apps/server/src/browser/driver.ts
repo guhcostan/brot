@@ -1,4 +1,5 @@
 import type { Bot, ComputerInput } from '@brot/protocol';
+import type { LoginCredentials } from './types';
 import type { Browser, Page } from 'playwright-core';
 import { hostAllowedForBot } from './egress';
 
@@ -105,6 +106,28 @@ export async function ensurePage(browser: Browser): Promise<Page> {
   const page = existing ?? (await context.newPage());
   if (!hasFixedViewport(page)) await page.setViewportSize(BROWSER_VIEWPORT);
   return page;
+}
+
+/** True when `currentHost` is `loginHost` or a subdomain of it. */
+export function hostMatchesLogin(currentHost: string, loginHost: string): boolean {
+  const host = currentHost.toLowerCase().replace(/\.$/, '');
+  const target = loginHost.toLowerCase().replace(/\.$/, '');
+  return host === target || host.endsWith(`.${target}`);
+}
+
+function pageHostname(page: Page): string | null {
+  try {
+    const url = new URL(page.url());
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.hostname.toLowerCase() : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The hostname the browser is currently on, or null when there is no page or it is not an http(s) page. */
+export async function pageHost(browser: Browser): Promise<string | null> {
+  const page = currentPage(browser);
+  return page === undefined ? null : pageHostname(page);
 }
 
 /** A JPEG of the page for the person watching the bot browse. */
@@ -423,6 +446,124 @@ async function run(browser: Browser, bot: Bot, command: string, args: Record<str
     default:
       throw new Error(`unknown command ${command}`);
   }
+}
+
+/*
+ * The login-filling code runs inside the page, so like the snapshot it is shipped as JavaScript source strings
+ * rather than a function (tsx/esbuild's keepNames would leave a `__name` call the page cannot resolve).
+ */
+
+/** Runs in the page. Tags the visible username/email, password and one-time-code fields. */
+const LOGIN_FIELDS_SOURCE = String.raw`function () {
+  var old = document.querySelectorAll('[data-brot-login]');
+  for (var i = 0; i < old.length; i++) old[i].removeAttribute('data-brot-login');
+  function visible(el) {
+    if (el.hidden || el.disabled || el.getAttribute('aria-hidden') === 'true') return false;
+    var style = getComputedStyle(el);
+    if (style.display === 'none' || style.visibility === 'hidden') return false;
+    var rect = el.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  }
+  function hints(el) {
+    var parts = [el.getAttribute('name'), el.getAttribute('id'), el.getAttribute('placeholder'),
+      el.getAttribute('aria-label'), el.getAttribute('autocomplete'), el.getAttribute('inputmode')];
+    return parts.filter(Boolean).join(' ').toLowerCase();
+  }
+  var username = null, password = null, otp = null;
+  var inputs = document.querySelectorAll('input');
+  for (var i = 0; i < inputs.length; i++) {
+    var el = inputs[i];
+    if (!visible(el)) continue;
+    var type = (el.getAttribute('type') || 'text').toLowerCase();
+    var autocomplete = (el.getAttribute('autocomplete') || '').toLowerCase();
+    if (['hidden', 'submit', 'button', 'reset', 'checkbox', 'radio', 'file', 'image', 'range', 'color', 'date', 'datetime-local', 'month', 'week', 'time'].indexOf(type) !== -1) continue;
+    if (password === null && type === 'password') { password = el; continue; }
+    if (otp === null && (autocomplete === 'one-time-code' || /(otp|totp|one[-_ ]?time|2fa|verif|security[-_ ]?code|auth[-_ ]?code)/.test(hints(el)))) { otp = el; continue; }
+    if (username === null && (type === 'email' || autocomplete === 'username' || autocomplete === 'email' || /user|email|login|account|identifier/.test(hints(el)))) { username = el; continue; }
+  }
+  if (username !== null) username.setAttribute('data-brot-login', 'username');
+  if (password !== null) password.setAttribute('data-brot-login', 'password');
+  if (otp !== null) otp.setAttribute('data-brot-login', 'otp');
+  return { username: username !== null, password: password !== null, otp: otp !== null };
+}`;
+
+/** Runs in the page. Clicks a visible submit button and reports whether one was found. */
+const LOGIN_SUBMIT_SOURCE = String.raw`function () {
+  function visible(el) {
+    if (el.hidden || el.disabled || el.getAttribute('aria-hidden') === 'true') return false;
+    var style = getComputedStyle(el);
+    if (style.display === 'none' || style.visibility === 'hidden') return false;
+    var rect = el.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  }
+  function textOf(el) {
+    return ((el.textContent || '') + ' ' + (el.value || '') + ' ' + (el.getAttribute('aria-label') || '')).toLowerCase();
+  }
+  var candidates = document.querySelectorAll('button, input[type=submit], input[type=button], [role=button]');
+  for (var i = 0; i < candidates.length; i++) {
+    var el = candidates[i];
+    if (!visible(el)) continue;
+    var type = (el.getAttribute('type') || '').toLowerCase();
+    if (type === 'submit' || /sign[ _-]?in|log[ _-]?in|login|continue|next|submit|verify/.test(textOf(el))) {
+      el.click();
+      return true;
+    }
+  }
+  return false;
+}`;
+
+interface LoginFields {
+  username: boolean;
+  password: boolean;
+  otp: boolean;
+}
+
+function isLoginFields(value: unknown): value is LoginFields {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    !Array.isArray(value) &&
+    typeof (value as Record<string, unknown>).username === 'boolean' &&
+    typeof (value as Record<string, unknown>).password === 'boolean' &&
+    typeof (value as Record<string, unknown>).otp === 'boolean'
+  );
+}
+
+async function typeInto(page: Page, field: 'username' | 'password' | 'otp', value: string): Promise<void> {
+  const locator = page.locator(`[data-brot-login="${field}"]`).first();
+  await locator.click();
+  await locator.fill('');
+  await locator.click();
+  await page.keyboard.type(value);
+}
+
+/**
+ * Fills a saved login on the current page and submits it. The values are typed as keystrokes and never returned;
+ * the error messages here name fields and hosts only, so a value cannot leak into model context through a failure.
+ */
+export async function fillLogin(page: Page, credentials: LoginCredentials): Promise<void> {
+  const host = pageHostname(page);
+  if (host === null) throw new Error(`open ${credentials.host} first; there is no page to fill`);
+  if (!hostMatchesLogin(host, credentials.host)) throw new Error(`the page is on ${host}, not ${credentials.host}`);
+  const found: unknown = await page.evaluate(`(${LOGIN_FIELDS_SOURCE})()`);
+  if (!isLoginFields(found)) throw new Error('the page did not report its login fields');
+  if (!found.username) throw new Error('the page has no visible username or email field');
+  if (!found.password) throw new Error('the page has no visible password field');
+  await typeInto(page, 'username', credentials.username);
+  await typeInto(page, 'password', credentials.password);
+  if (credentials.totp !== undefined && found.otp) await typeInto(page, 'otp', credentials.totp);
+  const beforeUrl = page.url();
+  let submitted = false;
+  try {
+    submitted = (await page.evaluate(`(${LOGIN_SUBMIT_SOURCE})()`)) === true;
+  } catch {
+    // A fast submit navigates and destroys the execution context; the submit already happened.
+    submitted = true;
+  }
+  if (!submitted) await page.locator('[data-brot-login="password"]').press('Enter');
+  // The submit is followed by a navigation, so wait for the URL to change before reporting success.
+  await page.waitForURL((url) => url.href !== beforeUrl, { timeout: 5_000 }).catch(() => undefined);
+  await page.waitForLoadState('domcontentloaded', { timeout: 5_000 }).catch(() => undefined);
 }
 
 /**

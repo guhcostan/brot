@@ -382,6 +382,56 @@ export const BrowserStatus = z.object({
 });
 export type BrowserStatus = z.infer<typeof BrowserStatus>;
 
+/** A saved login's name as a person types it: trimmed, 1 to 60 characters, one line. */
+const SavedLoginName = z
+  .string()
+  .trim()
+  .min(1)
+  .max(60)
+  .refine((name) => !/[\r\n]/.test(name), 'must be a single line');
+
+/** A site's bare hostname, lowercased: letters, digits, dots and dashes, with no scheme, path, port or credentials. */
+const SavedLoginHost = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .min(3)
+  .max(253)
+  .regex(/^[a-z0-9.-]+$/, 'use a bare hostname: letters, digits, dots and dashes')
+  .refine((host) => !host.startsWith('.') && !host.endsWith('.') && !host.includes('..'), 'use a bare hostname');
+
+/** A base32 secret (RFC 4648 alphabet). Spaces are tolerated when a person pastes a formatted key. */
+const BASE32_SECRET = /^[A-Za-z2-7]+={0,6}$/;
+const SavedLoginTotp = z
+  .string()
+  .trim()
+  .min(1)
+  .max(512)
+  .refine((value) => BASE32_SECRET.test(value.replace(/\s+/g, '')), 'must be a base32 secret');
+
+/** Saves a login for a site. The values go to the vault and are never returned by the API. */
+export const CreateSavedLogin = z.object({
+  name: SavedLoginName,
+  host: SavedLoginHost,
+  username: z.string().min(1).max(320),
+  password: z.string().min(1).max(4096),
+  /** Base32 TOTP secret, for sites that ask for a one-time code. */
+  totp: SavedLoginTotp.optional(),
+  label: z.string().trim().min(1).max(80).optional(),
+});
+export type CreateSavedLogin = z.infer<typeof CreateSavedLogin>;
+
+/** Updates a saved login. Re-send a value to re-seal it; `totp: null` removes two-factor. */
+export const UpdateSavedLogin = z.object({
+  name: SavedLoginName.optional(),
+  host: SavedLoginHost.optional(),
+  username: z.string().min(1).max(320).optional(),
+  password: z.string().min(1).max(4096).optional(),
+  totp: SavedLoginTotp.nullable().optional(),
+  label: z.string().trim().min(1).max(80).nullable().optional(),
+});
+export type UpdateSavedLogin = z.infer<typeof UpdateSavedLogin>;
+
 /** What `GET /api/bots/:id/computer` returns: the computer's state, whether it has a screen, and who drives it. */
 export const ComputerInfo = z.object({
   state: z.union([ComputerState, z.literal('none')]),

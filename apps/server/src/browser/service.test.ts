@@ -162,3 +162,26 @@ describe('host browser takeover without a running Chrome', () => {
     expect(BROWSER_TAKEOVER_REFUSAL).toBe('The person is in control of the browser; wait until they hand it back.');
   });
 });
+
+describe('saved login filling without a running Chrome', () => {
+  const credentials = { host: 'github.com', username: 'ada@example.com', password: 'hunter2' };
+
+  it('reports no page host until a browser is running', async () => {
+    const { service } = await startService();
+    const bot = hostBotFor('bot_1');
+    expect(await service.pageHost(bot)).toBeNull();
+    await expect(service.pageHost(botFor('bot_2'))).rejects.toThrow('This bot has no browser');
+  });
+
+  it('refuses to fill for a bot without a browser or while the person has taken over', async () => {
+    const { service } = await startService();
+    await expect(service.fillLogin(botFor('bot_1'), credentials)).rejects.toThrow('This bot has no browser');
+
+    const bot = hostBotFor('bot_2');
+    await service.setBrowserTakeover(bot, { active: true }, 'user');
+    await expect(service.fillLogin(bot, credentials)).rejects.toThrow(BROWSER_TAKEOVER_REFUSAL);
+    await service.setBrowserTakeover(bot, { active: false }, 'user');
+    // With no Chrome binary the lazy launch failure is a browser error, not an internal one.
+    await expect(service.fillLogin(bot, credentials)).rejects.toThrow(/The browser could not start/);
+  });
+});
