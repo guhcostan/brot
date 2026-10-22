@@ -3,6 +3,7 @@ import {
   BrowserStatus,
   CreateBot,
   CreateRoom,
+  CreateTeam,
   CreateRoutine,
   CreateTask,
   PairingComplete,
@@ -10,7 +11,10 @@ import {
   ResolveApproval,
   UpdateBot,
   UpdateRoomMembers,
+  UpdateRoutine,
   UpdateTask,
+  UpdateTeam,
+  UpdateThread,
 } from './requests';
 import { MAX_ROOM_BOTS, MIN_ROOM_BOTS } from './constants';
 
@@ -118,6 +122,28 @@ describe('request schemas', () => {
     const pairing = PairingComplete.parse({ token: 't', deviceName: 'Phone', publicKey: 'pk' });
     expect(pairing.role).toBe('full');
   });
+
+  it('defaults routine catch-up on and remember-last-run off, and accepts a timezone', () => {
+    const base = {
+      botId: 'bot_1',
+      name: 'Daily',
+      instruction: 'Summarize',
+      trigger: { type: 'cron', cron: '0 9 * * *' },
+    };
+    expect(CreateRoutine.parse(base)).toMatchObject({ catchUp: true, rememberLastRun: false });
+    expect(CreateRoutine.parse({ ...base, catchUp: false, rememberLastRun: true })).toMatchObject({
+      catchUp: false,
+      rememberLastRun: true,
+    });
+    const localized = CreateRoutine.parse({
+      ...base,
+      trigger: { type: 'cron', cron: '0 9 * * *', timezone: 'Europe/Lisbon' },
+    });
+    expect(localized.trigger).toEqual({ type: 'cron', cron: '0 9 * * *', timezone: 'Europe/Lisbon' });
+    expect(() => CreateRoutine.parse({ ...base, trigger: { type: 'cron', cron: '0 9 * * *', timezone: '' } })).toThrow();
+    expect(UpdateRoutine.parse({ catchUp: false, rememberLastRun: true })).toEqual({ catchUp: false, rememberLastRun: true });
+    expect(() => UpdateRoutine.parse({ catchUp: 'yes' })).toThrow();
+  });
 });
 
 describe('room, membership, and task requests', () => {
@@ -193,6 +219,39 @@ describe('room, membership, and task requests', () => {
     expect(() => UpdateTask.parse({ workRunId: '' })).toThrow();
     expect(() => UpdateTask.parse({})).toThrow(/at least one field/);
     expect(() => UpdateTask.parse({ status: 'paused' })).toThrow();
+  });
+
+  it('accepts a team id on CreateBot and lets UpdateBot clear it with null', () => {
+    expect(CreateBot.parse({ name: 'Onça', job: 'Lead', teamId: 'team_1' }).teamId).toBe('team_1');
+    expect(CreateBot.parse({ name: 'Onça', job: 'Lead' }).teamId).toBeUndefined();
+    expect(UpdateBot.parse({ teamId: null })).toEqual({ teamId: null });
+    expect(UpdateBot.parse({ teamId: 'team_2' })).toEqual({ teamId: 'team_2' });
+    expect(() => UpdateBot.parse({ teamId: '' })).toThrow();
+  });
+
+  it('defaults a new team to an empty brief and validates its fields', () => {
+    expect(CreateTeam.parse({ name: 'Growth' })).toEqual({ name: 'Growth', instructions: '' });
+    expect(CreateTeam.parse({ name: 'Growth', instructions: 'Ship weekly.', chiefBotId: 'bot_1' })).toEqual({
+      name: 'Growth',
+      instructions: 'Ship weekly.',
+      chiefBotId: 'bot_1',
+    });
+    expect(() => CreateTeam.parse({ name: '' })).toThrow();
+    expect(() => CreateTeam.parse({ name: 'Growth', chiefBotId: '' })).toThrow();
+  });
+
+  it('keeps UpdateTeam fields optional and lets it clear the chief with null', () => {
+    expect(UpdateTeam.parse({ chiefBotId: null })).toEqual({ chiefBotId: null });
+    expect(UpdateTeam.parse({ name: 'Ops', instructions: '' })).toEqual({ name: 'Ops', instructions: '' });
+    expect(UpdateTeam.parse({})).toEqual({});
+    expect(() => UpdateTeam.parse({ name: '' })).toThrow();
+  });
+
+  it('requires a thread title of 1 to 120 characters to rename one', () => {
+    expect(UpdateThread.parse({ title: 'Planning' })).toEqual({ title: 'Planning' });
+    expect(() => UpdateThread.parse({ title: '' })).toThrow();
+    expect(() => UpdateThread.parse({ title: 'x'.repeat(121) })).toThrow();
+    expect(UpdateThread.parse({ title: 'x'.repeat(120) }).title).toHaveLength(120);
   });
 
   it('accepts a team budget on CreateBot and lets UpdateBot clear it with null', () => {

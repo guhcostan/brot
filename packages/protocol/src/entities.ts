@@ -16,12 +16,30 @@ export type IsoDateTime = z.infer<typeof IsoDateTime>;
 export const ComputerKind = z.enum(['none', 'sandbox', 'host']);
 export type ComputerKind = z.infer<typeof ComputerKind>;
 
+/**
+ * A named group of bots with a shared brief. Every member bot gets the team's name and `instructions`
+ * in its prompt. `chiefBotId` is the bot that leads it.
+ */
+export const Team = z.object({
+  id: z.string(),
+  name: z.string(),
+  /** The team's shared brief, given to every member bot's prompt. */
+  instructions: z.string(),
+  /** The bot that leads the team. Absent until a chief is set, and after the chief bot is deleted. */
+  chiefBotId: z.string().optional(),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+export type Team = z.infer<typeof Team>;
+
 export const Bot = z.object({
   id: z.string(),
   name: z.string(),
   job: z.string(),
   instructions: z.string(),
   avatar: z.string().optional(),
+  /** The team this bot belongs to. Absent for an ungrouped bot. */
+  teamId: z.string().optional(),
   engine: z.string(),
   model: z.string().optional(),
   computer: ComputerKind,
@@ -301,7 +319,8 @@ export const Skill = z.object({
 export type Skill = z.infer<typeof Skill>;
 
 export const RoutineTrigger = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('cron'), cron: z.string() }),
+  /** `timezone` is an IANA name; the server validates it with croner before it is stored. */
+  z.object({ type: z.literal('cron'), cron: z.string(), timezone: z.string().min(1).optional() }),
   z.object({ type: z.literal('webhook'), secret: z.string() }),
 ]);
 export type RoutineTrigger = z.infer<typeof RoutineTrigger>;
@@ -313,12 +332,47 @@ export const Routine = z.object({
   instruction: z.string(),
   trigger: RoutineTrigger,
   enabled: z.boolean(),
+  /** Fire one missed occurrence (within the 12h catch-up window) after downtime. Defaults to true. */
+  catchUp: z.boolean().optional(),
+  /** Prepend the last completed run's result to the instruction. Defaults to false. */
+  rememberLastRun: z.boolean().optional(),
   lastRunAt: IsoDateTime.optional(),
   nextRunAt: IsoDateTime.optional(),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
 export type Routine = z.infer<typeof Routine>;
+
+/** How a routine run was started. */
+export const RoutineRunTrigger = z.enum(['schedule', 'webhook', 'manual']);
+export type RoutineRunTrigger = z.infer<typeof RoutineRunTrigger>;
+
+/**
+ * Where a routine run is. `queued` and `running` are active; `completed` ran, `failed` broke, `missed` was not
+ * fired, `skipped` found another run of the routine active, and `cancelled` was stopped.
+ */
+export const RoutineRunStatus = z.enum(['queued', 'running', 'completed', 'failed', 'missed', 'skipped', 'cancelled']);
+export type RoutineRunStatus = z.infer<typeof RoutineRunStatus>;
+
+/**
+ * One run of a routine. `runId` is the engine run it started, absent until it starts and for runs that never
+ * did. `result` is the assistant's final text of a completed run.
+ */
+export const RoutineRun = z.object({
+  id: z.string(),
+  routineId: z.string(),
+  botId: z.string(),
+  threadId: z.string(),
+  runId: z.string().optional(),
+  trigger: RoutineRunTrigger,
+  status: RoutineRunStatus,
+  result: z.string().optional(),
+  error: z.string().optional(),
+  startedAt: IsoDateTime,
+  endedAt: IsoDateTime.optional(),
+  createdAt: IsoDateTime,
+});
+export type RoutineRun = z.infer<typeof RoutineRun>;
 
 export const DeviceRole = z.enum(['full', 'approver', 'viewer']);
 export type DeviceRole = z.infer<typeof DeviceRole>;

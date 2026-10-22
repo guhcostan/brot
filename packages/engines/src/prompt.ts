@@ -23,9 +23,16 @@ export interface PromptRoom {
   members: PromptMember[];
 }
 
+/** The team a bot belongs to, as its prompt names it. `instructions` is the team's shared brief. */
+export interface PromptTeam {
+  name: string;
+  instructions: string;
+}
+
 /** What a prompt is built from. `teamTools` is set when the Brot team tools are attached to the run. */
 export interface PromptInput extends Pick<RunContext, 'bot' | 'memories' | 'history' | 'input'> {
   room?: PromptRoom;
+  team?: PromptTeam;
   teamTools?: boolean;
 }
 
@@ -33,7 +40,7 @@ export interface PromptInput extends Pick<RunContext, 'bot' | 'memories' | 'hist
  * A run's context with the room and team facts Brot adds for engines that build their own prompts. The fields are
  * optional, so every engine accepts it wherever a `RunContext` is accepted.
  */
-export type BrotRunContext = RunContext & Pick<PromptInput, 'room' | 'teamTools'>;
+export type BrotRunContext = RunContext & Pick<PromptInput, 'room' | 'team' | 'teamTools'>;
 
 const TEAM_GUIDANCE = [
   'Team tools:',
@@ -45,7 +52,7 @@ const TEAM_GUIDANCE = [
 ].join('\n');
 
 /**
- * Flattens a run into one prompt for the first turn of a session: who the bot is, its instructions, its room and team
+ * Flattens a run into one prompt for the first turn of a session: who the bot is, its instructions, its team and room
  * when it has them, its memories, the earlier messages, and this run's input. Later turns of a session send
  * `sessionInput`, because the session keeps this text.
  */
@@ -53,6 +60,7 @@ export function buildPrompt(ctx: PromptInput): string {
   const sections: string[] = [identityOf(ctx.bot)];
   const instructions = ctx.bot.instructions.trim();
   if (instructions) sections.push(`Instructions:\n${instructions}`);
+  if (ctx.team) sections.push(teamSection(ctx.team));
   if (ctx.room) sections.push(roomSection(ctx.room, ctx.bot));
   if (ctx.teamTools) sections.push(TEAM_GUIDANCE);
   if (ctx.memories.length > 0) {
@@ -78,6 +86,12 @@ function identityOf(bot: Bot): string {
   const job = bot.job.trim().replace(/[.!?]+$/, '');
   const who = job === '' ? `You are ${bot.name}.` : `You are ${bot.name}, ${job}.`;
   return `${who} You are a bot in Brot, working for the user.`;
+}
+
+/** The bot's team and its shared brief. A team without a brief is only named. */
+function teamSection(team: PromptTeam): string {
+  const brief = team.instructions.trim();
+  return brief === '' ? `Team: ${team.name}` : `Team: ${team.name}\n${brief}`;
 }
 
 function roomSection(room: PromptRoom, bot: Bot): string {

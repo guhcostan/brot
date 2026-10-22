@@ -12,10 +12,10 @@ import { newId, nowIso, required } from './common';
 
 type RoutineRow = typeof routines.$inferSelect;
 
-/** Scheduler-owned fields, written alongside the user-editable ones. */
+/** Scheduler-owned fields, written alongside the user-editable ones. `nextRunAt: null` means no next run. */
 export interface RoutineScheduleUpdate {
   lastRunAt?: IsoDateTime;
-  nextRunAt?: IsoDateTime;
+  nextRunAt?: IsoDateTime | null;
 }
 
 export function toRoutine(row: RoutineRow): Routine {
@@ -26,6 +26,8 @@ export function toRoutine(row: RoutineRow): Routine {
     instruction: row.instruction,
     trigger: row.trigger,
     enabled: row.enabled,
+    catchUp: row.catchUp,
+    rememberLastRun: row.rememberLastRun,
     lastRunAt: row.lastRunAt ?? undefined,
     nextRunAt: row.nextRunAt ?? undefined,
     createdAt: row.createdAt,
@@ -61,6 +63,8 @@ export function createRoutineRepo(db: Db) {
           instruction: data.instruction,
           trigger: data.trigger,
           enabled: data.enabled,
+          catchUp: data.catchUp,
+          rememberLastRun: data.rememberLastRun,
           createdAt: timestamp,
           updatedAt: timestamp,
         })

@@ -22,6 +22,8 @@ import type {
   MessageRole,
   PolicyEffect,
   ResponderMode,
+  RoutineRunStatus,
+  RoutineRunTrigger,
   RoutineTrigger,
   RunStatus,
   TaskStatus,
@@ -41,6 +43,8 @@ export const bots = sqliteTable('bots', {
   computer: text('computer').$type<ComputerKind>().notNull(),
   desktop: integer('desktop', { mode: 'boolean' }).notNull().default(false),
   browser: integer('browser', { mode: 'boolean' }).notNull().default(false),
+  /** The bot's team. Plain text, not a foreign key: deleting a team ungroups its bots instead of touching them. */
+  teamId: text('team_id'),
   egress: text('egress', { mode: 'json' })
     .$type<EgressPolicy>()
     .notNull()
@@ -48,6 +52,16 @@ export const bots = sqliteTable('bots', {
   teamBudgetUsd: real('team_budget_usd'),
   pinned: integer('pinned', { mode: 'boolean' }).notNull().default(false),
   archived: integer('archived', { mode: 'boolean' }).notNull().default(false),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+});
+
+/** A named group of bots with a shared brief, shown to every member bot's prompt. */
+export const teams = sqliteTable('teams', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  instructions: text('instructions').notNull(),
+  chiefBotId: text('chief_bot_id').references(() => bots.id, { onDelete: 'set null' }),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
 });
@@ -214,12 +228,40 @@ export const routines = sqliteTable(
     instruction: text('instruction').notNull(),
     trigger: text('trigger', { mode: 'json' }).$type<RoutineTrigger>().notNull(),
     enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+    catchUp: integer('catch_up', { mode: 'boolean' }).notNull().default(true),
+    rememberLastRun: integer('remember_last_run', { mode: 'boolean' }).notNull().default(false),
     lastRunAt: text('last_run_at'),
     nextRunAt: text('next_run_at'),
     createdAt: text('created_at').notNull(),
     updatedAt: text('updated_at').notNull(),
   },
   (t) => [index('routines_bot_idx').on(t.botId)],
+);
+
+/** One run of a routine: the engine run it started, the trigger, and how it ended. Rows cascade with the routine. */
+export const routineRuns = sqliteTable(
+  'routine_runs',
+  {
+    id: text('id').primaryKey(),
+    routineId: text('routine_id')
+      .notNull()
+      .references(() => routines.id, { onDelete: 'cascade' }),
+    botId: text('bot_id')
+      .notNull()
+      .references(() => bots.id, { onDelete: 'cascade' }),
+    threadId: text('thread_id')
+      .notNull()
+      .references(() => threads.id, { onDelete: 'cascade' }),
+    runId: text('run_id').references(() => runs.id, { onDelete: 'set null' }),
+    trigger: text('trigger').$type<RoutineRunTrigger>().notNull(),
+    status: text('status').$type<RoutineRunStatus>().notNull(),
+    result: text('result'),
+    error: text('error'),
+    startedAt: text('started_at').notNull(),
+    endedAt: text('ended_at'),
+    createdAt: text('created_at').notNull(),
+  },
+  (t) => [index('routine_runs_routine_idx').on(t.routineId), index('routine_runs_started_idx').on(t.startedAt)],
 );
 
 export const devices = sqliteTable(

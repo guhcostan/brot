@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { Bot, Routine, Thread } from '@brot/protocol';
+import type { Bot, Routine, RoutineRun, Thread } from '@brot/protocol';
 import { call, createTestContext, recordEvents, waitUntil, type TestContext } from './testing';
 
 let ctx: TestContext;
@@ -11,6 +11,19 @@ beforeEach(async () => {
 afterEach(async () => {
   await ctx.close();
 });
+
+async function waitForRuns(
+  routineId: string,
+  predicate: (runs: RoutineRun[]) => boolean,
+): Promise<RoutineRun[]> {
+  const deadline = Date.now() + 3000;
+  for (;;) {
+    const runs = (await (await call(ctx.app, 'GET', `/api/routine-runs?routineId=${routineId}`)).json()) as RoutineRun[];
+    if (predicate(runs)) return runs;
+    if (Date.now() > deadline) throw new Error('timed out waiting for routine run history');
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
 
 async function createWebhookRoutine(enabled = true): Promise<{ bot: Bot; routine: Routine; secret: string }> {
   const bot = (await (await call(ctx.app, 'POST', '/api/bots', { name: 'Ada', job: 'Ops' })).json()) as Bot;
@@ -34,8 +47,8 @@ function post(path: string, body: string): Promise<Response> {
 }
 
 describe('webhook receiver', () => {
-  it('runs the routine with the posted payload and answers 202', async () => {
-    const { bot, secret } = await createWebhookRoutine();
+  it('runs the routine with the posted payload, records it as a webhook run, and answers 202', async () => {
+    const { bot, routine, secret } = await createWebhookRoutine();
     const events = recordEvents(ctx.services.bus);
 
     const res = await post(`/h/${secret}`, JSON.stringify({ subject: 'Invoice' }));
@@ -54,6 +67,11 @@ describe('webhook receiver', () => {
     expect(messages[0]).toMatchObject({ role: 'user' });
     expect(messages[0]?.content).toContain('Triage the inbox.');
     expect(messages[0]?.content).toContain('{"subject":"Invoice"}');
+
+    const runs = await waitForRuns(routine.id, (history) => history[0]?.status === 'completed');
+    expect(runs).toHaveLength(1);
+    expect(runs[0]).toMatchObject({ trigger: 'webhook', status: 'completed', runId, threadId: thread?.id });
+    expect(runs[0]?.result).toContain('{"subject":"Invoice"}');
     events.stop();
   });
 

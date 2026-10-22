@@ -10,12 +10,14 @@ import {
   CreateRoutine,
   CreateSkill,
   CreateTask,
+  CreateTeam,
   CreateThread,
   IsoDateTime,
   PairingComplete,
   PostMessage,
   PROTOCOL_VERSION,
   ResolveApproval,
+  RoutineRunStatus,
   TaskStatus,
   ThreadKind,
   UpdateBot,
@@ -24,8 +26,11 @@ import {
   UpdateRoutine,
   UpdateSkill,
   UpdateTask,
+  UpdateTeam,
+  UpdateThread,
   type CanonicalEvent,
   type RoutineTrigger,
+  type Thread,
 } from '@brot/protocol';
 import { Hono, type Context } from 'hono';
 import { cors } from 'hono/cors';
@@ -36,7 +41,7 @@ import type { Broker } from './broker';
 import type { EventBus } from './bus';
 import type { Harness } from './harness';
 import { PairingError, type Pairing } from './pairing';
-import { cronError, type Scheduler } from './scheduler';
+import { triggerIssues, type Scheduler } from './scheduler';
 import type { BrotMcpService } from './mcp/types';
 import type { LlmRelay, ProviderSpec } from './llm';
 import { botBrowserKind } from './browser/tools';
@@ -52,6 +57,10 @@ export const SERVER_VERSION = '0.1.0';
 const ALLOWED_ORIGINS = ['http://localhost:5199', 'http://127.0.0.1:5199'];
 const REPLAY_PAGE_SIZE = 500;
 const HEARTBEAT_MS = 15_000;
+const DEFAULT_THREAD_TITLE = 'New thread';
+const MAX_AUTO_TITLE_LENGTH = 80;
+const ROUTINE_RUN_LIMIT_DEFAULT = 50;
+const ROUTINE_RUN_LIMIT_MAX = 200;
 
 export interface AppDeps {
   repos: Repos;
@@ -118,10 +127,12 @@ function isValidPattern(pattern: string): boolean {
   }
 }
 
-function cronIssues(trigger: RoutineTrigger): { path: string[]; message: string }[] {
-  if (trigger.type !== 'cron') return [];
-  const message = cronError(trigger.cron);
-  return message === undefined ? [] : [{ path: ['trigger', 'cron'], message: `Invalid cron pattern: ${message}` }];
+/** Parses a list limit: `fallback` when absent, clamped to `max`. Undefined for anything but a positive integer. */
+function listLimit(raw: string | undefined, fallback: number, max: number): number | undefined {
+  if (raw === undefined) return fallback;
+  if (!/^\d+$/.test(raw)) return undefined;
+  const limit = Number(raw);
+  return limit < 1 ? undefined : Math.min(limit, max);
 }
 
 /** A webhook routine created without a secret gets an unguessable one, since the secret is its only credential. */
@@ -152,6 +163,23 @@ async function unknownBots(repos: Repos, ids: readonly string[]): Promise<string
 
 function invalidReference(c: Context<AppEnv>, path: string, message: string): Response {
   return c.json({ error: 'Invalid request', issues: [{ path: [path], message }] }, 400);
+}
+
+/**
+ * The title a default-titled thread takes from its first user message: the content's first line, trimmed and
+ * cut to 80 code units. A surrogate pair at the edge is dropped whole instead of leaving half a code point.
+ */
+function titleFromMessage(content: string): string {
+  const line = (content.split('\n')[0] ?? '').trim();
+  const clipped = line.slice(0, MAX_AUTO_TITLE_LENGTH);
+  const last = clipped.charCodeAt(clipped.length - 1);
+  const cutsPair = clipped.length === MAX_AUTO_TITLE_LENGTH && last >= 0xd800 && last <= 0xdbff;
+  return cutsPair ? clipped.slice(0, -1) : clipped;
+}
+
+function hasDefaultTitle(thread: Thread): boolean {
+  const title = thread.title.trim();
+  return title === '' || title === DEFAULT_THREAD_TITLE;
 }
 
 /** A team rule (depth, chain size, room size, ended task) answers 409. Any other error is a server error. */
@@ -278,6 +306,15 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     return c.json(await repos.threads.create(id, body.data), 201);
   });
 
+  app.patch('/api/threads/:id', async (c) => {
+    const id = c.req.param('id');
+    if (!(await repos.threads.get(id))) return notFound(c, 'Thread');
+    const body = await parseBody(c, UpdateThread);
+    if (!body.ok) return body.response;
+    const thread = await repos.threads.setTitle(id, body.data.title);
+    return thread ? c.json(thread) : notFound(c, 'Thread');
+  });
+
   app.get('/api/threads/:id/messages', async (c) => {
     const id = c.req.param('id');
     if (!(await repos.threads.get(id))) return notFound(c, 'Thread');
@@ -297,6 +334,10 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     if (!thread) return notFound(c, 'Thread');
     const body = await parseBody(c, PostMessage);
     if (!body.ok) return body.response;
+    if (hasDefaultTitle(thread)) {
+      const title = titleFromMessage(body.data.content);
+      if (title !== '') await repos.threads.setTitle(id, title);
+    }
     if (thread.kind === 'room') {
       const { runId } = await rooms.post(thread, body.data);
       return c.json({ runId }, 202);
@@ -344,6 +385,42 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
       return ruleViolation(c, error);
     }
   });
+
+  app.get('/api/teams', async (c) => c.json(await repos.teams.list()));
+
+  app.post('/api/teams', async (c) => {
+    const body = await parseBody(c, CreateTeam);
+    if (!body.ok) return body.response;
+    if (body.data.chiefBotId !== undefined) {
+      const missing = await unknownBots(repos, [body.data.chiefBotId]);
+      if (missing.length > 0) {
+        return invalidReference(c, 'chiefBotId', `unknown or archived bots: ${missing.join(', ')}`);
+      }
+    }
+    return c.json(await repos.teams.create(body.data), 201);
+  });
+
+  /** Updates a team. `chiefBotId: null` removes the chief. */
+  app.patch('/api/teams/:id', async (c) => {
+    const id = c.req.param('id');
+    if (!(await repos.teams.get(id))) return notFound(c, 'Team');
+    const body = await parseBody(c, UpdateTeam);
+    if (!body.ok) return body.response;
+    const chiefBotId = body.data.chiefBotId;
+    if (chiefBotId !== undefined && chiefBotId !== null) {
+      const missing = await unknownBots(repos, [chiefBotId]);
+      if (missing.length > 0) {
+        return invalidReference(c, 'chiefBotId', `unknown or archived bots: ${missing.join(', ')}`);
+      }
+    }
+    const team = await repos.teams.update(id, body.data);
+    return team ? c.json(team) : notFound(c, 'Team');
+  });
+
+  /** Deletes the team and ungroups its bots. The bots stay. */
+  app.delete('/api/teams/:id', async (c) =>
+    (await repos.teams.remove(c.req.param('id'))) ? c.body(null, 204) : notFound(c, 'Team'),
+  );
 
   app.get('/api/tasks', async (c) => {
     const filter: TaskFilter = {};
@@ -499,7 +576,7 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     const body = await parseBody(c, CreateRoutine);
     if (!body.ok) return body.response;
     if (!(await repos.bots.get(body.data.botId))) return notFound(c, 'Bot');
-    const issues = cronIssues(body.data.trigger);
+    const issues = triggerIssues(body.data.trigger);
     if (issues.length > 0) return c.json({ error: 'Invalid request', issues }, 400);
     const routine = await repos.routines.create({ ...body.data, trigger: withWebhookSecret(body.data.trigger) });
     await scheduler.sync();
@@ -512,7 +589,7 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     const body = await parseBody(c, UpdateRoutine);
     if (!body.ok) return body.response;
     if (body.data.trigger) {
-      const issues = cronIssues(body.data.trigger);
+      const issues = triggerIssues(body.data.trigger);
       if (issues.length > 0) return c.json({ error: 'Invalid request', issues }, 400);
     }
     const trigger = body.data.trigger && withWebhookSecret(body.data.trigger);
@@ -531,7 +608,37 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
 
   app.post('/api/routines/:id/run', async (c) => {
     const result = await scheduler.runRoutineNow(c.req.param('id'));
-    return result ? c.json(result, 202) : notFound(c, 'Routine');
+    if (!result) return notFound(c, 'Routine');
+    if (result.status === 'skipped') return c.json({ error: 'Routine is already running' }, 409);
+    return c.json({ runId: result.runId }, 202);
+  });
+
+  /** A routine's run history, newest first. */
+  app.get('/api/routines/:id/runs', async (c) => {
+    const id = c.req.param('id');
+    if (!(await repos.routines.get(id))) return notFound(c, 'Routine');
+    const limit = listLimit(c.req.query('limit'), ROUTINE_RUN_LIMIT_DEFAULT, ROUTINE_RUN_LIMIT_MAX);
+    if (limit === undefined) return c.json({ error: 'limit must be a positive integer' }, 400);
+    return c.json(await repos.routineRuns.listByRoutine(id, { limit }));
+  });
+
+  /** Run history across routines, filtered by routine, bot, or status. Newest first. */
+  app.get('/api/routine-runs', async (c) => {
+    const limit = listLimit(c.req.query('limit'), ROUTINE_RUN_LIMIT_DEFAULT, ROUTINE_RUN_LIMIT_MAX);
+    if (limit === undefined) return c.json({ error: 'limit must be a positive integer' }, 400);
+    const status = c.req.query('status');
+    const parsed = status === undefined ? undefined : RoutineRunStatus.safeParse(status);
+    if (parsed !== undefined && !parsed.success) return invalid(c, parsed.error);
+    const routineId = c.req.query('routineId');
+    const botId = c.req.query('botId');
+    return c.json(
+      await repos.routineRuns.list({
+        ...(routineId === undefined ? {} : { routineId }),
+        ...(botId === undefined ? {} : { botId }),
+        ...(parsed?.success === true ? { status: parsed.data } : {}),
+        limit,
+      }),
+    );
   });
 
   // Live events: replays stored events after `after` (when given), then streams live ones.

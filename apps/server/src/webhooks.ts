@@ -29,8 +29,10 @@ export function createWebhookApp(deps: { repos: Repos; scheduler: Scheduler }): 
           payload = text;
         }
       }
-      const result = await scheduler.runRoutineNow(routine.id, { payload });
-      return result ? c.json(result, 202) : c.json({ error: 'Not found' }, 404);
+      const result = await scheduler.runRoutineNow(routine.id, { payload, trigger: 'webhook' });
+      if (!result) return c.json({ error: 'Not found' }, 404);
+      if (result.status === 'skipped') return c.json({ status: 'skipped' }, 202);
+      return c.json({ runId: result.runId }, 202);
     },
   );
 

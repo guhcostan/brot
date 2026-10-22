@@ -54,16 +54,18 @@ describe('migrate', () => {
       'messages',
       'policies',
       'room_members',
+      'routine_runs',
       'routines',
       'runs',
       'skills',
       'tasks',
+      'teams',
       'thread_sessions',
       'threads',
     ]);
 
     const applied = await handle.client.execute('SELECT COUNT(*) AS count FROM __drizzle_migrations');
-    expect(Number(applied.rows[0]?.count)).toBe(6);
+    expect(Number(applied.rows[0]?.count)).toBe(8);
   });
 
   it('adds the rooms, team task, and per-bot session schema on a fresh database', async () => {
@@ -317,6 +319,102 @@ describe('migrate', () => {
     expect((await repos.bots.get('bot_old'))?.browser).toBeUndefined();
     expect((await repos.bots.update('bot_old', { browser: true }))?.browser).toBe(true);
     expect((await repos.bots.get('bot_old'))?.browser).toBe(true);
+  });
+
+  it('adds teams and the bot team column in place, leaving existing bots ungrouped', async () => {
+    const { handle } = await tempDb();
+    const journal = JSON.parse(await readFile(join(migrationsFolder, 'meta', '_journal.json'), 'utf8')) as {
+      entries: Array<{ tag: string; when: number }>;
+    };
+    const applied = journal.entries.slice(0, 6);
+    if (applied.length !== 6 || applied[5]?.tag !== '0005_flashy_invisible_woman') {
+      throw new Error('journal must start with the 0000 to 0005 migrations');
+    }
+
+    for (const entry of applied) {
+      await handle.client.executeMultiple(await readFile(join(migrationsFolder, `${entry.tag}.sql`), 'utf8'));
+    }
+    await handle.client.execute(
+      'CREATE TABLE "__drizzle_migrations" ("id" INTEGER PRIMARY KEY AUTOINCREMENT, "hash" text NOT NULL, "created_at" numeric)',
+    );
+    for (const entry of applied) {
+      await handle.client.execute({
+        sql: 'INSERT INTO "__drizzle_migrations" ("hash", "created_at") VALUES (?, ?)',
+        args: [entry.tag, entry.when],
+      });
+    }
+    await handle.client.execute(
+      `INSERT INTO bots (id, name, job, instructions, engine, computer, pinned, archived, created_at, updated_at)
+       VALUES ('bot_old', 'Ada', 'Researcher', '', 'mock', 'none', 0, 0, '2026-10-19T10:00:00.000Z', '2026-10-19T10:00:00.000Z')`,
+    );
+
+    await migrate(handle.db);
+
+    expect(await columnNames(handle, 'bots')).toContain('team_id');
+    expect(await tableNames(handle)).toContain('teams');
+    const repos = createRepos(handle.db);
+    expect((await repos.bots.get('bot_old'))?.teamId).toBeUndefined();
+
+    const team = await repos.teams.create({ name: 'Growth', instructions: 'Ship weekly.' });
+    expect((await repos.bots.update('bot_old', { teamId: team.id }))?.teamId).toBe(team.id);
+    expect(await repos.teams.remove(team.id)).toBe(true);
+    expect((await repos.bots.get('bot_old'))?.teamId).toBeUndefined();
+  });
+
+  it('adds routine runs and the catch-up and remember-last-run flags in place', async () => {
+    const { handle } = await tempDb();
+    const journal = JSON.parse(await readFile(join(migrationsFolder, 'meta', '_journal.json'), 'utf8')) as {
+      entries: Array<{ tag: string; when: number }>;
+    };
+    const applied = journal.entries.slice(0, 7);
+    if (applied.length !== 7 || applied[6]?.tag !== '0006_silly_puff_adder') {
+      throw new Error('journal must start with the 0000 to 0006 migrations');
+    }
+
+    for (const entry of applied) {
+      await handle.client.executeMultiple(await readFile(join(migrationsFolder, `${entry.tag}.sql`), 'utf8'));
+    }
+    await handle.client.execute(
+      'CREATE TABLE "__drizzle_migrations" ("id" INTEGER PRIMARY KEY AUTOINCREMENT, "hash" text NOT NULL, "created_at" numeric)',
+    );
+    for (const entry of applied) {
+      await handle.client.execute({
+        sql: 'INSERT INTO "__drizzle_migrations" ("hash", "created_at") VALUES (?, ?)',
+        args: [entry.tag, entry.when],
+      });
+    }
+    const stamp = '2026-10-19T10:00:00.000Z';
+    await handle.client.execute({
+      sql: `INSERT INTO bots (id, name, job, instructions, engine, computer, pinned, archived, created_at, updated_at)
+            VALUES ('bot_old', 'Ada', 'Researcher', '', 'mock', 'none', 0, 0, ?, ?)`,
+      args: [stamp, stamp],
+    });
+    await handle.client.execute({
+      sql: `INSERT INTO routines (id, bot_id, name, instruction, trigger, enabled, created_at, updated_at)
+            VALUES ('routine_old', 'bot_old', 'Daily', 'Summarize', '{"type":"cron","cron":"0 9 * * *"}', 1, ?, ?)`,
+      args: [stamp, stamp],
+    });
+
+    await migrate(handle.db);
+
+    expect(await tableNames(handle)).toContain('routine_runs');
+    expect(await columnNames(handle, 'routines')).toEqual(
+      expect.arrayContaining(['catch_up', 'remember_last_run']),
+    );
+    const repos = createRepos(handle.db);
+    const routine = await repos.routines.get('routine_old');
+    expect(routine).toMatchObject({ name: 'Daily', catchUp: true, rememberLastRun: false });
+
+    const run = await repos.routineRuns.create({
+      routineId: 'routine_old',
+      botId: 'bot_old',
+      threadId: (await repos.threads.create('bot_old', { title: 'Daily' })).id,
+      trigger: 'schedule',
+      status: 'running',
+    });
+    expect(run.status).toBe('running');
+    expect(await repos.routines.remove('routine_old')).toBe(true);
+    expect(await repos.routineRuns.get(run.id)).toBeUndefined();
   });
 
   it('enables foreign keys on the connection', async () => {

@@ -230,6 +230,13 @@ export function createHarness(deps: HarnessDeps): Harness {
     return { runId: run.id, settled };
   }
 
+  /** The bot's team and its shared brief, read once for this run. Absent for an ungrouped bot. */
+  async function teamFor(bot: Bot): Promise<BrotRunContext['team']> {
+    if (bot.teamId === undefined) return undefined;
+    const team = await repos.teams.get(bot.teamId);
+    return team === undefined ? undefined : { name: team.name, instructions: team.instructions };
+  }
+
   /**
    * Runs one run's engine turn. The turn's context is read here, not when the run was queued, so a queued run sees
    * what the run before it wrote. Its lane is released only after the engine has returned, so the engine never
@@ -268,7 +275,7 @@ export function createHarness(deps: HarnessDeps): Harness {
       const mcpServers = mcp
         ? [mcp.specForRun({ botId: bot.id, threadId: state.threadId, runId: state.runId }, place.brotBaseUrl)]
         : undefined;
-      const room = await roomFor(repos, thread);
+      const [room, team] = await Promise.all([roomFor(repos, thread), teamFor(bot)]);
       const ctx: BrotRunContext = {
         runId: state.runId,
         threadId: state.threadId,
@@ -284,6 +291,7 @@ export function createHarness(deps: HarnessDeps): Harness {
         ...(mcpServers === undefined ? {} : { mcpServers }),
         ...(llmRoute === undefined ? {} : { llm: llmRoute }),
         ...(room === undefined ? {} : { room }),
+        ...(team === undefined ? {} : { team }),
         ...(teamTools && mcpServers !== undefined ? { teamTools: true } : {}),
       };
       for await (const event of driver.run(ctx)) {

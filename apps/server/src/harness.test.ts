@@ -496,6 +496,44 @@ describe('contained runs: engine sessions', () => {
   });
 });
 
+describe('contained runs: team brief', () => {
+  it('gives a member bot\'s run its team name and brief, and no team to an ungrouped bot', async () => {
+    const engine = fakeEngine(replies);
+    const ctx = await contextWith({ engines: createEngineRegistry([engine.driver]) });
+    const team = await ctx.services.repos.teams.create({
+      name: 'Growth',
+      instructions: 'Ship one experiment a week.',
+    });
+    const member = await ctx.services.repos.bots.create({
+      name: 'Ada',
+      job: 'Testing',
+      engine: 'dsh',
+      computer: 'none',
+      model: 'fake/model-1',
+      teamId: team.id,
+    });
+    const memberThread = await ctx.services.repos.threads.create(member.id);
+    const ungrouped = await botAndThread(ctx, { computer: 'none' });
+
+    await runToEnd(ctx, memberThread.id);
+    await runToEnd(ctx, ungrouped.threadId);
+
+    expect(engine.contexts[0]).toMatchObject({ team: { name: 'Growth', instructions: 'Ship one experiment a week.' } });
+    expect(engine.contexts[1]).not.toHaveProperty('team');
+  });
+
+  it('gives no team when the bot names one that no longer exists', async () => {
+    const engine = fakeEngine(replies);
+    const ctx = await contextWith({ engines: createEngineRegistry([engine.driver]) });
+    const { bot, threadId } = await botAndThread(ctx, { computer: 'none' });
+    await ctx.services.repos.bots.update(bot.id, { teamId: 'team_deleted' });
+
+    await runToEnd(ctx, threadId);
+
+    expect(engine.contexts[0]).not.toHaveProperty('team');
+  });
+});
+
 describe('services shutdown', () => {
   it('closes engines and computer providers once, however often close is called', async () => {
     const engine = fakeEngine(replies);

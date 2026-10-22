@@ -166,7 +166,7 @@ export async function createServices(
     chains,
   });
   late.harness = harness;
-  const scheduler = createScheduler({ repos, harness });
+  const scheduler = createScheduler({ repos, harness, bus });
   const pairing = createPairing({ repos });
 
   let closing: Promise<void> | undefined;

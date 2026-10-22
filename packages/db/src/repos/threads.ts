@@ -79,6 +79,16 @@ export function createThreadRepo(db: Db) {
       return rows[0] ? toThread(rows[0]) : undefined;
     },
 
+    /** Renames a thread. A rename is user activity, so it also moves the thread in a bot's list. */
+    async setTitle(id: string, title: string): Promise<Thread | undefined> {
+      const rows = await db
+        .update(threads)
+        .set({ title, updatedAt: nowIso() })
+        .where(eq(threads.id, id))
+        .returning();
+      return rows[0] ? toThread(rows[0]) : undefined;
+    },
+
     async touch(id: string): Promise<Thread | undefined> {
       const rows = await db
         .update(threads)

@@ -9,9 +9,11 @@ import { createMessageRepo } from './messages';
 import { createPolicyRepo } from './policies';
 import { createRoomRepo } from './rooms';
 import { createRoutineRepo } from './routines';
+import { createRoutineRunRepo } from './routine-runs';
 import { createRunRepo } from './runs';
 import { createSkillRepo } from './skills';
 import { createTaskRepo } from './tasks';
+import { createTeamRepo } from './teams';
 import { createThreadRepo } from './threads';
 import { createThreadSessionRepo } from './thread-sessions';
 
@@ -27,11 +29,13 @@ export function createRepos(db: Db) {
     skills: createSkillRepo(db),
     computers: createComputerRepo(db),
     routines: createRoutineRepo(db),
+    routineRuns: createRoutineRunRepo(db),
     devices: createDeviceRepo(db),
     events: createEventRepo(db),
     rooms: createRoomRepo(db),
     threadSessions: createThreadSessionRepo(db),
     tasks: createTaskRepo(db),
+    teams: createTeamRepo(db),
   };
 }
 
@@ -41,5 +45,6 @@ export type { CreateApprovalInput } from './approvals';
 export type { CreateMessageInput } from './messages';
 export type { CreateDeviceInput } from './devices';
 export type { RoutineScheduleUpdate } from './routines';
+export type { CreateRoutineRunInput, RoutineRunFilter, RoutineRunPatch } from './routine-runs';
 export type { RunPatch } from './runs';
 export type { TaskFilter } from './tasks';

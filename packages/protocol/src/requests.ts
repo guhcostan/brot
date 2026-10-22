@@ -40,6 +40,7 @@ export const CreateBot = z
     desktop: z.boolean().optional(),
     browser: z.boolean().default(false),
     avatar: z.string().optional(),
+    teamId: z.string().min(1).optional(),
     egress: EgressPolicy.default(defaultEgressPolicy),
     teamBudgetUsd: z.number().nonnegative().optional(),
     hostAcknowledged: z.boolean().optional(),
@@ -59,6 +60,8 @@ export const UpdateBot = z
     computer: ComputerKind.optional(),
     desktop: z.boolean().optional(),
     browser: z.boolean().optional(),
+    /** `null` removes the bot from its team. */
+    teamId: z.string().min(1).nullable().optional(),
     egress: EgressPolicy.optional(),
     /** `null` removes the cap. */
     teamBudgetUsd: z.number().nonnegative().nullable().optional(),
@@ -69,10 +72,32 @@ export const UpdateBot = z
   .superRefine(requireHostAcknowledgement);
 export type UpdateBot = z.infer<typeof UpdateBot>;
 
+/** A named group of bots with a shared brief. `instructions` is empty unless given. */
+export const CreateTeam = z.object({
+  name: z.string().min(1),
+  instructions: z.string().default(''),
+  chiefBotId: z.string().min(1).optional(),
+});
+export type CreateTeam = z.infer<typeof CreateTeam>;
+export type CreateTeamInput = z.input<typeof CreateTeam>;
+
+export const UpdateTeam = z.object({
+  name: z.string().min(1).optional(),
+  instructions: z.string().optional(),
+  /** `null` removes the chief. */
+  chiefBotId: z.string().min(1).nullable().optional(),
+});
+export type UpdateTeam = z.infer<typeof UpdateTeam>;
+
 export const CreateThread = z.object({
   title: z.string().min(1).optional(),
 });
 export type CreateThread = z.infer<typeof CreateThread>;
+
+export const UpdateThread = z.object({
+  title: z.string().min(1).max(120),
+});
+export type UpdateThread = z.infer<typeof UpdateThread>;
 
 /** Rejects a bot list that names the same bot twice. */
 function requireUniqueBots(bots: string[], ctx: z.RefinementCtx, path: string[]): void {
@@ -227,6 +252,10 @@ export const CreateRoutine = z.object({
   instruction: z.string(),
   trigger: RoutineTrigger,
   enabled: z.boolean().default(true),
+  /** Fire one missed occurrence (within 12h) after downtime. */
+  catchUp: z.boolean().default(true),
+  /** Prepend the last completed run's result to the instruction. */
+  rememberLastRun: z.boolean().default(false),
 });
 export type CreateRoutine = z.infer<typeof CreateRoutine>;
 export type CreateRoutineInput = z.input<typeof CreateRoutine>;
@@ -236,6 +265,8 @@ export const UpdateRoutine = z.object({
   instruction: z.string().optional(),
   trigger: RoutineTrigger.optional(),
   enabled: z.boolean().optional(),
+  catchUp: z.boolean().optional(),
+  rememberLastRun: z.boolean().optional(),
 });
 export type UpdateRoutine = z.infer<typeof UpdateRoutine>;
 

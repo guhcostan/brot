@@ -120,6 +120,68 @@ describe('bots', () => {
   });
 });
 
+describe('teams', () => {
+  it('creates, lists, updates and removes teams', async () => {
+    const growth = await repos.teams.create({ name: 'Growth', instructions: 'Ship one experiment a week.' });
+    expect(growth).toMatchObject({ name: 'Growth', instructions: 'Ship one experiment a week.' });
+    expect(growth.chiefBotId).toBeUndefined();
+
+    const ada = await repos.bots.create({ name: 'Ada', job: 'x' });
+    const ops = await repos.teams.create({ name: 'Ops', chiefBotId: ada.id });
+    expect(ops.chiefBotId).toBe(ada.id);
+    expect(ops.instructions).toBe('');
+    expect((await repos.teams.list()).map((team) => team.name)).toEqual(['Growth', 'Ops']);
+    expect(await repos.teams.get(ops.id)).toEqual(ops);
+
+    const updated = await repos.teams.update(ops.id, {
+      name: 'Operations',
+      instructions: 'Keep it running.',
+      chiefBotId: null,
+    });
+    expect(updated).toMatchObject({ name: 'Operations', instructions: 'Keep it running.' });
+    expect(updated?.chiefBotId).toBeUndefined();
+    expect((updated?.updatedAt ?? '') >= ops.updatedAt).toBe(true);
+    expect(await repos.teams.update('missing', { name: 'x' })).toBeUndefined();
+
+    expect(await repos.teams.remove(ops.id)).toBe(true);
+    expect(await repos.teams.remove(ops.id)).toBe(false);
+    expect(await repos.teams.get(ops.id)).toBeUndefined();
+  });
+
+  it('stores a bot team, and a new bot has none', async () => {
+    const team = await repos.teams.create({ name: 'Growth' });
+    const grouped = await repos.bots.create({ name: 'Ada', job: 'x', teamId: team.id });
+    expect(grouped.teamId).toBe(team.id);
+    expect((await repos.bots.get(grouped.id))?.teamId).toBe(team.id);
+    expect((await repos.bots.list()).find((bot) => bot.id === grouped.id)?.teamId).toBe(team.id);
+
+    expect((await repos.bots.update(grouped.id, { teamId: null }))?.teamId).toBeUndefined();
+    expect((await repos.bots.update(grouped.id, { teamId: team.id }))?.teamId).toBe(team.id);
+    expect((await repos.bots.create({ name: 'Grace', job: 'x' })).teamId).toBeUndefined();
+  });
+
+  it('ungroups its bots when a team is deleted, and never deletes them', async () => {
+    const team = await repos.teams.create({ name: 'Growth' });
+    const grouped = await repos.bots.create({ name: 'Ada', job: 'x', teamId: team.id });
+    const other = await repos.bots.create({ name: 'Grace', job: 'x' });
+
+    expect(await repos.teams.remove(team.id)).toBe(true);
+
+    expect(await repos.bots.get(grouped.id)).toMatchObject({ id: grouped.id, name: 'Ada' });
+    expect((await repos.bots.get(grouped.id))?.teamId).toBeUndefined();
+    expect((await repos.bots.get(other.id))?.teamId).toBeUndefined();
+  });
+
+  it('clears the chief when the chief bot is deleted', async () => {
+    const chief = await repos.bots.create({ name: 'Ada', job: 'x' });
+    const team = await repos.teams.create({ name: 'Growth', chiefBotId: chief.id });
+
+    await repos.bots.remove(chief.id);
+
+    expect((await repos.teams.get(team.id))?.chiefBotId).toBeUndefined();
+  });
+});
+
 describe('threads', () => {
   it('creates threads with a default title and lists them per bot', async () => {
     const bot = await repos.bots.create({ name: 'Ada', job: 'x' });
@@ -133,6 +195,14 @@ describe('threads', () => {
     expect((await repos.threads.listByBot(bot.id)).map((t) => t.id).sort()).toEqual(
       [named.id, untitled.id].sort(),
     );
+  });
+
+  it('renames a thread and bumps updatedAt', async () => {
+    const { thread } = await seed();
+    const renamed = await repos.threads.setTitle(thread.id, 'Launch plan');
+    expect(renamed).toMatchObject({ id: thread.id, title: 'Launch plan' });
+    expect((renamed?.updatedAt ?? '') >= thread.updatedAt).toBe(true);
+    expect(await repos.threads.setTitle('missing', 'x')).toBeUndefined();
   });
 
   it('touch bumps updatedAt', async () => {
@@ -380,6 +450,123 @@ describe('routines', () => {
     });
     expect(updated).toMatchObject({ enabled: false, trigger: { type: 'cron', cron: '0 10 * * *' }, nextRunAt: when, name: 'Daily' });
     expect(await repos.routines.remove(routine.id)).toBe(true);
+  });
+
+  it('stores a timezone, defaults catch-up on, and remembers the last run when asked', async () => {
+    const { bot } = await seed();
+    const routine = await repos.routines.create({
+      botId: bot.id,
+      name: 'Daily',
+      instruction: 'Summarize',
+      trigger: { type: 'cron', cron: '0 9 * * *', timezone: 'America/Sao_Paulo' },
+    });
+    expect(routine).toMatchObject({
+      catchUp: true,
+      rememberLastRun: false,
+      trigger: { type: 'cron', cron: '0 9 * * *', timezone: 'America/Sao_Paulo' },
+    });
+
+    const updated = await repos.routines.update(routine.id, { catchUp: false, rememberLastRun: true });
+    expect(updated).toMatchObject({ catchUp: false, rememberLastRun: true });
+    expect(await repos.routines.get(routine.id)).toMatchObject({ catchUp: false, rememberLastRun: true });
+  });
+});
+
+describe('routine runs', () => {
+  async function seedRoutine() {
+    const { bot } = await seed();
+    const routine = await repos.routines.create({
+      botId: bot.id,
+      name: 'Daily',
+      instruction: 'Summarize',
+      trigger: { type: 'cron', cron: '0 9 * * *' },
+    });
+    const thread = await repos.threads.create(bot.id, { title: 'Daily' });
+    return { bot, routine, thread };
+  }
+
+  it('stores runs newest first and filters them by routine, bot, status, and limit', async () => {
+    const { bot, routine, thread } = await seedRoutine();
+    const first = await repos.routineRuns.create({
+      routineId: routine.id,
+      botId: bot.id,
+      threadId: thread.id,
+      trigger: 'schedule',
+      startedAt: '2026-10-20T09:00:00.000Z',
+    });
+    const second = await repos.routineRuns.create({
+      routineId: routine.id,
+      botId: bot.id,
+      threadId: thread.id,
+      trigger: 'manual',
+      startedAt: '2026-10-21T09:00:00.000Z',
+    });
+    expect(first).toMatchObject({ status: 'running', routineId: routine.id, threadId: thread.id });
+    expect(first.endedAt).toBeUndefined();
+
+    expect((await repos.routineRuns.listByRoutine(routine.id)).map((r) => r.id)).toEqual([second.id, first.id]);
+    expect((await repos.routineRuns.listByRoutine(routine.id, { limit: 1 })).map((r) => r.id)).toEqual([second.id]);
+    expect((await repos.routineRuns.list({ botId: bot.id })).map((r) => r.id)).toEqual([second.id, first.id]);
+    expect((await repos.routineRuns.list({ status: 'running' })).map((r) => r.id)).toEqual([second.id, first.id]);
+    expect(await repos.routineRuns.list({ status: 'completed' })).toEqual([]);
+  });
+
+  it('tracks active runs and the latest completed one', async () => {
+    const { bot, routine, thread } = await seedRoutine();
+    expect(await repos.routineRuns.activeByRoutine(routine.id)).toEqual([]);
+    expect(await repos.routineRuns.latestCompleted(routine.id)).toBeUndefined();
+
+    const queued = await repos.routineRuns.create({
+      routineId: routine.id,
+      botId: bot.id,
+      threadId: thread.id,
+      trigger: 'webhook',
+      status: 'queued',
+    });
+    const completed = await repos.routineRuns.create({
+      routineId: routine.id,
+      botId: bot.id,
+      threadId: thread.id,
+      trigger: 'manual',
+      startedAt: '2026-10-20T09:00:00.000Z',
+    });
+    const linked = await repos.routineRuns.update(completed.id, {
+      status: 'completed',
+      endedAt: '2026-10-20T09:01:00.000Z',
+      result: 'All quiet.',
+    });
+    expect(linked).toMatchObject({ status: 'completed', endedAt: '2026-10-20T09:01:00.000Z', result: 'All quiet.' });
+
+    expect((await repos.routineRuns.activeByRoutine(routine.id)).map((r) => r.id)).toEqual([queued.id]);
+    expect((await repos.routineRuns.latestCompleted(routine.id))?.id).toBe(completed.id);
+  });
+
+  it('links the engine run and clears the link when that run is deleted', async () => {
+    const { bot, routine, thread } = await seedRoutine();
+    const engineRun = await repos.runs.create({ threadId: thread.id, botId: bot.id, engine: 'mock' });
+    const run = await repos.routineRuns.create({
+      routineId: routine.id,
+      botId: bot.id,
+      threadId: thread.id,
+      trigger: 'schedule',
+      runId: engineRun.id,
+    });
+    expect(run.runId).toBe(engineRun.id);
+
+    await handle.client.execute({ sql: 'DELETE FROM runs WHERE id = ?', args: [engineRun.id] });
+    expect((await repos.routineRuns.get(run.id))?.runId).toBeUndefined();
+  });
+
+  it('deletes a routine runs with it', async () => {
+    const { bot, routine, thread } = await seedRoutine();
+    const run = await repos.routineRuns.create({
+      routineId: routine.id,
+      botId: bot.id,
+      threadId: thread.id,
+      trigger: 'manual',
+    });
+    expect(await repos.routines.remove(routine.id)).toBe(true);
+    expect(await repos.routineRuns.get(run.id)).toBeUndefined();
   });
 });
 

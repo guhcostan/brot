@@ -1,6 +1,6 @@
 import type { Message } from '@brot/protocol';
 import { describe, expect, it } from 'vitest';
-import { buildPrompt, HISTORY_LIMIT, sessionInput, type PromptRoom } from './prompt';
+import { buildPrompt, HISTORY_LIMIT, sessionInput, type PromptRoom, type PromptTeam } from './prompt';
 import { testBot } from './test-utils';
 
 const AT = '2026-10-19T12:00:00.000Z';
@@ -9,6 +9,8 @@ const IDENTITY = 'You are Test bot, Testing. You are a bot in Brot, working for 
 function message(index: number, role: Message['role'], content: string): Message {
   return { id: `m${index}`, threadId: 'thread_1', role, content, createdAt: AT };
 }
+
+const growthTeam: PromptTeam = { name: 'Growth', instructions: 'Ship one experiment a week.' };
 
 const room: PromptRoom = {
   title: 'Launch',
@@ -81,6 +83,40 @@ describe('buildPrompt', () => {
     });
     expect(prompt).toContain('Responders: only the members mentioned with @name answer.');
     expect(prompt).not.toContain('Lead:');
+  });
+
+  it('names the bot\'s team and its shared brief after the instructions', () => {
+    const prompt = buildPrompt({
+      bot: { ...testBot, instructions: 'Be brief.' },
+      memories: [],
+      history: [],
+      input: 'go',
+      team: growthTeam,
+    });
+
+    expect(prompt).toBe(
+      [
+        IDENTITY,
+        'Instructions:\nBe brief.',
+        'Team: Growth\nShip one experiment a week.',
+        'Current message:\ngo',
+      ].join('\n\n'),
+    );
+    expect(prompt.indexOf('Instructions:')).toBeLessThan(prompt.indexOf('Team: Growth'));
+  });
+
+  it('names a team without a brief and leaves the section out when the bot has no team', () => {
+    const named = buildPrompt({ bot: testBot, memories: [], history: [], input: 'go', team: { name: 'Ops', instructions: '  ' } });
+    expect(named).toContain('Team: Ops\n\nCurrent message:');
+    expect(named).not.toContain('Ship one experiment');
+
+    const plain = buildPrompt({ bot: testBot, memories: [], history: [], input: 'go' });
+    expect(plain).not.toContain('Team:');
+  });
+
+  it('puts the team before the room section', () => {
+    const prompt = buildPrompt({ bot: testBot, memories: [], history: [], input: 'go', team: growthTeam, room });
+    expect(prompt.indexOf('Team: Growth')).toBeLessThan(prompt.indexOf('Room "Launch".'));
   });
 
   it('adds team guidance only when the team tools are attached', () => {

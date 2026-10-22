@@ -11,10 +11,12 @@ import {
   ResponderMode,
   RoomMember,
   Routine,
+  RoutineRun,
   Run,
   Skill,
   Task,
   TaskStatus,
+  Team,
   Thread,
   ThreadKind,
 } from './entities';
@@ -107,17 +109,68 @@ describe('entity schemas', () => {
       createdAt: at,
       updatedAt: at,
     };
+    const localized = {
+      ...cron,
+      id: 'rt3',
+      trigger: { type: 'cron', cron: '0 9 * * *', timezone: 'America/Sao_Paulo' },
+      catchUp: true,
+      rememberLastRun: true,
+    };
     const webhook = { ...cron, id: 'rt2', trigger: { type: 'webhook', secret: 's3cret' } };
     const device = { id: 'd1', name: 'Phone', role: 'approver', publicKey: 'pk', createdAt: at };
     expect(roundTrip(Routine, cron)).toEqual(cron);
+    expect(roundTrip(Routine, localized)).toEqual(localized);
     expect(roundTrip(Routine, webhook)).toEqual(webhook);
     expect(roundTrip(Device, device)).toEqual(device);
+  });
+
+  it('round-trips a routine run and rejects unknown statuses and triggers', () => {
+    const run = {
+      id: 'rr1',
+      routineId: 'rt1',
+      botId: 'bot_1',
+      threadId: 't1',
+      runId: 'r1',
+      trigger: 'schedule',
+      status: 'completed',
+      result: 'Done.',
+      startedAt: at,
+      endedAt: at,
+      createdAt: at,
+    };
+    expect(roundTrip(RoutineRun, run)).toEqual(run);
+    expect(() => RoutineRun.parse({ ...run, status: 'paused' })).toThrow();
+    expect(() => RoutineRun.parse({ ...run, trigger: 'timer' })).toThrow();
+    expect(RoutineRun.parse({ ...run, runId: undefined, result: undefined, endedAt: undefined }).runId).toBeUndefined();
   });
 
   it('round-trips a bot with a host browser flag', () => {
     const withBrowser = { ...bot, browser: true };
     expect(roundTrip(Bot, withBrowser)).toEqual(withBrowser);
     expect(Bot.parse(bot).browser).toBeUndefined();
+  });
+
+  it('round-trips a bot grouped in a team', () => {
+    const grouped = { ...bot, teamId: 'team_1' };
+    expect(roundTrip(Bot, grouped)).toEqual(grouped);
+    expect(Bot.parse(bot).teamId).toBeUndefined();
+  });
+
+  it('round-trips a team with and without a chief, and rejects a malformed one', () => {
+    const team = {
+      id: 'team_1',
+      name: 'Growth',
+      instructions: 'Ship one experiment a week.',
+      chiefBotId: 'bot_1',
+      createdAt: at,
+      updatedAt: at,
+    };
+    expect(roundTrip(Team, team)).toEqual(team);
+    const bare = { id: 'team_2', name: 'Ops', instructions: '', createdAt: at, updatedAt: at };
+    expect(roundTrip(Team, bare)).toEqual(bare);
+    expect(Team.parse(bare)).not.toHaveProperty('chiefBotId');
+    expect(() => Team.parse({ ...team, name: 1 })).toThrow();
+    expect(() => Team.parse({ ...team, updatedAt: 'yesterday' })).toThrow();
   });
 
   it('round-trips a bot with an egress policy and a thread with an engine session', () => {

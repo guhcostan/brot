@@ -13,6 +13,7 @@ export function toBot(row: BotRow): Bot {
     job: row.job,
     instructions: row.instructions,
     avatar: row.avatar ?? undefined,
+    teamId: row.teamId ?? undefined,
     engine: row.engine,
     model: row.model ?? undefined,
     computer: row.computer,
