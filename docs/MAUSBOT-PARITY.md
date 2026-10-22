@@ -73,7 +73,7 @@ Legend: ✅ parity or better · 🟡 partial · ❌ absent · 🎯 current wave.
 | Host browser (My Chrome) attach | ✅ | ❌ | W5 |
 | Saved logins vault + `fill_login` | ✅ | ✅ vault-backed logins with a Settings UI, host-gated fill_login with TOTP | W7 done |
 | Connected apps (Composio marketplace) + per-bot tool grants | ✅ | ❌ | W3 |
-| Custom MCP servers (stdio/HTTP, per-bot) | ✅ | ✅ stdio/HTTP servers with vault secrets, handshake test and Settings panel; per-bot grants pending | W5 done |
+| Custom MCP servers (stdio/HTTP, per-bot) | ✅ | ✅ stdio/HTTP servers with vault secrets, handshake test, Settings panel and per-bot grants | W5 done |
 | Approval levels per bot/thread + decision log | ✅ | 🟡 per-bot ask/edits modes with an irreversible safety floor; decision log/export next | W6 |
 | Routines: cron/weekday with timezone, receipts, recovery, calendar | ✅ | ✅ runs, receipts, catch-up, timezone, routines page; calendar next | W3 done |
 | Webhook triggers | ✅ | 🟡 receiver exists, no signed secret UX | W6 |

@@ -364,6 +364,18 @@ mapped in `docs/MAUSBOT-PARITY.md` (34 bots / 7 teams, 33 bots with a browser an
 - Verified live: a workspace fact "the secret code is JABUTICABA" made a DSH run answer JABUTICABA while the
   bot's own memory list stayed empty.
 - Suite: 2205 tests (226 files), typecheck 12/12, lint clean.
+## Wave 26: per-bot MCP server grants (2026-10-22)
+
+- **Grants.** A bot can pick which saved MCP servers it sees: `mcpServerIds` is an allowlist (absent/null =
+  every enabled server, previous behaviour; [] = none; unknown/deleted ids ignored and pruned from the API
+  on read). Brot's own MCP server always attaches. Migration 0017 adds bots.mcp_server_ids; POST/PATCH
+  /api/bots validate named ids and return 400 listing unknown ones. The bot dialog gains an MCP servers
+  fieldset (Every enabled server / Choose servers with checkboxes, disabled servers dimmed and excluded,
+  Settings link when empty, note when none ticked), create/patch-only-when-changed. en/pt-BR/es.
+- **Fix:** memory listing is now deterministic (rowid tie-break), removing a flaky workspace-caps harness test.
+- Verified live: create with one grant, [] and two-id patches, deleting a granted server pruned it from the
+  bot, unknown id 400.
+- Suite: 2237 tests (229 files), typecheck 12/12, lint clean.
 ## Next
 
 1. Re-run the eval suite on a live model once OpenCode Go has quota (`apps/evals`, `--base` to the server), including B8 and C; the 2026-10-20 results predate the read auto-allow and the fixes above.
