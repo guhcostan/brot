@@ -1735,5 +1735,121 @@ export function createMockClient(): BrotClient {
         skills: pkg.skills.length,
       };
     },
+    async getToday(filter = {}) {
+      const to = filter.to ?? now();
+      const from = filter.from ?? new Date(new Date(to).setHours(0, 0, 0, 0)).toISOString();
+      const pendingApprovals = [...approvals.values()].filter((entry) => entry.approval.status === 'pending').length;
+      const routineStatuses = [...routineRuns.values()].flat();
+      const routineCounts = {
+        completed: routineStatuses.filter((run) => run.status === 'completed').length,
+        failed: routineStatuses.filter((run) => run.status === 'failed').length,
+        skipped: routineStatuses.filter((run) => run.status === 'skipped').length,
+        running: routineStatuses.filter((run) => run.status === 'running' || run.status === 'queued').length,
+      };
+      const byBot = [
+        { botId: 'bot_capy', name: 'Capy', runs: 7, completed: 7, failed: 0, tokensIn: 74_000, tokensOut: 21_000, costUsd: 0.1932 },
+        { botId: 'bot_onca', name: 'Onça', runs: 5, completed: 3, failed: 2, tokensIn: 48_000, tokensOut: 14_000, costUsd: 0.1284 },
+        { botId: 'bot_tuca', name: 'Tuca', runs: 3, completed: 3, failed: 0, tokensIn: 32_000, tokensOut: 9_000, costUsd: 0.0912 },
+        { botId: 'bot_tamu', name: 'Tamu', runs: 3, completed: 2, failed: 0, tokensIn: 30_320, tokensOut: 8_880, costUsd: 0.0693 },
+      ];
+      const totals = byBot.reduce(
+        (sum, bot) => ({
+          runs: sum.runs + bot.runs,
+          completed: sum.completed + bot.completed,
+          failed: sum.failed + bot.failed,
+          cancelled: sum.cancelled,
+          tokensIn: sum.tokensIn + bot.tokensIn,
+          tokensOut: sum.tokensOut + bot.tokensOut,
+          costUsd: Number((sum.costUsd + bot.costUsd).toFixed(4)),
+        }),
+        { runs: 0, completed: 0, failed: 0, cancelled: 1, tokensIn: 0, tokensOut: 0, costUsd: 0 },
+      );
+      const highlight = (botId: string, botName: string, text: string, agoMs: number) => ({
+        botId,
+        botName,
+        threadId: dmThreadOf(botId),
+        text,
+        at: new Date(Date.now() - agoMs).toISOString(),
+      });
+      return {
+        from,
+        to,
+        totals,
+        byBot,
+        routines: routineCounts,
+        pendingApprovals,
+        highlights: [
+          highlight('bot_capy', 'Capy', 'Three things today: finish the renewal notes, review the export fix, and send Tuca the pricing update.', 20 * 60_000),
+          highlight('bot_onca', 'Onça', 'The export fix is in review, and two tests still fail on the row limit. Want me to take the last one?', 2 * 3_600_000),
+          highlight('bot_tuca', 'Tuca', 'Sent the renewal follow-up to Ana and flagged the export fix as the open item before the call.', 5 * 3_600_000),
+        ],
+      };
+    },
+
+    async getUsage(filter = {}) {
+      const to = filter.to ?? now();
+      const from = filter.from ?? new Date(Date.parse(to) - 30 * 24 * 3_600_000).toISOString();
+      const group = filter.group ?? 'day';
+      const usageBots = [
+        { key: 'bot_capy', label: 'Capy', runs: 42, completed: 39, failed: 2, cancelled: 1, tokensIn: 420_000, tokensOut: 118_000, costUsd: 1.0864 },
+        { key: 'bot_onca', label: 'Onça', runs: 31, completed: 27, failed: 3, cancelled: 1, tokensIn: 298_000, tokensOut: 82_000, costUsd: 0.7688 },
+        { key: 'bot_tuca', label: 'Tuca', runs: 18, completed: 18, failed: 0, cancelled: 0, tokensIn: 164_000, tokensOut: 47_000, costUsd: 0.4372 },
+        { key: 'bot_tamu', label: 'Tamu', runs: 14, completed: 13, failed: 1, cancelled: 0, tokensIn: 126_000, tokensOut: 38_000, costUsd: 0.3414 },
+      ];
+      const botGroups = usageBots.map((bot) => ({
+        key: bot.key,
+        label: bot.label,
+        totals: {
+          runs: bot.runs,
+          completed: bot.completed,
+          failed: bot.failed,
+          cancelled: bot.cancelled,
+          tokensIn: bot.tokensIn,
+          tokensOut: bot.tokensOut,
+          costUsd: bot.costUsd,
+        },
+      }));
+      const days = 7;
+      const dayGroups = Array.from({ length: days }, (_entry, index) => {
+        const key = new Date(Date.parse(to) - (days - 1 - index) * 24 * 3_600_000).toISOString().slice(0, 10);
+        const runs = 6 + (index % 3) * 2;
+        return {
+          key,
+          totals: {
+            runs,
+            completed: runs - 1,
+            failed: index % 4 === 0 ? 1 : 0,
+            cancelled: 0,
+            tokensIn: runs * 2_400,
+            tokensOut: runs * 680,
+            costUsd: Number((runs * 0.0271).toFixed(4)),
+          },
+        };
+      });
+      const selected = filter.botId === undefined ? (group === 'day' ? dayGroups : botGroups) : botGroups.filter((entry) => entry.key === filter.botId);
+      const totals = selected.reduce(
+        (sum, entry) => ({
+          runs: sum.runs + entry.totals.runs,
+          completed: sum.completed + entry.totals.completed,
+          failed: sum.failed + entry.totals.failed,
+          cancelled: sum.cancelled + entry.totals.cancelled,
+          tokensIn: sum.tokensIn + entry.totals.tokensIn,
+          tokensOut: sum.tokensOut + entry.totals.tokensOut,
+          costUsd: Number((sum.costUsd + entry.totals.costUsd).toFixed(4)),
+        }),
+        { runs: 0, completed: 0, failed: 0, cancelled: 0, tokensIn: 0, tokensOut: 0, costUsd: 0 },
+      );
+      return { from, to, totals, groups: selected.map((entry) => structuredClone(entry)) };
+    },
+
+    usageExportUrl(filter = {}) {
+      const query = new URLSearchParams();
+      if (filter.from !== undefined) query.set('from', filter.from);
+      if (filter.to !== undefined) query.set('to', filter.to);
+      if (filter.botId !== undefined) query.set('botId', filter.botId);
+      const suffix = query.size === 0 ? '' : `?${query.toString()}`;
+      return `/api/usage/export.csv${suffix}`;
+    },
+
   };
 }

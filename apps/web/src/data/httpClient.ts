@@ -40,6 +40,7 @@ import {
   Task,
   Team,
   Thread,
+  TodaySummary,
   UpdateBot,
   UpdateBrowserProfile,
   UpdateMcpServer,
@@ -50,6 +51,7 @@ import {
   UpdateTask,
   UpdateTeam,
   UpdateThread,
+  UsageSummary,
   DESKTOP_HEIGHT,
   DESKTOP_WIDTH,
   type CanonicalEventType,
@@ -66,6 +68,8 @@ import {
   type RoutineRunFilter,
   type RoutineRunStarted,
   type TeamPackageImportCounts,
+  type TodayFilter,
+  type UsageFilter,
   type TaskFilter,
 } from './client';
 
@@ -733,6 +737,21 @@ export function createHttpClient({
       const response = await write('POST', '/api/team-packages/import', body);
       return parseImportCounts(await response.json());
     },
+
+    getToday(filter: TodayFilter = {}) {
+      const suffix = querySuffix({ from: filter.from, to: filter.to, tz: filter.tz });
+      return read(`/api/today${suffix}`, TodaySummary);
+    },
+
+    getUsage(filter: UsageFilter = {}) {
+      const suffix = querySuffix({ from: filter.from, to: filter.to, botId: filter.botId, group: filter.group });
+      return read(`/api/usage${suffix}`, UsageSummary);
+    },
+
+    usageExportUrl(filter: Omit<UsageFilter, 'group'> = {}) {
+      const suffix = querySuffix({ from: filter.from, to: filter.to, botId: filter.botId });
+      return `${root}/api/usage/export.csv${suffix}`;
+    },
   };
 }
 
@@ -795,6 +814,13 @@ export function parseComputerInfo(value: unknown): ComputerInfo {
     height: size(value.height, DESKTOP_HEIGHT),
     takeover: value.takeover == null ? null : Takeover.parse(value.takeover),
   };
+}
+
+/** A query string for the optional filters, or '' when every one is absent. */
+function querySuffix(values: Readonly<Record<string, string | undefined>>): string {
+  const query = new URLSearchParams();
+  for (const [name, value] of Object.entries(values)) if (value !== undefined) query.set(name, value);
+  return query.size === 0 ? '' : `?${query.toString()}`;
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;

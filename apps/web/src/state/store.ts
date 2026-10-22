@@ -20,6 +20,7 @@ export type Selection =
   | { kind: 'approvals' }
   | { kind: 'notifications' }
   | { kind: 'routines' }
+  | { kind: 'insights' }
   | { kind: 'settings' };
 
 export interface AppState {

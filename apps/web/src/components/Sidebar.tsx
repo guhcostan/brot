@@ -5,7 +5,7 @@ import type { Room } from '../data/client';
 import { avatarOf } from '../format';
 import { t, type Locale } from '../i18n';
 import type { Selection } from '../state/store';
-import { Bell, Board, ChevronRight, Clock, Gear, Inbox, Pencil, Plus } from './icons';
+import { Bell, Board, Chart, ChevronRight, Clock, Gear, Inbox, Pencil, Plus } from './icons';
 import { useLiveMood } from './mood';
 import { memberSummary } from './RoomView';
 import { botStatusLabel } from './taskLabels';
@@ -255,6 +255,17 @@ export function Sidebar({
             <Clock />
           </span>
           <span className="flex-1 text-base font-medium text-ink">{t('routines.title')}</span>
+        </button>
+        <button
+          type="button"
+          aria-current={selection?.kind === 'insights' ? 'true' : undefined}
+          onClick={() => onSelect({ kind: 'insights' })}
+          className={cx(rowClass, 'py-1.5')}
+        >
+          <span className="flex size-8 flex-none items-center justify-center text-ink">
+            <Chart />
+          </span>
+          <span className="flex-1 text-base font-medium text-ink">{t('insights.title')}</span>
         </button>
         </div>
 

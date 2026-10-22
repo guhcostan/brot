@@ -92,6 +92,13 @@ export const FileDoc = ({ size }: { size?: number }) => (
   </Icon>
 );
 
+/** Three bars: the insights page. */
+export const Chart = ({ size }: { size?: number }) => (
+  <Icon size={size}>
+    <path d="M4 16.25V10M10 16.25V4.25M16 16.25V7.5" />
+  </Icon>
+);
+
 /** A bell: the notification inbox. */
 export const Bell = ({ size }: { size?: number }) => (
   <Icon size={size}>

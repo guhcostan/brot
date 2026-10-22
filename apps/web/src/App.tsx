@@ -9,6 +9,7 @@ import { Close, Plus } from './components/icons';
 import { NewRoomDialog } from './components/NewRoomDialog';
 import { NotificationsView } from './components/NotificationsView';
 import { RoomView } from './components/RoomView';
+import { InsightsView } from './components/InsightsView';
 import { RoutinesView } from './components/RoutinesView';
 import { SettingsView } from './components/SettingsView';
 import { Sidebar } from './components/Sidebar';
@@ -252,6 +253,14 @@ export function App(): ReactElement {
     );
   } else if (selection?.kind === 'routines') {
     main = <RoutinesView bots={state.bots} onOpenBots={openBots} onNewBot={newBot} />;
+  } else if (selection?.kind === 'insights') {
+    main = (
+      <InsightsView
+        onOpenBots={openBots}
+        onOpenApprovals={() => goTo({ kind: 'approvals' })}
+        onOpenBot={(botId) => void openBotPane(botId)}
+      />
+    );
   } else if (selection?.kind === 'settings') {
     main = <SettingsView locale={locale} onLocaleChange={changeLocale} theme={theme} onThemeChange={changeTheme} onOpenBots={openBots} />;
   } else if (room) {
@@ -313,6 +322,7 @@ export function App(): ReactElement {
     selection?.kind === 'approvals' ||
     selection?.kind === 'notifications' ||
     selection?.kind === 'routines' ||
+    selection?.kind === 'insights' ||
     selection?.kind === 'settings';
   const taskRoom = room ? { id: room.thread.id, title: room.thread.title, memberIds: membersOf(state, room.thread.id) } : undefined;
   const noticeVisible = notice !== null && !(selection !== null && selectionKey(selection) === selectionKey(notice.selection) && (wide || pane === 'context'));

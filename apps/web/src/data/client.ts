@@ -34,6 +34,9 @@ import type {
   TaskStatus,
   Team,
   Thread,
+  TodaySummary,
+  UsageGrouping,
+  UsageSummary,
   UpdateBot,
   UpdateBrowserProfile,
   UpdateMcpServer,
@@ -67,11 +70,20 @@ export type {
   RoutineRunStatus,
   SetBrowserTakeover,
   Skill,
+  TodayBot,
+  TodayHighlight,
+  TodayRoutines,
+  TodaySummary,
+  TodayTotals,
   UpdateBrowserProfile,
   UpdateMcpServer,
   UpdateMemory,
   UpdateRoutine,
   UpdateSkill,
+  UsageGroup,
+  UsageGrouping,
+  UsageSummary,
+  UsageTotals,
 } from '@brot/protocol';
 export type { Team } from '@brot/protocol';
 
@@ -153,6 +165,21 @@ export interface TeamPackageImportCounts {
   rooms: number;
   routines: number;
   skills: number;
+}
+
+/** The window behind `GET /api/today`. Without bounds the server uses local midnight in `tz`. */
+export interface TodayFilter {
+  from?: string;
+  to?: string;
+  tz?: string;
+}
+
+/** The window and grouping behind `GET /api/usage`. */
+export interface UsageFilter {
+  from?: string;
+  to?: string;
+  botId?: string;
+  group?: UsageGrouping;
 }
 
 export interface ProviderModel {
@@ -331,4 +358,11 @@ export interface BrotClient {
   exportTeamPackage(teamId?: string): Promise<TeamPackageExport>;
   /** Imports a package previously produced by the export, or hand-written in the same format. */
   importTeamPackage(content: string): Promise<TeamPackageImportCounts>;
+
+  /** The Today summary: totals, per-bot shares, routine counts, pending approvals and highlights. */
+  getToday(filter?: TodayFilter): Promise<TodaySummary>;
+  /** A usage summary over a range, grouped by UTC day or by bot. */
+  getUsage(filter?: UsageFilter): Promise<UsageSummary>;
+  /** The same-origin CSV export URL for the same range, for a link or the download helper. */
+  usageExportUrl(filter?: Omit<UsageFilter, 'group'>): string;
 }

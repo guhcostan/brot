@@ -28,6 +28,19 @@ export function downloadTextFile(filename: string, content: string, mimeType = '
   return true;
 }
 
+/** Saves a same-origin URL with a filename through a temporary link. False when there is no DOM. */
+export function downloadFileUrl(filename: string, url: string): boolean {
+  if (typeof document === 'undefined') return false;
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  link.rel = 'noopener';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  return true;
+}
+
 /** Reads a picked package file as text, preferring `File.text()` and falling back to `FileReader`. */
 export async function readFileText(file: File): Promise<string> {
   if (typeof file.text === 'function') return file.text();
