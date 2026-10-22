@@ -5,12 +5,15 @@ import {
   ComputerInput,
   ComputerState,
   CreateBot,
+  CreateMemory,
   CreateRoom,
   CreateRoutine,
+  CreateSkill,
   CreateTask,
   CreateTeam,
   CreateThread,
   Device,
+  Memory,
   Message,
   PairingStartResponse,
   PostMessage,
@@ -20,13 +23,16 @@ import {
   RoutineRun,
   Run,
   SetTakeover,
+  Skill,
   Takeover,
   Task,
   Team,
   Thread,
   UpdateBot,
+  UpdateMemory,
   UpdateRoomMembers,
   UpdateRoutine,
+  UpdateSkill,
   UpdateTask,
   UpdateTeam,
   UpdateThread,
@@ -331,6 +337,47 @@ export function createHttpClient({
 
     async deleteTeam(teamId) {
       await request(`/api/teams/${encodeURIComponent(teamId)}`, { method: 'DELETE' });
+    },
+
+    listMemories(botId) {
+      return read(`/api/bots/${encodeURIComponent(botId)}/memories`, Memory.array());
+    },
+
+    async createMemory(botId, input) {
+      const body = CreateMemory.parse(input);
+      const response = await write('POST', `/api/bots/${encodeURIComponent(botId)}/memories`, body);
+      return Memory.parse(await response.json());
+    },
+
+    async updateMemory(memoryId, patch) {
+      const body = UpdateMemory.parse(patch);
+      const response = await write('PATCH', `/api/memories/${encodeURIComponent(memoryId)}`, body);
+      return Memory.parse(await response.json());
+    },
+
+    async deleteMemory(memoryId) {
+      await request(`/api/memories/${encodeURIComponent(memoryId)}`, { method: 'DELETE' });
+    },
+
+    listSkills(botId) {
+      const suffix = botId === undefined ? '' : `?${new URLSearchParams({ botId }).toString()}`;
+      return read(`/api/skills${suffix}`, Skill.array());
+    },
+
+    async createSkill(input) {
+      const body = CreateSkill.parse(input);
+      const response = await write('POST', '/api/skills', body);
+      return Skill.parse(await response.json());
+    },
+
+    async updateSkill(skillId, patch) {
+      const body = UpdateSkill.parse(patch);
+      const response = await write('PATCH', `/api/skills/${encodeURIComponent(skillId)}`, body);
+      return Skill.parse(await response.json());
+    },
+
+    async deleteSkill(skillId) {
+      await request(`/api/skills/${encodeURIComponent(skillId)}`, { method: 'DELETE' });
     },
 
     listThreads(botId) {

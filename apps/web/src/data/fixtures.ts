@@ -1,4 +1,4 @@
-import type { Approval, Bot, CanonicalEvent, Message, Routine, RoutineRun, Task, Team, Thread } from '@brot/protocol';
+import type { Approval, Bot, CanonicalEvent, Memory, Message, Routine, RoutineRun, Skill, Task, Team, Thread } from '@brot/protocol';
 
 const CREATED = '2026-10-01T09:00:00.000Z';
 
@@ -562,5 +562,74 @@ export const DEMO_ROUTINE_RUNS: RoutineRun[] = [
     startedAt: hoursAgo(4),
     endedAt: hoursAgo(4 - 0.01),
     createdAt: hoursAgo(4),
+  },
+];
+
+/** What the demo bots remember, so the Memory tab has entries in mock mode. */
+export const DEMO_MEMORIES: Memory[] = [
+  {
+    id: 'mem_capy_1',
+    botId: 'bot_capy',
+    kind: 'preference',
+    content: 'Prefers short summaries before 10am, with the three priorities at the top.',
+    createdAt: CREATED,
+    updatedAt: CREATED,
+  },
+  {
+    id: 'mem_capy_2',
+    botId: 'bot_capy',
+    kind: 'fact',
+    content: 'The Acme renewal is the top priority until Nov 1. Keep every draft focused on it.',
+    createdAt: CREATED,
+    updatedAt: CREATED,
+  },
+  {
+    id: 'mem_sol_1',
+    botId: 'bot_sol',
+    kind: 'summary',
+    content: 'Morning brief runs on weekdays at 08:00: check email, then Slack, then the task board, in that order.',
+    createdAt: CREATED,
+    updatedAt: CREATED,
+  },
+  {
+    id: 'mem_onca_1',
+    botId: 'bot_onca',
+    kind: 'fact',
+    content: 'The CSV export timeout came from loading every row into memory before writing. Stream it in pages instead.',
+    createdAt: CREATED,
+    updatedAt: CREATED,
+  },
+];
+
+/** Skills the demo bots can use, one shared between every bot. */
+export const DEMO_SKILLS: Skill[] = [
+  {
+    id: 'skill_followup',
+    botId: 'bot_capy',
+    name: 'Customer follow-up',
+    description: 'Write a short, specific follow-up that moves the conversation forward.',
+    body: '# Customer follow-up\n\n1. Re-read the last two messages in the thread.\n2. Open with the one thing they asked for.\n3. Add a single next step with a date.\n4. Keep it under 120 words and send nothing without approval.',
+    version: 1,
+    createdAt: CREATED,
+    updatedAt: CREATED,
+  },
+  {
+    id: 'skill_refund',
+    botId: 'bot_tuca',
+    name: 'Refund triage',
+    description: 'Decide when a refund request needs your approval before replying.',
+    body: '# Refund triage\n\n- Find the order and check the purchase date.\n- Under the refund window: draft a same-day reply.\n- Over the window or above the plan limit: ask for approval first.\n- Never promise a refund the policy does not cover.',
+    version: 1,
+    createdAt: CREATED,
+    updatedAt: CREATED,
+  },
+  {
+    id: 'skill_weekly',
+    name: 'Weekly plan',
+    description: 'Turn the task board and room activity into a one-page weekly plan.',
+    body: '# Weekly plan\n\n1. List everything open or in progress on the board.\n2. Group it by outcome, not by bot.\n3. Pick the three that matter most this week.\n4. Give each one an owner and a date, then post the plan in the room.',
+    version: 1,
+    createdAt: CREATED,
+    updatedAt: CREATED,
   },
 ];

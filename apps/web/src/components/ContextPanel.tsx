@@ -1,18 +1,21 @@
-import { useId, useState, type ReactElement } from 'react';
+import { useCallback, useEffect, useId, useState, type ReactElement } from 'react';
 import { MAX_ROOM_BOTS, MIN_ROOM_BOTS, type Bot, type Task } from '@brot/protocol';
-import { Badge, BotAvatar, Button, Card, EmptyState, cx } from '@brot/ui';
-import type { Room } from '../data/client';
-import { avatarOf, formatCount, formatTime, formatUsd } from '../format';
+import { Badge, BotAvatar, Button, EmptyState, cx } from '@brot/ui';
+import type { CreateMemory, CreateSkill, Memory, Room, Skill, UpdateMemory, UpdateSkill } from '../data/client';
+import { avatarOf, formatCount, formatUsd } from '../format';
 import { t, type TranslationKey } from '../i18n';
 import { botActivity, sumCost, type ThreadState } from '../state/thread';
+import { useClient } from './client';
 import { ComputerSection } from './ComputerPanel';
 import { Close, Plus } from './icons';
+import { MemoryTab } from './MemoryTab';
+import { SkillsTab } from './SkillsTab';
 import { TaskList } from './Tasks';
 import { moodOf, useTeam } from './team';
 
 const BOT_TABS = ['memory', 'tasks', 'skills', 'apps', 'routines', 'cost'] as const;
 const ROOM_TABS = ['tasks', 'cost'] as const;
-type TabId = (typeof BOT_TABS)[number];
+export type TabId = (typeof BOT_TABS)[number];
 
 const TAB_LABEL: Record<TabId, TranslationKey> = {
   memory: 'context.memory',
@@ -34,17 +37,117 @@ export interface ContextPanelProps {
   onUpdateMembers: (roomId: string, change: { add?: string[]; remove?: string[] }) => Promise<unknown>;
   onClose: () => void;
   className?: string;
+  /** Opens this tab first. Defaults to Memory for a bot and Tasks for a room. */
+  initialTab?: TabId;
+  /** Memories to render before the client load resolves, e.g. in an SSR render. */
+  initialMemories?: Memory[];
+  /** Skills to render before the client load resolves, e.g. in an SSR render. */
+  initialSkills?: Skill[];
 }
 
 /**
  * A bot's computer on top, or a room's members, then text tabs with an underline (DESIGN.md
  * section 7).
  */
-export function ContextPanel({ subject, thread, tasks, onNewTask, onUpdateMembers, onClose, className }: ContextPanelProps): ReactElement {
+export function ContextPanel({
+  subject,
+  thread,
+  tasks,
+  onNewTask,
+  onUpdateMembers,
+  onClose,
+  className,
+  initialTab,
+  initialMemories,
+  initialSkills,
+}: ContextPanelProps): ReactElement {
+  const client = useClient();
   const tabs: readonly TabId[] = subject.kind === 'bot' ? BOT_TABS : ROOM_TABS;
-  const [chosen, setTab] = useState<TabId>(subject.kind === 'bot' ? 'memory' : 'tasks');
+  const [chosen, setTab] = useState<TabId>(initialTab ?? (subject.kind === 'bot' ? 'memory' : 'tasks'));
   const tab = tabs.includes(chosen) ? chosen : tabs[0]!;
   const idBase = useId();
+  const botId = subject.kind === 'bot' ? subject.bot.id : null;
+  const plainTab: Exclude<TabId, 'tasks' | 'memory' | 'skills'> | null =
+    tab === 'apps' || tab === 'routines' || tab === 'cost' ? tab : null;
+
+  const [memories, setMemories] = useState<Memory[] | null>(initialMemories ?? null);
+  const [skills, setSkills] = useState<Skill[] | null>(initialSkills ?? null);
+  const [memoryError, setMemoryError] = useState<string | null>(null);
+  const [skillError, setSkillError] = useState<string | null>(null);
+
+  const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
+
+  const loadMemories = useCallback(async () => {
+    if (botId === null) return;
+    try {
+      setMemories(await client.listMemories(botId));
+      setMemoryError(null);
+    } catch (cause) {
+      setMemoryError(messageOf(cause));
+      setMemories((current) => current ?? []);
+    }
+  }, [botId, client]);
+
+  const loadSkills = useCallback(async () => {
+    if (botId === null) return;
+    try {
+      setSkills(await client.listSkills(botId));
+      setSkillError(null);
+    } catch (cause) {
+      setSkillError(messageOf(cause));
+      setSkills((current) => current ?? []);
+    }
+  }, [botId, client]);
+
+  useEffect(() => {
+    if (botId === null) return;
+    void loadMemories();
+    void loadSkills();
+  }, [botId, loadMemories, loadSkills]);
+
+  const createMemory = useCallback(
+    async (input: CreateMemory) => {
+      if (botId === null) return;
+      await client.createMemory(botId, input);
+      await loadMemories();
+    },
+    [botId, client, loadMemories],
+  );
+  const updateMemory = useCallback(
+    async (memoryId: string, patch: UpdateMemory) => {
+      await client.updateMemory(memoryId, patch);
+      await loadMemories();
+    },
+    [client, loadMemories],
+  );
+  const deleteMemory = useCallback(
+    async (memoryId: string) => {
+      await client.deleteMemory(memoryId);
+      await loadMemories();
+    },
+    [client, loadMemories],
+  );
+  const createSkill = useCallback(
+    async (input: CreateSkill) => {
+      await client.createSkill(input);
+      await loadSkills();
+    },
+    [client, loadSkills],
+  );
+  const updateSkill = useCallback(
+    async (skillId: string, patch: UpdateSkill) => {
+      await client.updateSkill(skillId, patch);
+      await loadSkills();
+    },
+    [client, loadSkills],
+  );
+  const deleteSkill = useCallback(
+    async (skillId: string) => {
+      await client.deleteSkill(skillId);
+      await loadSkills();
+    },
+    [client, loadSkills],
+  );
 
   return (
     <aside className={cx('context-panel flex min-h-0 flex-col bg-surface md:border-l md:border-line', className)}>
@@ -102,9 +205,28 @@ export function ContextPanel({ subject, thread, tasks, onNewTask, onUpdateMember
               </div>
               <TaskList tasks={tasks} empty={subject.kind === 'bot' ? t('context.tasksEmptyBot', { name: subject.bot.name }) : t('context.tasksEmptyRoom')} />
             </div>
-          ) : (
-            <TabBody tab={tab} name={subject.kind === 'bot' ? subject.bot.name : subject.room.thread.title} thread={thread} />
-          )}
+          ) : subject.kind === 'bot' && tab === 'memory' ? (
+            <MemoryTab
+              botName={subject.bot.name}
+              memories={memories ?? undefined}
+              error={memoryError ?? undefined}
+              onCreate={createMemory}
+              onUpdate={updateMemory}
+              onDelete={deleteMemory}
+            />
+          ) : subject.kind === 'bot' && tab === 'skills' ? (
+            <SkillsTab
+              botId={subject.bot.id}
+              botName={subject.bot.name}
+              skills={skills ?? undefined}
+              error={skillError ?? undefined}
+              onCreate={createSkill}
+              onUpdate={updateSkill}
+              onDelete={deleteSkill}
+            />
+          ) : plainTab !== null ? (
+            <TabBody tab={plainTab} name={subject.kind === 'bot' ? subject.bot.name : subject.room.thread.title} thread={thread} />
+          ) : null}
         </div>
       </div>
     </aside>
@@ -223,32 +345,8 @@ function Members({ room, members, thread, onUpdate }: MembersProps): ReactElemen
   );
 }
 
-function TabBody({ tab, name, thread }: { tab: Exclude<TabId, 'tasks'>; name: string; thread: ThreadState }): ReactElement {
-
+function TabBody({ tab, name, thread }: { tab: Exclude<TabId, 'tasks' | 'memory' | 'skills'>; name: string; thread: ThreadState }): ReactElement {
   switch (tab) {
-    case 'memory':
-      if (thread.memories.length === 0) {
-        return <EmptyState className="py-8" title={t('context.memoryTitle')} description={t('context.memoryBody', { name })} />;
-      }
-      return (
-        <ul className="m-0 flex list-none flex-col gap-2 p-0">
-          {thread.memories.map((memory) => (
-            <li key={memory.id}>
-              <Card className="flex flex-col gap-2 p-3">
-                <div className="flex items-center justify-between gap-2">
-                  <Badge>{memory.kind}</Badge>
-                  <span className="text-xs text-ink-3 tabular-nums">{formatTime(memory.updatedAt)}</span>
-                </div>
-                <p className="m-0 text-base">{memory.content}</p>
-              </Card>
-            </li>
-          ))}
-        </ul>
-      );
-
-    case 'skills':
-      return <EmptyState className="py-8" title={t('context.skillsTitle')} description={t('context.skillsBody', { name })} />;
-
     case 'apps':
       return <EmptyState className="py-8" title={t('context.appsTitle')} description={t('context.appsBody')} />;
 

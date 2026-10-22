@@ -4,9 +4,12 @@ import type {
   ComputerInput,
   ComputerState,
   CreateBotInput,
+  CreateMemory,
   CreateRoutineInput,
+  CreateSkill,
   CreateTeamInput,
   Device,
+  Memory,
   PairingStartResponse,
   PostMessage,
   ResolveApproval,
@@ -15,18 +18,34 @@ import type {
   RoutineRun,
   RoutineRunStatus,
   SetTakeover,
+  Skill,
   Takeover,
   Task,
   TaskStatus,
   Team,
   Thread,
   UpdateBot,
+  UpdateMemory,
   UpdateRoomMembers,
   UpdateRoutine,
+  UpdateSkill,
   UpdateTeam,
 } from '@brot/protocol';
 
-export type { CreateRoutineInput, Routine, RoutineRun, RoutineRunStatus, UpdateRoutine } from '@brot/protocol';
+export type {
+  CreateMemory,
+  CreateRoutineInput,
+  CreateSkill,
+  Memory,
+  MemoryKind,
+  Routine,
+  RoutineRun,
+  RoutineRunStatus,
+  Skill,
+  UpdateMemory,
+  UpdateRoutine,
+  UpdateSkill,
+} from '@brot/protocol';
 export type { Team } from '@brot/protocol';
 
 /**
@@ -156,6 +175,19 @@ export interface BrotClient {
   updateTeam(teamId: string, patch: UpdateTeam): Promise<Team>;
   /** Deletes the team and ungroups its bots; the bots stay. */
   deleteTeam(teamId: string): Promise<void>;
+
+  /** What a bot remembers, oldest first. */
+  listMemories(botId: string): Promise<Memory[]>;
+  createMemory(botId: string, input: CreateMemory): Promise<Memory>;
+  updateMemory(memoryId: string, patch: UpdateMemory): Promise<Memory>;
+  deleteMemory(memoryId: string): Promise<void>;
+
+  /** A bot's skills plus the shared ones, by name. Without a bot, every skill. */
+  listSkills(botId?: string): Promise<Skill[]>;
+  /** `botId` absent creates a shared skill. */
+  createSkill(input: CreateSkill): Promise<Skill>;
+  updateSkill(skillId: string, patch: UpdateSkill): Promise<Skill>;
+  deleteSkill(skillId: string): Promise<void>;
 
   /** A bot's DM threads, most recently active first. */
   listThreads(botId: string): Promise<Thread[]>;

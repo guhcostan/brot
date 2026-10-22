@@ -6,12 +6,14 @@ import type {
   CanonicalEvent,
   ComputerState,
   Device,
+  Memory,
   Message,
   PostMessage,
   ResolveApproval,
   Routine,
   RoutineRun,
   RoutineRunStatus,
+  Skill,
   Takeover,
   Task,
   Team,
@@ -19,7 +21,9 @@ import type {
 } from '@brot/protocol';
 import {
   CreateBot,
+  CreateMemory,
   CreateRoutine,
+  CreateSkill,
   CreateTeam,
   CreateThread,
   DESKTOP_HEIGHT,
@@ -27,8 +31,10 @@ import {
   MAX_ROOM_BOTS,
   MIN_ROOM_BOTS,
   UpdateBot,
+  UpdateMemory,
   UpdateRoomMembers,
   UpdateRoutine,
+  UpdateSkill,
   UpdateTeam,
   UpdateThread,
   defaultEgressPolicy,
@@ -51,10 +57,12 @@ import {
   DEFAULT_THREAD_TITLE,
   DEMO_BOTS,
   DEMO_HISTORY,
+  DEMO_MEMORIES,
   DEMO_ROOM_HISTORY,
   DEMO_ROOMS,
   DEMO_ROUTINE_RUNS,
   DEMO_ROUTINES,
+  DEMO_SKILLS,
   DEMO_TASKS,
   DEMO_TEAMS,
   DEMO_THREAD_TITLES,
@@ -237,6 +245,8 @@ export function createMockClient(): BrotClient {
   const tasks = new Map<string, Task>(DEMO_TASKS.map((task) => [task.id, { ...task }]));
   const taskTimers = new Map<string, Array<ReturnType<typeof setTimeout>>>();
   const batons = new Map<string, string>();
+  const memories = new Map<string, Memory>(DEMO_MEMORIES.map((memory) => [memory.id, structuredClone(memory)]));
+  const skills = new Map<string, Skill>(DEMO_SKILLS.map((skill) => [skill.id, structuredClone(skill)]));
   const routines = new Map<string, Routine>(DEMO_ROUTINES.map((routine) => [routine.id, structuredClone(routine)]));
   /** Runs per routine, newest first. */
   const routineRuns = new Map<string, RoutineRun[]>();
@@ -722,6 +732,8 @@ export function createMockClient(): BrotClient {
       threadsOfBot.delete(botId);
       screens.delete(botId);
       browserStates.delete(botId);
+      for (const [memoryId, memory] of memories) if (memory.botId === botId) memories.delete(memoryId);
+      for (const [skillId, skill] of skills) if (skill.botId === botId) skills.delete(skillId);
       for (const room of rooms.values()) room.memberIds = room.memberIds.filter((id) => id !== botId);
     },
 
@@ -772,6 +784,88 @@ export function createMockClient(): BrotClient {
         delete ungrouped.teamId;
         bots.set(botId, ungrouped);
       }
+    },
+
+    async listMemories(botId) {
+      if (!bots.has(botId)) throw new Error(`Unknown bot: ${botId}`);
+      return [...memories.values()]
+        .filter((memory) => memory.botId === botId)
+        .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt) || a.id.localeCompare(b.id))
+        .map((memory) => structuredClone(memory));
+    },
+
+    async createMemory(botId, input) {
+      if (!bots.has(botId)) throw new Error(`Unknown bot: ${botId}`);
+      const data = CreateMemory.parse(input);
+      const at = now();
+      const created: Memory = { id: nextId('mem'), botId, kind: data.kind, content: data.content, createdAt: at, updatedAt: at };
+      memories.set(created.id, created);
+      return structuredClone(created);
+    },
+
+    async updateMemory(memoryId, patch) {
+      const current = memories.get(memoryId);
+      if (!current) throw new Error(`Unknown memory: ${memoryId}`);
+      const data = UpdateMemory.parse(patch);
+      const next: Memory = {
+        ...current,
+        ...(data.kind === undefined ? {} : { kind: data.kind }),
+        ...(data.content === undefined ? {} : { content: data.content }),
+        updatedAt: now(),
+      };
+      memories.set(memoryId, next);
+      return structuredClone(next);
+    },
+
+    async deleteMemory(memoryId) {
+      if (!memories.delete(memoryId)) throw new Error(`Unknown memory: ${memoryId}`);
+    },
+
+    async listSkills(botId?: string) {
+      if (botId !== undefined && !bots.has(botId)) throw new Error(`Unknown bot: ${botId}`);
+      return [...skills.values()]
+        .filter((skill) => botId === undefined || skill.botId === botId || skill.botId === undefined)
+        .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id))
+        .map((skill) => structuredClone(skill));
+    },
+
+    async createSkill(input) {
+      const data = CreateSkill.parse(input);
+      if (data.botId !== undefined && !bots.has(data.botId)) throw new Error(`Unknown bot: ${data.botId}`);
+      const at = now();
+      const created: Skill = {
+        id: nextId('skill'),
+        ...(data.botId === undefined ? {} : { botId: data.botId }),
+        name: data.name,
+        description: data.description,
+        body: data.body,
+        version: 1,
+        createdAt: at,
+        updatedAt: at,
+      };
+      skills.set(created.id, created);
+      return structuredClone(created);
+    },
+
+    async updateSkill(skillId, patch) {
+      const current = skills.get(skillId);
+      if (!current) throw new Error(`Unknown skill: ${skillId}`);
+      const data = UpdateSkill.parse(patch);
+      const next: Skill = {
+        ...current,
+        ...(data.name === undefined ? {} : { name: data.name }),
+        ...(data.description === undefined ? {} : { description: data.description }),
+        ...(data.body === undefined ? {} : { body: data.body }),
+        ...(data.botId === undefined ? {} : { botId: data.botId }),
+        version: current.version + 1,
+        updatedAt: now(),
+      };
+      skills.set(skillId, next);
+      return structuredClone(next);
+    },
+
+    async deleteSkill(skillId) {
+      if (!skills.delete(skillId)) throw new Error(`Unknown skill: ${skillId}`);
     },
 
     async listThreads(botId) {
