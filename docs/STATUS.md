@@ -223,6 +223,22 @@ mapped in `docs/MAUSBOT-PARITY.md` (34 bots / 7 teams, 33 bots with a browser an
 - Suite: 1792 tests (167 files), typecheck 12/12, lint clean. Known flake: the desktop takeover timing
   test can fail under full-suite parallelism and passes in isolation (seen twice); worth a later fix.
 
+## Wave 16: host browser live view, team packages UI (2026-10-22)
+
+- **Host browser live view and takeover.** GET /api/bots/:id/browser/screen returns a 1280x800 JPEG
+  frame of the live page (lazy launch, no-store). Takeover is one state per browser profile, shared by
+  every bot on it: while the person holds it, bot browser commands are refused with a clear message and
+  the frame keeps flowing; POST /api/bots/:id/browser/takeover shows/changes it and
+  POST /api/bots/:id/browser/input accepts move/click/scroll/type/key (full device only, viewport
+  validated). During the headed sign-in window the local window is the input surface and the API refuses
+  input. Verified live: JPEG 1280x800, a real DSH run was refused three times during takeover, and after
+  hand-back it opened example.com.
+- **Team sharing UI.** Settings → Team packages: a scope select (whole workspace or one team) and a
+  download named by the server headers; import from paste or a .md/.json file with a client-side preview
+  (protocol parser) showing counts, names, the "no model/computer/browser/credentials" and "routines
+  arrive paused" warnings, parser issues, a confirmation dialog and the created counts.
+- Suite: 1839 tests (170 files), typecheck 12/12, lint clean.
+
 ## Next
 
 1. Re-run the eval suite on a live model once OpenCode Go has quota (`apps/evals`, `--base` to the server), including B8 and C; the 2026-10-20 results predate the read auto-allow and the fixes above.
