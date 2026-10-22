@@ -190,6 +190,22 @@ mapped in `docs/MAUSBOT-PARITY.md` (34 bots / 7 teams, 33 bots with a browser an
   US$ 0.052. The Usage dashboard page lands next.
 - Suite: 1709 tests (158 files), typecheck 12/12, lint clean.
 
+## Wave 14: shared browser profiles (2026-10-22)
+
+- **Login profiles shared by teams.** The unit of a running browser is now the effective profile: a bot's
+  own profile or a shared one that several bots name. One Chrome, egress proxy and serial queue per
+  profile, so a team signs into X/LinkedIn once and every member bot reuses the session; a login window
+  opened by one bot reports `login` to the others. Different egress allowlists restart that profile's
+  Chrome through the requesting bot's proxy (cookies survive); closing through any bot closes the
+  profile; deleting a profile deletes its saved logins and ungroups its bots back to own profiles.
+  Routes: `/api/browser/profiles` CRUD; bot browser status returns the resolved profile; bots accept
+  `browserProfileId`. Web: Settings → Browser profiles (new/rename/bot counts/delete with consequences)
+  and a profile picker in the bot dialog named in the status line. Migration 0011 also adds the
+  `runs.started_at` index.
+- Verified live: two bots on one profile shared login state, close through either stopped both, and
+  deleting the profile ungrouped the bots and removed its directory.
+- Suite: 1753 tests (161 files), typecheck 12/12, lint clean.
+
 ## Next
 
 1. Re-run the eval suite on a live model once OpenCode Go has quota (`apps/evals`, `--base` to the server), including B8 and C; the 2026-10-20 results predate the read auto-allow and the fixes above.

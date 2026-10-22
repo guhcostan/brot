@@ -68,10 +68,10 @@ Legend: ✅ parity or better · 🟡 partial · ❌ absent · 🎯 current wave.
 | Groups/rooms with per-bot state, holds, usage badge | ✅ | 🟡 rooms with sequential responders, task board | W3 |
 | Teams: named section, shared instructions, roster, Chief | ✅ | ✅ teams with brief, chief and roster | W2 done |
 | Per-team working folder (`bot.cwd`) | ✅ | 🟡 sandbox `/workspace` per bot; host computer has the real cwd | W2 |
-| Browser per bot, persistent login profiles | ✅ | ✅ host browser with a per-bot profile; container Chromium profile now persists too | W1 done |
-| Live browser view and take-over | ✅ | 🟡 desktops have it; host browser has no live view yet | W6 |
+| Browser per bot, persistent login profiles | ✅ | ✅ per-bot and shared profiles, persistent logins, egress-gated | W1 done |
+| Live browser view and take-over | ✅ | 🟡 desktops have it; host browser has a headed login window but no live view/take-over yet | W7 |
 | Host browser (My Chrome) attach | ✅ | ❌ | W5 |
-| Saved logins vault + `fill_login` | ✅ | ❌ | W5 |
+| Saved logins vault + `fill_login` | ✅ | ❌ (shared profiles cover the everyday case) | W7 |
 | Connected apps (Composio marketplace) + per-bot tool grants | ✅ | ❌ | W3 |
 | Custom MCP servers (stdio/HTTP, per-bot) | ✅ | 🟡 stdio/HTTP servers attach to runs with vault secrets and a real test handshake; per-bot grants and settings UI next | W5 |
 | Approval levels per bot/thread + decision log | ✅ | 🟡 per-tool broker + policies, no levels/log export | W4 |
