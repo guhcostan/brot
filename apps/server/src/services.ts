@@ -59,7 +59,7 @@ export interface ServiceExtras {
   llm?: LlmOptions;
   /** Bot desktop options. Tests inject a fake runner here. Only used when a sandbox computer provider exists. */
   desktop?: DesktopOptions;
-  /** The bot browser on the server machine. Tests inject a fake. Defaults to a Chrome with one profile per bot. */
+  /** The bot browser on the server machine. Tests inject a fake. Defaults to a Chrome per browser profile (own or shared). */
   browser?: HostBrowserService;
 }
 

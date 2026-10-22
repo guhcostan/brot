@@ -3,6 +3,7 @@ import { TEAM_MAX_DEPTH } from './constants';
 import {
   Approval,
   Bot,
+  BrowserProfile,
   Computer,
   Device,
   Memory,
@@ -46,6 +47,13 @@ const roundTrip = <T>(schema: { parse: (input: unknown) => T }, value: unknown):
 describe('entity schemas', () => {
   it('round-trips a bot through JSON', () => {
     expect(roundTrip(Bot, bot)).toEqual(bot);
+  });
+
+  it('round-trips a browser profile and a bot that shares it', () => {
+    const profile = { id: 'bp_1', name: 'Shared accounts', createdAt: at, updatedAt: at };
+    expect(roundTrip(BrowserProfile, profile)).toEqual(profile);
+    const shared = { ...bot, browserProfileId: 'bp_1' };
+    expect(roundTrip(Bot, shared)).toEqual(shared);
   });
 
   it('round-trips thread, message, and run', () => {

@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, stat } from 'node:fs/promises';
 import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -162,6 +162,96 @@ describe.skipIf(!chromeFound)('host browser against the real Chrome', () => {
         const reopened = await service.browser(bot, 'open', { url: 'https://example.com' });
         expect(String(reopened.title)).toBe('Example Domain');
         expect(await service.status(bot)).toEqual({ state: 'running' });
+      } finally {
+        await service.closeAll();
+        await rm(home, { recursive: true, force: true });
+      }
+    },
+    180_000,
+  );
+
+  it(
+    'shares one Chrome between the bots that name the same profile',
+    async () => {
+      const home = await mkdtemp(join(tmpdir(), 'brot-browser-'));
+      const service = createHostBrowserService({ home });
+      const profileId = 'bp_it_shared_browse';
+      const first = botFor(`bot_shared_a_${Date.now()}`, ['example.com'], profileId);
+      const second = botFor(`bot_shared_b_${Date.now()}`, ['example.com'], profileId);
+      try {
+        await service.browser(first, 'open', { url: 'https://example.com' });
+        expect(await service.status(first)).toEqual({ state: 'running' });
+        expect(await service.status(second)).toEqual({ state: 'running' });
+
+        // The second bot reads the page the first one opened: the profile has one Chrome, not one per bot.
+        const snapshot = await service.browser(second, 'snapshot', {});
+        expect(String(snapshot.title)).toBe('Example Domain');
+
+        // Closing through either bot closes that profile's browser for everyone in it.
+        await service.close(second);
+        expect(await service.status(first)).toEqual({ state: 'stopped' });
+        expect(await service.statusForProfile(profileId)).toEqual({ state: 'stopped' });
+      } finally {
+        await service.closeAll();
+        await rm(home, { recursive: true, force: true });
+      }
+    },
+    180_000,
+  );
+
+  it(
+    'restarts a shared profile Chrome when another bot has a different egress policy',
+    async () => {
+      const home = await mkdtemp(join(tmpdir(), 'brot-browser-'));
+      const service = createHostBrowserService({ home });
+      const profileId = 'bp_it_shared_egress';
+      const first = botFor(`bot_egress_a_${Date.now()}`, ['example.com'], profileId);
+      const second = botFor(`bot_egress_b_${Date.now()}`, ['www.google.com'], profileId);
+      try {
+        await service.browser(first, 'open', { url: 'https://example.com' });
+        expect(String((await service.browser(first, 'snapshot', {})).title)).toBe('Example Domain');
+
+        // A different allowlist restarts the profile's Chrome through the second bot's proxy; the page is gone
+        // but the profile directory (cookies, logins) survives the restart.
+        const restarted = await service.browser(second, 'snapshot', {});
+        expect(String(restarted.title)).not.toBe('Example Domain');
+        expect(await service.status(second)).toEqual({ state: 'running' });
+        await expect(service.browser(second, 'open', { url: 'https://example.com' })).rejects.toThrow(
+          /not on this bot's egress allowlist/,
+        );
+
+        // The first bot's command restarts it back under its own policy.
+        const again = await service.browser(first, 'open', { url: 'https://example.com' });
+        expect(String(again.title)).toBe('Example Domain');
+        expect((await stat(join(home, 'browser-profiles', profileId))).isDirectory()).toBe(true);
+      } finally {
+        await service.closeAll();
+        await rm(home, { recursive: true, force: true });
+      }
+    },
+    180_000,
+  );
+
+  it(
+    'destroys only an own profile when its bot is deleted, and leaves a shared one',
+    async () => {
+      const home = await mkdtemp(join(tmpdir(), 'brot-browser-'));
+      const service = createHostBrowserService({ home });
+      const sharedId = 'bp_it_delete_shared';
+      const sharedBot = botFor(`bot_delete_shared_${Date.now()}`, ['example.com'], sharedId);
+      const ownBot = botFor(`bot_delete_own_${Date.now()}`, ['example.com']);
+      try {
+        await service.browser(sharedBot, 'open', { url: 'https://example.com' });
+        await service.deleteProfile(sharedBot);
+        // A shared profile outlives any one bot: its browser and directory are untouched.
+        expect(await service.status(sharedBot)).toEqual({ state: 'running' });
+        expect((await stat(join(home, 'browser-profiles', sharedId))).isDirectory()).toBe(true);
+
+        await service.browser(ownBot, 'open', { url: 'https://example.com' });
+        await service.deleteProfile(ownBot);
+        await service.deleteProfile(ownBot);
+        expect(await service.status(ownBot)).toEqual({ state: 'stopped' });
+        await expect(stat(join(home, 'browser-profiles', ownBot.id))).rejects.toThrow();
       } finally {
         await service.closeAll();
         await rm(home, { recursive: true, force: true });

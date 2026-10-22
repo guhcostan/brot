@@ -2,6 +2,7 @@ import type { Db } from '../client';
 import { createApprovalRepo } from './approvals';
 import { createAttachmentRepo } from './attachments';
 import { createBotRepo } from './bots';
+import { createBrowserProfileRepo } from './browser-profiles';
 import { createComputerRepo } from './computers';
 import { createDeviceRepo } from './devices';
 import { createEventRepo } from './events';
@@ -23,6 +24,7 @@ import { createThreadSessionRepo } from './thread-sessions';
 export function createRepos(db: Db) {
   return {
     bots: createBotRepo(db),
+    browserProfiles: createBrowserProfileRepo(db),
     threads: createThreadRepo(db),
     messages: createMessageRepo(db),
     attachments: createAttachmentRepo(db),

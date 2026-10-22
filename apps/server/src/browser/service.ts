@@ -1,7 +1,7 @@
 import { rm } from 'node:fs/promises';
 import type { Bot } from '@brot/protocol';
 import { ensurePage, runBrowserCommand } from './driver';
-import { createBotEgress, type BotEgress } from './egress';
+import { botAllowlist, createBotEgress, type BotEgress } from './egress';
 import { launchChrome, removeDevToolsState, resolveChromeBinary, type ChromeHandle } from './launch';
 import { ensureProfileDir, profileDir } from './profile';
 import type { HostBrowserDeps, HostBrowserService, HostBrowserState } from './types';
@@ -9,30 +9,52 @@ import type { HostBrowserDeps, HostBrowserService, HostBrowserState } from './ty
 /** What the bot is told when it asks for the browser while the person's sign-in window is open. */
 const LOGIN_REFUSAL = 'the person is signing in; try again when the window closes';
 
-interface BotBrowser {
+interface ProfileBrowser {
   readonly state: Exclude<HostBrowserState, 'stopped'>;
   readonly chrome: ChromeHandle;
   /** Only bot browsing has one; the login window is deliberately unproxied. */
   readonly egress?: BotEgress;
+  /** The allowlist this Chrome's egress proxy enforces. Another bot's command may restart it. */
+  readonly allow: readonly string[];
+}
+
+/** The unit a Chrome serves: a shared profile id, or the bot's own id when it names no profile. */
+function profileKey(bot: Bot): string {
+  return bot.browserProfileId ?? bot.id;
+}
+
+/** True when two bots' egress policies allow the same hosts, regardless of entry order. */
+function sameAllowlist(left: readonly string[], right: readonly string[]): boolean {
+  if (left.length !== right.length) return false;
+  const sortedLeft = [...left].sort();
+  const sortedRight = [...right].sort();
+  return sortedLeft.every((entry, index) => entry === sortedRight[index]);
 }
 
 /**
- * One Chrome and one egress proxy per bot, started lazily and driven by `browser`. Commands on one bot run in
- * order; different bots do not wait for each other.
+ * One Chrome and one egress proxy per browser profile, started lazily and driven by `browser`. A bot with no
+ * `browserProfileId` owns its profile (keyed by its id, so its directory is the same `browser-profiles/<botId>`
+ * it always had); bots that name the same shared profile share one Chrome. Commands on one profile run in
+ * order, and different profiles do not wait for each other.
  *
- * The login hand-off: `openForLogin` starts a headed, unproxied Chrome and reports `login`. While the window is
- * open, bot commands are refused. Once the person closes the window, the profile (with the new session) is
- * reused by the next command, which relaunches Chrome headless through the bot's egress proxy.
+ * Egress is enforced per Chrome, not per profile: a profile's browser runs with the allowlist of the bot whose
+ * command started it. When another bot of the same profile has a different allowlist, its command restarts the
+ * Chrome through its own proxy. The profile directory keeps the cookies and logins, so a restart loses only the
+ * live page.
+ *
+ * The login hand-off: `openForLogin` starts a headed, unproxied Chrome and reports `login`; every bot sharing
+ * that profile sees it and its commands are refused. Once the person closes the window, the profile (with the
+ * new session) is reused by the next command, which relaunches Chrome headless through the bot's egress proxy.
  */
 export function createHostBrowserService(deps: HostBrowserDeps): HostBrowserService {
-  const browsers = new Map<string, BotBrowser>();
+  const browsers = new Map<string, ProfileBrowser>();
   const queues = new Map<string, Promise<unknown>>();
 
-  function serial<T>(botId: string, work: () => Promise<T>): Promise<T> {
-    const previous = queues.get(botId) ?? Promise.resolve();
+  function serial<T>(key: string, work: () => Promise<T>): Promise<T> {
+    const previous = queues.get(key) ?? Promise.resolve();
     const current = previous.then(work, work);
     queues.set(
-      botId,
+      key,
       current.then(
         () => undefined,
         () => undefined,
@@ -42,50 +64,50 @@ export function createHostBrowserService(deps: HostBrowserDeps): HostBrowserServ
   }
 
   /** Kills Chrome, closes the proxy and drops the DevTools port file. Safe to call more than once. */
-  async function end(info: BotBrowser, botId: string): Promise<void> {
-    if (browsers.get(botId) === info) browsers.delete(botId);
+  async function end(info: ProfileBrowser, key: string): Promise<void> {
+    if (browsers.get(key) === info) browsers.delete(key);
     await info.chrome.close().catch(() => undefined);
     await info.egress?.close().catch(() => undefined);
-    await removeDevToolsState(profileDir(deps.home, botId)).catch(() => undefined);
+    await removeDevToolsState(profileDir(deps.home, key)).catch(() => undefined);
   }
 
-  function track(info: BotBrowser, botId: string): void {
-    browsers.set(botId, info);
+  function track(info: ProfileBrowser, key: string): void {
+    browsers.set(key, info);
     // A crash must not leave a dead browser in the map: reap it, and report stopped from then on.
     info.chrome.exited
       .then(() => {
-        if (browsers.get(botId) !== info) return;
-        browsers.delete(botId);
-        void end(info, botId).catch(() => undefined);
+        if (browsers.get(key) !== info) return;
+        browsers.delete(key);
+        void end(info, key).catch(() => undefined);
       })
       .catch(() => undefined);
   }
 
-  function loginWindowOpen(info: BotBrowser): boolean {
+  function loginWindowOpen(info: ProfileBrowser): boolean {
     if (!info.chrome.isRunning() || !info.chrome.browser.isConnected()) return false;
     return info.chrome.browser.contexts().some((context) => context.pages().length > 0);
   }
 
-  /** The live browser for this bot, after reaping a crash or a login window the person closed. */
-  async function live(bot: Bot): Promise<BotBrowser | undefined> {
-    const info = browsers.get(bot.id);
+  /** The live browser for a profile, after reaping a crash or a login window the person closed. */
+  async function live(key: string): Promise<ProfileBrowser | undefined> {
+    const info = browsers.get(key);
     if (info === undefined) return undefined;
     const usable = info.state === 'login' ? loginWindowOpen(info) : info.chrome.isRunning();
     if (!usable) {
-      await end(info, bot.id);
+      await end(info, key);
       return undefined;
     }
     return info;
   }
 
-  async function launchForBrowsing(bot: Bot): Promise<BotBrowser> {
+  async function launchForBrowsing(bot: Bot, key: string): Promise<ProfileBrowser> {
     const binary = resolveChromeBinary(deps.binary);
-    const profile = await ensureProfileDir(deps.home, bot.id);
+    const profile = await ensureProfileDir(deps.home, key);
     const egress = await createBotEgress(bot);
     try {
       const chrome = await launchChrome(binary, { profile, proxyPort: egress.port });
-      const info: BotBrowser = { state: 'running', chrome, egress };
-      track(info, bot.id);
+      const info: ProfileBrowser = { state: 'running', chrome, egress, allow: [...botAllowlist(bot)] };
+      track(info, key);
       return info;
     } catch (error) {
       await egress.close().catch(() => undefined);
@@ -93,79 +115,118 @@ export function createHostBrowserService(deps: HostBrowserDeps): HostBrowserServ
     }
   }
 
-  async function launchForLogin(bot: Bot): Promise<BotBrowser> {
+  async function launchForLogin(bot: Bot, key: string): Promise<ProfileBrowser> {
     const binary = resolveChromeBinary(deps.binary);
-    const profile = await ensureProfileDir(deps.home, bot.id);
+    const profile = await ensureProfileDir(deps.home, key);
     const chrome = await launchChrome(binary, { profile, headed: true });
-    const info: BotBrowser = { state: 'login', chrome };
+    const info: ProfileBrowser = { state: 'login', chrome, allow: [] };
     try {
-      track(info, bot.id);
+      track(info, key);
       await ensurePage(chrome.browser);
       return info;
     } catch (error) {
-      await end(info, bot.id);
+      await end(info, key);
       throw error;
     }
   }
 
+  async function stateOf(key: string): Promise<HostBrowserState> {
+    const info = await live(key);
+    return info?.state ?? 'stopped';
+  }
+
   return {
     status(bot) {
-      return serial(bot.id, async () => {
-        const info = await live(bot);
-        return { state: info?.state ?? 'stopped' };
-      });
+      const key = profileKey(bot);
+      return serial(key, async () => ({ state: await stateOf(key) }));
     },
 
     openForLogin(bot) {
-      return serial(bot.id, async () => {
-        const existing = browsers.get(bot.id);
-        if (existing !== undefined) await end(existing, bot.id);
-        await launchForLogin(bot);
+      const key = profileKey(bot);
+      return serial(key, async () => {
+        const existing = browsers.get(key);
+        if (existing !== undefined) await end(existing, key);
+        await launchForLogin(bot, key);
         return { state: 'login' };
       });
     },
 
     browser(bot, command, args) {
-      return serial(bot.id, async () => {
-        let info = await live(bot);
+      const key = profileKey(bot);
+      return serial(key, async () => {
+        let info = await live(key);
         if (info !== undefined && info.state === 'login') throw new Error(LOGIN_REFUSAL);
-        info ??= await launchForBrowsing(bot);
+        const allow = botAllowlist(bot);
+        if (info !== undefined && !sameAllowlist(info.allow, allow)) {
+          // A profile has one Chrome and one egress policy at a time. A bot with a different policy restarts it
+          // rather than browsing under another bot's allowlist. The profile (cookies, logins) survives.
+          await end(info, key);
+          info = undefined;
+        }
+        info ??= await launchForBrowsing(bot, key);
         try {
           return await runBrowserCommand(info.chrome.browser, bot, command, args);
         } catch (error) {
           // A dead Chrome is reaped here so the next command starts a fresh one; command errors keep it running.
-          if (!info.chrome.isRunning()) await end(info, bot.id);
+          if (!info.chrome.isRunning()) await end(info, key);
           throw error;
         }
       });
     },
 
     close(bot) {
-      return serial(bot.id, async () => {
-        const info = browsers.get(bot.id);
+      const key = profileKey(bot);
+      return serial(key, async () => {
+        const info = browsers.get(key);
         if (info !== undefined) {
-          await end(info, bot.id);
+          await end(info, key);
           return;
         }
-        await removeDevToolsState(profileDir(deps.home, bot.id)).catch(() => undefined);
+        await removeDevToolsState(profileDir(deps.home, key)).catch(() => undefined);
       });
     },
 
     deleteProfile(bot) {
-      return serial(bot.id, async () => {
-        const info = browsers.get(bot.id);
-        if (info !== undefined) await end(info, bot.id);
-        await rm(profileDir(deps.home, bot.id), { recursive: true, force: true });
+      // A shared profile outlives any one bot; it is deleted through its own route, which also ungroups its bots.
+      if (bot.browserProfileId !== undefined) return Promise.resolve();
+      const key = profileKey(bot);
+      return serial(key, async () => {
+        const info = browsers.get(key);
+        if (info !== undefined) await end(info, key);
+        await rm(profileDir(deps.home, key), { recursive: true, force: true });
+      });
+    },
+
+    statusForProfile(profileId) {
+      return serial(profileId, async () => ({ state: await stateOf(profileId) }));
+    },
+
+    closeProfile(profileId) {
+      return serial(profileId, async () => {
+        const info = browsers.get(profileId);
+        if (info !== undefined) {
+          await end(info, profileId);
+          return;
+        }
+        await removeDevToolsState(profileDir(deps.home, profileId)).catch(() => undefined);
+      });
+    },
+
+    deleteProfileDir(profileId) {
+      return serial(profileId, async () => {
+        const info = browsers.get(profileId);
+        if (info !== undefined) await end(info, profileId);
+        await rm(profileDir(deps.home, profileId), { recursive: true, force: true });
       });
     },
 
     async closeAll() {
-      const ids = new Set([...browsers.keys(), ...queues.keys()]);
+      const keys = new Set([...browsers.keys(), ...queues.keys()]);
       await Promise.all(
-        [...ids].map((botId) =>
-          serial(botId, async () => {
-            const info = browsers.get(botId);
-            if (info !== undefined) await end(info, botId);
+        [...keys].map((key) =>
+          serial(key, async () => {
+            const info = browsers.get(key);
+            if (info !== undefined) await end(info, key);
           }),
         ),
       );

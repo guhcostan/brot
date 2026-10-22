@@ -76,6 +76,20 @@ describe('bots', () => {
     expect((await repos.bots.update(plain.id, { browser: true }))?.browser).toBe(true);
   });
 
+  it('stores the shared browser profile and clears it back to its own', async () => {
+    const profile = await repos.browserProfiles.create({ name: 'Shared accounts' });
+    const bot = await repos.bots.create({ name: 'Ada', job: 'x', browser: true, browserProfileId: profile.id });
+    expect(bot.browserProfileId).toBe(profile.id);
+    expect((await repos.bots.get(bot.id))?.browserProfileId).toBe(profile.id);
+    expect((await repos.bots.list()).find((item) => item.id === bot.id)?.browserProfileId).toBe(profile.id);
+
+    expect((await repos.bots.update(bot.id, { browserProfileId: null }))?.browserProfileId).toBeUndefined();
+    expect((await repos.bots.update(bot.id, { browserProfileId: profile.id }))?.browserProfileId).toBe(profile.id);
+
+    const plain = await repos.bots.create({ name: 'Bo', job: 'x' });
+    expect(plain.browserProfileId).toBeUndefined();
+  });
+
   it('rejects invalid egress hosts on create and update', async () => {
     await expect(
       repos.bots.create({ name: 'Ada', job: 'x', egress: { mode: 'allowlist', allow: ['https://github.com'] } }),
@@ -126,6 +140,42 @@ describe('bots', () => {
     expect(await repos.bots.remove(bot.id)).toBe(true);
     expect(await repos.bots.remove(bot.id)).toBe(false);
     expect(await repos.bots.get(bot.id)).toBeUndefined();
+  });
+});
+
+describe('browser profiles', () => {
+  it('creates, lists by name, renames and removes profiles', async () => {
+    const shared = await repos.browserProfiles.create({ name: '  Shared accounts  ' });
+    expect(shared.name).toBe('Shared accounts');
+    const work = await repos.browserProfiles.create({ name: 'Work' });
+    expect((await repos.browserProfiles.list()).map((profile) => profile.name)).toEqual(['Shared accounts', 'Work']);
+    expect(await repos.browserProfiles.get(shared.id)).toEqual(shared);
+
+    const renamed = await repos.browserProfiles.update(shared.id, { name: 'Team logins' });
+    expect(renamed).toMatchObject({ name: 'Team logins' });
+    expect((renamed?.updatedAt ?? '') >= shared.updatedAt).toBe(true);
+    expect(await repos.browserProfiles.update('missing', { name: 'x' })).toBeUndefined();
+
+    expect(await repos.browserProfiles.remove(work.id)).toBe(true);
+    expect(await repos.browserProfiles.remove(work.id)).toBe(false);
+    expect(await repos.browserProfiles.get(work.id)).toBeUndefined();
+  });
+
+  it('rejects an empty, long or multi-line name', async () => {
+    await expect(repos.browserProfiles.create({ name: '   ' })).rejects.toThrow();
+    await expect(repos.browserProfiles.create({ name: 'x'.repeat(61) })).rejects.toThrow();
+    await expect(repos.browserProfiles.create({ name: 'two\nlines' })).rejects.toThrow();
+  });
+
+  it('ungroups its bots when removed and never deletes them', async () => {
+    const profile = await repos.browserProfiles.create({ name: 'Shared accounts' });
+    const first = await repos.bots.create({ name: 'Ada', job: 'x', browser: true, browserProfileId: profile.id });
+    const second = await repos.bots.create({ name: 'Bo', job: 'x', browser: true, browserProfileId: profile.id });
+
+    expect(await repos.browserProfiles.remove(profile.id)).toBe(true);
+    expect((await repos.bots.get(first.id))?.browser).toBe(true);
+    expect((await repos.bots.get(first.id))?.browserProfileId).toBeUndefined();
+    expect((await repos.bots.get(second.id))?.browserProfileId).toBeUndefined();
   });
 });
 

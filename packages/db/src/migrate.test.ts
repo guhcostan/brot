@@ -48,6 +48,7 @@ describe('migrate', () => {
       'approvals',
       'attachments',
       'bots',
+      'browser_profiles',
       'computers',
       'devices',
       'events',
@@ -68,7 +69,62 @@ describe('migrate', () => {
     ]);
 
     const applied = await handle.client.execute('SELECT COUNT(*) AS count FROM __drizzle_migrations');
-    expect(Number(applied.rows[0]?.count)).toBe(11);
+    expect(Number(applied.rows[0]?.count)).toBe(12);
+  });
+
+  it('adds shared browser profiles and the runs started index on a fresh database', async () => {
+    const { handle } = await tempDb();
+    await migrate(handle.db);
+
+    expect(await tableNames(handle)).toContain('browser_profiles');
+    expect(await columnNames(handle, 'bots')).toContain('browser_profile_id');
+    const indexes = await handle.client.execute("PRAGMA index_list('runs')");
+    expect(indexes.rows.some((row) => row.name === 'runs_started_idx')).toBe(true);
+  });
+
+  it('upgrades the wave 12 database in place: shared profiles and the runs started index are added', async () => {
+    const { handle } = await tempDb();
+    const journal = JSON.parse(await readFile(join(migrationsFolder, 'meta', '_journal.json'), 'utf8')) as {
+      entries: Array<{ tag: string; when: number }>;
+    };
+    const before = journal.entries.slice(0, 11);
+    const latest = journal.entries[11];
+    if (before.length !== 11 || latest === undefined) throw new Error('journal must hold the wave 12 and wave 13 migrations');
+
+    // Recreate the database as wave 12 left it, with a bot, a thread and a run already in place.
+    for (const entry of before) {
+      await handle.client.executeMultiple(await readFile(join(migrationsFolder, `${entry.tag}.sql`), 'utf8'));
+    }
+    await handle.client.execute(
+      'CREATE TABLE "__drizzle_migrations" ("id" INTEGER PRIMARY KEY AUTOINCREMENT, "hash" text NOT NULL, "created_at" numeric)',
+    );
+    for (const entry of before) {
+      await handle.client.execute({
+        sql: 'INSERT INTO "__drizzle_migrations" ("hash", "created_at") VALUES (?, ?)',
+        args: [entry.tag, entry.when],
+      });
+    }
+    await handle.client.execute(
+      `INSERT INTO bots (id, name, job, instructions, engine, computer, pinned, archived, created_at, updated_at)
+       VALUES ('bot_old', 'Ada', 'Researcher', '', 'mock', 'none', 0, 0, '2026-10-19T10:00:00.000Z', '2026-10-19T10:00:00.000Z')`,
+    );
+    await handle.client.execute(
+      `INSERT INTO threads (id, bot_id, title, created_at, updated_at)
+       VALUES ('thread_old', 'bot_old', 'Chat', '2026-10-19T10:00:00.000Z', '2026-10-19T10:00:00.000Z')`,
+    );
+    await handle.client.execute(
+      `INSERT INTO runs (id, thread_id, bot_id, status, engine, started_at)
+       VALUES ('run_old', 'thread_old', 'bot_old', 'completed', 'mock', '2026-10-19T10:00:00.000Z')`,
+    );
+
+    await migrate(handle.db);
+
+    const repos = createRepos(handle.db);
+    expect(await columnNames(handle, 'bots')).toContain('browser_profile_id');
+    expect((await repos.bots.get('bot_old'))?.browserProfileId).toBeUndefined();
+    expect((await repos.runs.listByThread('thread_old')).map((run) => run.id)).toEqual(['run_old']);
+    const indexes = await handle.client.execute("PRAGMA index_list('runs')");
+    expect(indexes.rows.some((row) => row.name === 'runs_started_idx')).toBe(true);
   });
 
   it('adds the rooms, team task, and per-bot session schema on a fresh database', async () => {

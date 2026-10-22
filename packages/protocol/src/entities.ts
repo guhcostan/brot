@@ -33,6 +33,18 @@ export const Team = z.object({
 });
 export type Team = z.infer<typeof Team>;
 
+/**
+ * A browser profile on the server machine, holding the logins a person saved in it. A bot either browses with
+ * its own profile (the default) or names a shared one, so several bots use the same signed-in session.
+ */
+export const BrowserProfile = z.object({
+  id: z.string(),
+  name: z.string(),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+});
+export type BrowserProfile = z.infer<typeof BrowserProfile>;
+
 export const Bot = z.object({
   id: z.string(),
   name: z.string(),
@@ -55,6 +67,11 @@ export const Bot = z.object({
    * the bot's `egress` policy.
    */
   browser: z.boolean().optional(),
+  /**
+   * The shared browser profile this bot browses with. Absent means its own profile, which is private to the
+   * bot. Bots that name the same profile share one Chrome and every login in it.
+   */
+  browserProfileId: z.string().optional(),
   /**
    * Whether finished runs post an inbox notification. Absent means true. Approvals and failed runs always
    * notify, because those need a person.

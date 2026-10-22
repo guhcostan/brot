@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   BrowserStatus,
   CreateBot,
+  CreateBrowserProfile,
   CreateRoom,
   CreateTeam,
   CreateRoutine,
@@ -10,6 +11,7 @@ import {
   PostMessage,
   ResolveApproval,
   UpdateBot,
+  UpdateBrowserProfile,
   UpdateRoomMembers,
   UpdateRoutine,
   UpdateTask,
@@ -33,16 +35,35 @@ describe('request schemas', () => {
     });
   });
 
-  it('validates a host browser status', () => {
-    expect(BrowserStatus.parse({ state: 'login' })).toEqual({ state: 'login' });
-    expect(BrowserStatus.parse({ state: 'running' })).toEqual({ state: 'running' });
-    expect(() => BrowserStatus.parse({ state: 'opening' })).toThrow();
+  it('validates a host browser status and the profile behind it', () => {
+    const own = { state: 'login', profile: { kind: 'own' } };
+    expect(BrowserStatus.parse(own)).toEqual(own);
+    const shared = { state: 'running', profile: { kind: 'shared', id: 'bp_1', name: 'Shared accounts' } };
+    expect(BrowserStatus.parse(shared)).toEqual(shared);
+    expect(() => BrowserStatus.parse({ state: 'opening', profile: { kind: 'own' } })).toThrow();
+    expect(() => BrowserStatus.parse({ state: 'login' })).toThrow();
+    expect(() => BrowserStatus.parse({ state: 'login', profile: { kind: 'team' } })).toThrow();
   });
 
   it('accepts a browser flag on CreateBot and UpdateBot', () => {
     expect(CreateBot.parse({ name: 'Ada', job: 'Researcher', browser: true }).browser).toBe(true);
     expect(UpdateBot.parse({ browser: true })).toEqual({ browser: true });
     expect(UpdateBot.parse({ browser: false })).toEqual({ browser: false });
+  });
+
+  it('accepts a shared browser profile on CreateBot and clears it on UpdateBot', () => {
+    expect(CreateBot.parse({ name: 'Ada', job: 'Researcher', browserProfileId: 'bp_1' }).browserProfileId).toBe('bp_1');
+    expect(CreateBot.parse({ name: 'Ada', job: 'Researcher' }).browserProfileId).toBeUndefined();
+    expect(UpdateBot.parse({ browserProfileId: 'bp_1' })).toEqual({ browserProfileId: 'bp_1' });
+    expect(UpdateBot.parse({ browserProfileId: null })).toEqual({ browserProfileId: null });
+  });
+
+  it('trims and validates a browser profile name', () => {
+    expect(CreateBrowserProfile.parse({ name: '  Shared accounts  ' })).toEqual({ name: 'Shared accounts' });
+    expect(UpdateBrowserProfile.parse({ name: 'Work' })).toEqual({ name: 'Work' });
+    expect(() => CreateBrowserProfile.parse({ name: '   ' })).toThrow();
+    expect(() => CreateBrowserProfile.parse({ name: 'x'.repeat(61) })).toThrow();
+    expect(() => CreateBrowserProfile.parse({ name: 'two\nlines' })).toThrow(/single line/);
   });
 
   it('defaults the notification toggle on and lets UpdateBot turn it off', () => {

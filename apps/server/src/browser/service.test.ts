@@ -68,4 +68,39 @@ describe('host browser service without a usable Chrome', () => {
     expect(await service.status(first)).toEqual({ state: 'stopped' });
     expect(await service.status(second)).toEqual({ state: 'stopped' });
   });
+
+  it('reports one state for every bot that shares a profile', async () => {
+    const { service } = await startService();
+    const first = botFor('bot_1', ['example.com'], 'bp_shared');
+    const second = botFor('bot_2', ['example.com'], 'bp_shared');
+    expect(await service.status(first)).toEqual({ state: 'stopped' });
+    expect(await service.status(second)).toEqual({ state: 'stopped' });
+    expect(await service.statusForProfile('bp_shared')).toEqual({ state: 'stopped' });
+  });
+
+  it('leaves a shared profile directory alone when one of its bots is deleted', async () => {
+    const { service, home } = await startService();
+    const bot = botFor('bot_1', undefined, 'bp_shared');
+    const shared = join(home, 'browser-profiles', 'bp_shared');
+    await mkdir(shared, { recursive: true });
+
+    await service.deleteProfile(bot);
+    await service.deleteProfile(bot);
+    expect((await stat(shared)).isDirectory()).toBe(true);
+    expect(await service.status(bot)).toEqual({ state: 'stopped' });
+  });
+
+  it('deletes a shared profile directory through its own methods, idempotently', async () => {
+    const { service, home } = await startService();
+    const shared = join(home, 'browser-profiles', 'bp_shared');
+    await mkdir(shared, { recursive: true });
+
+    await service.closeProfile('bp_shared');
+    expect(await service.statusForProfile('bp_shared')).toEqual({ state: 'stopped' });
+
+    await service.deleteProfileDir('bp_shared');
+    await service.deleteProfileDir('bp_shared');
+    await expect(stat(shared)).rejects.toThrow();
+    expect(await service.statusForProfile('bp_shared')).toEqual({ state: 'stopped' });
+  });
 });

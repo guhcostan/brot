@@ -4,6 +4,7 @@ import type { EngineRegistry } from '@brot/engines';
 import {
   ApprovalStatus,
   CreateBot,
+  CreateBrowserProfile,
   CreateMcpServer,
   CreateMemory,
   CreatePolicy,
@@ -23,6 +24,7 @@ import {
   TaskStatus,
   ThreadKind,
   UpdateBot,
+  UpdateBrowserProfile,
   UpdateMcpServer,
   UpdateMemory,
   UpdateRoomMembers,
@@ -31,6 +33,8 @@ import {
   UpdateTask,
   UpdateTeam,
   UpdateThread,
+  type Bot,
+  type BrowserProfileRef,
   type CanonicalEvent,
   type RoutineTrigger,
   type Thread,
@@ -204,6 +208,19 @@ function invalidReference(c: Context<AppEnv>, path: string, message: string): Re
   return c.json({ error: 'Invalid request', issues: [{ path: [path], message }] }, 400);
 }
 
+/** The id when it names no browser profile, for a 400 issue. Absent and `null` mean the bot's own profile. */
+async function unknownBrowserProfile(repos: Repos, id: string | null | undefined): Promise<string | undefined> {
+  if (id === undefined || id === null) return undefined;
+  return (await repos.browserProfiles.get(id)) === undefined ? id : undefined;
+}
+
+/** Which profile serves a bot's host browser: its own, or the shared profile it names. */
+async function browserProfileRef(repos: Repos, bot: Bot): Promise<BrowserProfileRef> {
+  if (bot.browserProfileId === undefined) return { kind: 'own' };
+  const profile = await repos.browserProfiles.get(bot.browserProfileId);
+  return { kind: 'shared', id: bot.browserProfileId, name: profile?.name ?? bot.browserProfileId };
+}
+
 /**
  * The title a default-titled thread takes from its first user message: the content's first line, trimmed and
  * cut to 80 code units. A surrogate pair at the edge is dropped whole instead of leaving half a code point.
@@ -265,10 +282,43 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     c.json(await repos.bots.list({ includeArchived: c.req.query('includeArchived') === 'true' })),
   );
 
+  /** Shared browser profiles: one signed-in Chrome on the server machine that several bots can use. */
+  app.get('/api/browser/profiles', async (c) => c.json(await repos.browserProfiles.list()));
+
+  app.post('/api/browser/profiles', async (c) => {
+    const body = await parseBody(c, CreateBrowserProfile);
+    if (!body.ok) return body.response;
+    return c.json(await repos.browserProfiles.create(body.data), 201);
+  });
+
+  app.patch('/api/browser/profiles/:id', async (c) => {
+    const id = c.req.param('id');
+    if ((await repos.browserProfiles.get(id)) === undefined) return notFound(c, 'Browser profile');
+    const body = await parseBody(c, UpdateBrowserProfile);
+    if (!body.ok) return body.response;
+    const profile = await repos.browserProfiles.update(id, body.data);
+    return profile === undefined ? notFound(c, 'Browser profile') : c.json(profile);
+  });
+
+  /**
+   * Deletes a shared profile: its browser closes, its saved logins directory goes, and every bot that named it
+   * falls back to its own profile. The bots themselves are untouched.
+   */
+  app.delete('/api/browser/profiles/:id', async (c) => {
+    const id = c.req.param('id');
+    if ((await repos.browserProfiles.get(id)) === undefined) return notFound(c, 'Browser profile');
+    await browser.closeProfile(id);
+    await browser.deleteProfileDir(id);
+    await repos.browserProfiles.remove(id);
+    return c.body(null, 204);
+  });
+
   app.post('/api/bots', async (c) => {
     const body = await parseBody(c, CreateBot);
     if (!body.ok) return body.response;
     if (body.data.computer === 'host' && config.mode !== 'desktop') return hostRefused(c);
+    const missingProfile = await unknownBrowserProfile(repos, body.data.browserProfileId);
+    if (missingProfile !== undefined) return invalidReference(c, 'browserProfileId', 'unknown browser profile');
     return c.json(await repos.bots.create(body.data), 201);
   });
 
@@ -281,6 +331,8 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     const body = await parseBody(c, UpdateBot);
     if (!body.ok) return body.response;
     if (body.data.computer === 'host' && config.mode !== 'desktop') return hostRefused(c);
+    const missingProfile = await unknownBrowserProfile(repos, body.data.browserProfileId);
+    if (missingProfile !== undefined) return invalidReference(c, 'browserProfileId', 'unknown browser profile');
     const before = await repos.bots.get(c.req.param('id'));
     const bot = await repos.bots.update(c.req.param('id'), body.data);
     if (bot && before && bot.engine !== before.engine) await harness.resetEngineSessions(bot.id);
@@ -304,7 +356,8 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     const bot = await repos.bots.get(c.req.param('id'));
     if (!bot) return notFound(c, 'Bot');
     if (bot.browser !== true) return c.json({ error: 'This bot has no browser' }, 409);
-    return c.json(await browser.status(bot));
+    const status = await browser.status(bot);
+    return c.json({ state: status.state, profile: await browserProfileRef(repos, bot) });
   });
 
   /**
@@ -318,10 +371,14 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     if (botBrowserKind(bot) === 'desktop') {
       return c.json({ error: 'This bot already has a browser in its desktop' }, 409);
     }
-    return c.json(await browser.openForLogin(bot), 202);
+    const status = await browser.openForLogin(bot);
+    return c.json({ state: status.state, profile: await browserProfileRef(repos, bot) }, 202);
   });
 
-  /** Closes the bot's browser and saves its profile. Closing a browser that is already stopped is not an error. */
+  /**
+   * Closes the bot's browser and saves its profile. For a shared profile this affects every bot using it.
+   * Closing a browser that is already stopped is not an error.
+   */
   app.post('/api/bots/:id/browser/close', async (c) => {
     const bot = await repos.bots.get(c.req.param('id'));
     if (!bot) return notFound(c, 'Bot');

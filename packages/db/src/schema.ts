@@ -45,6 +45,11 @@ export const bots = sqliteTable('bots', {
   computer: text('computer').$type<ComputerKind>().notNull(),
   desktop: integer('desktop', { mode: 'boolean' }).notNull().default(false),
   browser: integer('browser', { mode: 'boolean' }).notNull().default(false),
+  /**
+   * The shared browser profile the bot browses with. Plain text, not a foreign key: deleting a profile
+   * ungroups its bots instead of touching them. Absent means the bot's own profile.
+   */
+  browserProfileId: text('browser_profile_id'),
   notifications: integer('notifications', { mode: 'boolean' }).notNull().default(true),
   /** The bot's team. Plain text, not a foreign key: deleting a team ungroups its bots instead of touching them. */
   teamId: text('team_id'),
@@ -65,6 +70,14 @@ export const teams = sqliteTable('teams', {
   name: text('name').notNull(),
   instructions: text('instructions').notNull(),
   chiefBotId: text('chief_bot_id').references(() => bots.id, { onDelete: 'set null' }),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+});
+
+/** A signed-in Chrome profile on the server machine, optionally shared by several bots. */
+export const browserProfiles = sqliteTable('browser_profiles', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
 });
@@ -189,7 +202,8 @@ export const runs = sqliteTable(
     costUsd: real('cost_usd').notNull().default(0),
     error: text('error'),
   },
-  (t) => [index('runs_thread_idx').on(t.threadId)],
+  // The usage range query scans by startedAt; the thread lookup has its own index.
+  (t) => [index('runs_thread_idx').on(t.threadId), index('runs_started_idx').on(t.startedAt)],
 );
 
 export const approvals = sqliteTable(

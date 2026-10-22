@@ -40,6 +40,8 @@ export const CreateBot = z
     computer: ComputerKind.default('sandbox'),
     desktop: z.boolean().optional(),
     browser: z.boolean().default(false),
+    /** Browse with a shared profile instead of the bot's own. */
+    browserProfileId: z.string().min(1).optional(),
     notifications: z.boolean().default(true),
     avatar: z.string().optional(),
     teamId: z.string().min(1).optional(),
@@ -62,6 +64,8 @@ export const UpdateBot = z
     computer: ComputerKind.optional(),
     desktop: z.boolean().optional(),
     browser: z.boolean().optional(),
+    /** A shared profile id, or `null` to go back to the bot's own profile. */
+    browserProfileId: z.string().min(1).nullable().optional(),
     notifications: z.boolean().optional(),
     /** `null` removes the bot from its team. */
     teamId: z.string().min(1).nullable().optional(),
@@ -329,11 +333,37 @@ export const SetTakeover = z.object({
 export type SetTakeover = z.infer<typeof SetTakeover>;
 
 /**
- * What `GET /api/bots/:id/browser` returns: the bot's host browser. `login` means a headed window is open for the
- * person to sign in.
+ * A profile name as a person types it: trimmed, 1 to 60 characters, one line. Blank names and line breaks are
+ * refused because the name is shown in bot forms and one-line lists.
+ */
+const BrowserProfileName = z
+  .string()
+  .trim()
+  .min(1)
+  .max(60)
+  .refine((name) => !/[\r\n]/.test(name), 'must be a single line');
+
+/** Creates a shared browser profile: one set of logins several bots can use. */
+export const CreateBrowserProfile = z.object({ name: BrowserProfileName });
+export type CreateBrowserProfile = z.infer<typeof CreateBrowserProfile>;
+
+export const UpdateBrowserProfile = z.object({ name: BrowserProfileName });
+export type UpdateBrowserProfile = z.infer<typeof UpdateBrowserProfile>;
+
+/** Which profile serves a bot's host browser: its own, or a shared profile it names. */
+export const BrowserProfileRef = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('own') }),
+  z.object({ kind: z.literal('shared'), id: z.string(), name: z.string() }),
+]);
+export type BrowserProfileRef = z.infer<typeof BrowserProfileRef>;
+
+/**
+ * What `GET /api/bots/:id/browser` returns: the bot's host browser and the profile behind it. `login` means a
+ * headed window is open for the person to sign in; `state` stays where it was so older clients still read it.
  */
 export const BrowserStatus = z.object({
   state: z.enum(['stopped', 'running', 'login']),
+  profile: BrowserProfileRef,
 });
 export type BrowserStatus = z.infer<typeof BrowserStatus>;
 

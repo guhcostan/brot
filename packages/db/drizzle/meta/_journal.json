@@ -78,6 +78,13 @@
       "when": 1792683601282,
       "tag": "0010_supreme_nomad",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1792686977572,
+      "tag": "0011_brown_skullbuster",
+      "breakpoints": true
     }
   ]
 }

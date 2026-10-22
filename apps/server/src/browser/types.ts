@@ -20,24 +20,43 @@ export interface BrowserDriver {
   browser(bot: Bot, command: string, args: Record<string, unknown>): Promise<Record<string, unknown>>;
 }
 
+/**
+ * A host browser runs one Chrome per browser profile, not per bot. A bot either uses its own profile or names a
+ * shared one (`bot.browserProfileId`), so several bots can share one signed-in session. Every method below acts
+ * on the bot's effective profile.
+ */
 export interface HostBrowserService extends BrowserDriver {
+  /** The state of the browser serving the bot's effective profile. */
   status(bot: Bot): Promise<HostBrowserStatus>;
   /**
-   * Starts a headed browser with the bot's profile so the person can sign in, and leaves it open. The
-   * next time the bot uses the browser the window closes and the profile (with the session) is reused.
-   * The window is not proxied: the person is driving it, and sign-in flows reach sites the bot's egress
-   * policy does not cover.
+   * Starts a headed browser with the bot's effective profile so the person can sign in, and leaves it open.
+   * Every bot in a shared profile sees `login` while the window is up. The next time the bot uses the browser
+   * the window closes and the profile (with the session) is reused. The window is not proxied: the person is
+   * driving it, and sign-in flows reach sites the bot's egress policy does not cover.
    */
   openForLogin(bot: Bot): Promise<HostBrowserStatus>;
-  /** Closes the bot's browser, saving its profile. Idempotent. */
+  /** Closes the browser for the bot's effective profile, saving it. Affects every bot sharing it. Idempotent. */
   close(bot: Bot): Promise<void>;
-  /** Closes the browser and deletes its profile, for a bot that is being deleted. Idempotent. */
+  /**
+   * Closes the browser and deletes the saved logins, for a bot that is being deleted. Only a bot on its own
+   * profile has a directory to delete; a shared profile outlives any one bot and is deleted through its route.
+   * Idempotent.
+   */
   deleteProfile(bot: Bot): Promise<void>;
+  /** The state of one profile's browser, by profile key (a shared profile id, or a bot id for an own profile). */
+  statusForProfile(profileId: string): Promise<HostBrowserStatus>;
+  /** Closes the browser serving a shared profile, saving it. Idempotent. */
+  closeProfile(profileId: string): Promise<void>;
+  /** Closes the browser and deletes a shared profile's directory, logins included. Idempotent. */
+  deleteProfileDir(profileId: string): Promise<void>;
   closeAll(): Promise<void>;
 }
 
 export interface HostBrowserDeps {
-  /** The Brot home; profiles live in `<home>/browser-profiles/<botId>`. */
+  /**
+   * The Brot home. Profiles live in `<home>/browser-profiles/<key>`, where the key is a shared profile id or,
+   * for a bot's own profile, the bot id.
+   */
   home: string;
   /** Chrome binary. Defaults to `BROT_BROWSER_PATH`, then the usual macOS/Linux/Windows locations. */
   binary?: string;
