@@ -12,7 +12,9 @@ describe('mock team scenario', () => {
   it('seeds only protocol-valid events and tasks', async () => {
     const client = createMockClient();
     for (const bot of await client.listBots()) {
-      for (const event of await client.history(bot.id)) expect(() => CanonicalEvent.parse(event)).not.toThrow();
+      for (const thread of await client.listThreads(bot.id)) {
+        for (const event of await client.history(thread.id)) expect(() => CanonicalEvent.parse(event)).not.toThrow();
+      }
     }
     for (const room of await client.listRooms()) {
       for (const event of await client.roomHistory(room.thread.id)) expect(() => CanonicalEvent.parse(event)).not.toThrow();
@@ -26,7 +28,9 @@ describe('mock team scenario', () => {
     expect(gazeTargets(room)).toEqual({ bot_onca: 'bot_tamu' });
     expect(room.items.some((item) => item.kind === 'handoff')).toBe(true);
 
-    const tuca = foldEvents(await client.history('bot_tuca'));
+    const tucaThread = (await client.listThreads('bot_tuca'))[0];
+    if (!tucaThread) throw new Error('bot_tuca has no DM thread');
+    const tuca = foldEvents(await client.history(tucaThread.id));
     expect(pendingApprovals(tuca)).toHaveLength(1);
     expect((await client.listTasks({ status: 'blocked' })).map((task) => task.assigneeBotId)).toEqual(['bot_tuca']);
   });
@@ -75,5 +79,63 @@ describe('mock team scenario', () => {
   it('refuses a room with one bot', async () => {
     const client = createMockClient();
     await expect(client.createRoom({ title: 'Solo', botIds: ['bot_capy'], leadBotId: 'bot_capy', responder: 'lead' })).rejects.toThrow();
+  });
+});
+
+describe('mock threads', () => {
+  it('seeds each bot with one default DM thread', async () => {
+    const client = createMockClient();
+    for (const bot of await client.listBots()) {
+      const threads = await client.listThreads(bot.id);
+      expect(threads).toHaveLength(1);
+      expect(threads[0]).toMatchObject({ botId: bot.id, kind: 'dm' });
+      expect(threads[0]?.title).toBeTruthy();
+    }
+  });
+
+  it('keeps many threads of one bot independent, and answers in the thread that was posted to', async () => {
+    const client = createMockClient();
+    const events: BotEvent[] = [];
+    client.onEvent((item) => events.push(item));
+    const [seed] = await client.listThreads('bot_capy');
+    if (!seed) throw new Error('bot_capy has no DM thread');
+    const second = await client.createThread('bot_capy', { title: 'Planning' });
+
+    await client.postMessage(second.id, { content: 'Plan the week' });
+    await vi.runAllTimersAsync();
+
+    const planning = foldEvents(await client.history(second.id));
+    const seeded = foldEvents(await client.history(seed.id));
+    expect(planning.items).toEqual(expect.arrayContaining([expect.objectContaining({ kind: 'message', content: 'Plan the week' })]));
+    expect(seeded.items.some((item) => item.kind === 'message' && item.content === 'Plan the week')).toBe(false);
+    expect(events.filter((entry) => entry.threadId === second.id).length).toBeGreaterThan(0);
+    expect(events.filter((entry) => entry.threadId === second.id).every((entry) => entry.botId === 'bot_capy')).toBe(true);
+  });
+
+  it('lists a bot threads most recent first, renames one, and creates the first for a new bot', async () => {
+    const client = createMockClient();
+    const created = await client.createThread('bot_capy', { title: 'Planning' });
+    const listed = await client.listThreads('bot_capy');
+    expect(listed.map((thread) => thread.id)).toEqual([created.id, 'thread_bot_capy']);
+
+    const renamed = await client.renameThread(created.id, 'Q4 planning');
+    expect(renamed.title).toBe('Q4 planning');
+    expect((await client.listThreads('bot_capy')).find((thread) => thread.id === created.id)?.title).toBe('Q4 planning');
+
+    const bot = await client.createBot({ name: 'Lobo', job: 'Researcher', computer: 'none' });
+    expect(await client.listThreads(bot.id)).toEqual([]);
+    const first = await client.createThread(bot.id);
+    expect((await client.listThreads(bot.id)).map((thread) => thread.id)).toEqual([first.id]);
+    await expect(client.renameThread(first.id, '')).rejects.toThrow();
+  });
+
+  it('creates the first thread when a task needs one for a new bot', async () => {
+    const client = createMockClient();
+    const bot = await client.createBot({ name: 'Lobo', job: 'Researcher', computer: 'none' });
+    const task = await client.createTask({ title: 'Check the docs', assigneeBotId: bot.id });
+    const [thread] = await client.listThreads(bot.id);
+    expect(thread).toBeDefined();
+    expect(task.threadId).toBe(thread?.id);
+    await vi.runAllTimersAsync();
   });
 });

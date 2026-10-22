@@ -17,7 +17,7 @@ import { ThreadView } from './components/ThreadView';
 import { currentShell } from './components/shell';
 import { createClient } from './data';
 import { getLocale, setLocale, t, type Locale } from './i18n';
-import { inbox, membersOf, statusOfBot, statusOfRoom, taskList, type Selection } from './state/store';
+import { inbox, membersOf, statusOfBot, statusOfRoom, taskList, threadStatusOf, type Selection } from './state/store';
 import { tasksForBot, tasksForRoom } from './state/tasks';
 import { emptyThread, pendingApprovals } from './state/thread';
 import { useChat } from './state/useChat';
@@ -44,17 +44,27 @@ function useWide(): boolean {
   return wide;
 }
 
-const selectionKey = (selection: Selection | null) => (selection ? ('id' in selection ? `${selection.kind}:${selection.id}` : selection.kind) : 'none');
+/** A DM is identified by its thread too, so two threads of one bot are separate panes. */
+const selectionKey = (selection: Selection | null): string => {
+  if (selection === null) return 'none';
+  if ('threadId' in selection) return `${selection.kind}:${selection.id}:${selection.threadId}`;
+  return 'id' in selection ? `${selection.kind}:${selection.id}` : selection.kind;
+};
+
+interface TakeoverNoticeState {
+  takeover: Takeover;
+  selection: Selection;
+}
 
 /**
  * Three panes like DESIGN.md section 7. Below md the app shows one pane at a time; below xl the
- * context panel is an overlay. The main pane shows a bot's DM, a room, the task board, the approvals
- * inbox, or settings.
+ * context panel is an overlay. The main pane shows one of a bot's DM threads, a room, the task
+ * board, the approvals inbox, or settings.
  */
 export function App(): ReactElement {
   const client = useMemo(() => createClient(), []);
   const chat = useChat(client);
-  const { state, select, send, sendToRoom, decide, createRoom, createTask, cancelTask } = chat;
+  const { state, select, openBot, newThread, loadThreads, loadHistory, send, sendToRoom, decide, createRoom, createTask, cancelTask } = chat;
   const [pane, setPane] = useState<Pane>('thread');
   const [locale, setLocaleState] = useState<Locale>(getLocale);
   const [theme, setThemeState] = useState<Theme>(getTheme);
@@ -63,7 +73,7 @@ export function App(): ReactElement {
   const [newTaskOpen, setNewTaskOpen] = useState(false);
   const [openTaskId, setOpenTaskId] = useState<string | null>(null);
   const [botDialog, setBotDialog] = useState<{ botId?: string } | null>(null);
-  const [notice, setNotice] = useState<Takeover | null>(null);
+  const [notice, setNotice] = useState<TakeoverNoticeState | null>(null);
   const seenTakeovers = useRef(new Set<string>());
   const wide = useWide();
 
@@ -83,23 +93,55 @@ export function App(): ReactElement {
     [state, botsById],
   );
   const waitingBots = useMemo(() => {
-    const threads = [...Object.values(state.threads), ...Object.values(state.roomThreads)];
-    return new Set(threads.flatMap((thread) => pendingApprovals(thread).map((item) => item.approval.botId)));
-  }, [state.threads, state.roomThreads]);
+    const waiting = new Set<string>();
+    for (const thread of Object.values(state.threads)) {
+      for (const item of pendingApprovals(thread)) waiting.add(item.approval.botId);
+    }
+    return waiting;
+  }, [state.threads]);
   const pending = useMemo(() => inbox(state), [state]);
 
   const goTo = useCallback(
-    (selection: Parameters<typeof select>[0]) => {
+    (selection: Selection) => {
       select(selection);
       setPane('thread');
     },
     [select],
   );
 
+  const openBotPane = useCallback(
+    async (botId: string) => {
+      await openBot(botId);
+      setPane('thread');
+    },
+    [openBot],
+  );
+
+  const openThread = useCallback(
+    (botId: string, threadId: string) => {
+      goTo({ kind: 'bot', id: botId, threadId });
+    },
+    [goTo],
+  );
+
+  const startThread = useCallback(
+    async (botId: string) => {
+      await newThread(botId);
+      setPane('thread');
+    },
+    [newThread],
+  );
+
+  // A thread's history is read the first time it is shown; the most recent thread of every bot is
+  // already loaded at startup.
+  useEffect(() => {
+    if (state.selection?.kind === 'room') void loadHistory(state.selection.id, 'room');
+    else if (state.selection?.kind === 'bot') void loadHistory(state.selection.threadId, 'dm');
+  }, [state.selection, loadHistory]);
+
   // A bot that asks for the person at its computer opens its panel and says why (docs/COMPUTER-USE.md).
   useEffect(() => {
-    const threads = [...Object.values(state.threads), ...Object.values(state.roomThreads)];
-    for (const thread of threads) {
+    for (const [threadId, thread] of Object.entries(state.threads)) {
       const takeover = thread.takeover;
       if (!takeover) continue;
       const key = `${takeover.botId}:${takeover.at}:${String(takeover.active)}`;
@@ -108,14 +150,17 @@ export function App(): ReactElement {
       // History replays old takeovers; only a request from the last minute opens the panel.
       const fresh = Date.now() - Date.parse(takeover.at) < 60_000;
       if (takeover.active && takeover.requestedBy === 'bot' && fresh) {
-        select({ kind: 'bot', id: takeover.botId });
+        const target: Selection = state.rooms.some((room) => room.thread.id === threadId)
+          ? { kind: 'room', id: threadId }
+          : { kind: 'bot', id: takeover.botId, threadId };
+        select(target);
         setPane('context');
-        setNotice(takeover);
+        setNotice({ takeover, selection: target });
       } else if (!takeover.active) {
-        setNotice((current) => (current?.botId === takeover.botId ? null : current));
+        setNotice((current) => (current?.takeover.botId === takeover.botId ? null : current));
       }
     }
-  }, [state.threads, state.roomThreads, select]);
+  }, [state.threads, state.rooms, select]);
 
   const team: TeamContextValue = useMemo(
     () => ({
@@ -123,16 +168,22 @@ export function App(): ReactElement {
       rooms: state.rooms,
       tasks: state.tasks,
       waitingBots,
-      openBot: (id) => goTo({ kind: 'bot', id }),
+      openBot: (id, threadId) => {
+        if (threadId !== undefined) openThread(id, threadId);
+        else void openBotPane(id);
+      },
       openRoom: (id) => goTo({ kind: 'room', id }),
       openTask: setOpenTaskId,
     }),
-    [botsById, state.rooms, state.tasks, waitingBots, goTo],
+    [botsById, state.rooms, state.tasks, waitingBots, openThread, openBotPane, goTo],
   );
 
   const { selection } = state;
-  const bot = selection?.kind === 'bot' ? (botsById[selection.id] ?? null) : null;
+  const selectedBotId = selection?.kind === 'bot' ? selection.id : null;
+  const selectedThreadId = selection?.kind === 'bot' ? selection.threadId : null;
+  const bot = selectedBotId !== null ? (botsById[selectedBotId] ?? null) : null;
   const room = selection?.kind === 'room' ? (state.rooms.find((entry) => entry.thread.id === selection.id) ?? null) : null;
+  const selectedThread = selectedBotId !== null ? (state.threadLists[selectedBotId] ?? []).find((thread) => thread.id === selectedThreadId) : undefined;
   const allTasks = taskList(state);
   const activeTasks = allTasks.filter((task) => task.status === 'open' || task.status === 'in_progress' || task.status === 'blocked').length;
   const editing = botDialog?.botId ? botsById[botDialog.botId] : undefined;
@@ -142,12 +193,14 @@ export function App(): ReactElement {
     : room
       ? { kind: 'room', room, members: memberBots(room.thread.id) }
       : null;
-  const subjectThread = bot ? (state.threads[bot.id] ?? emptyThread) : room ? (state.roomThreads[room.thread.id] ?? emptyThread) : emptyThread;
+  const subjectThread =
+    selectedThreadId !== null ? (state.threads[selectedThreadId] ?? emptyThread) : room ? (state.threads[room.thread.id] ?? emptyThread) : emptyThread;
   const subjectTasks = bot ? tasksForBot(state.tasks, bot.id) : room ? tasksForRoom(state.tasks, room.thread.id) : [];
 
   const openBots = () => setPane('bots');
   const openContext = () => setPane('context');
   const newBot = () => setBotDialog({});
+  const noBots = state.ready && state.bots.length === 0;
 
   let main: ReactElement;
   if (selection?.kind === 'tasks') {
@@ -162,7 +215,7 @@ export function App(): ReactElement {
         key={room.thread.id}
         room={room}
         members={memberBots(room.thread.id)}
-        thread={state.roomThreads[room.thread.id] ?? emptyThread}
+        thread={state.threads[room.thread.id] ?? emptyThread}
         status={statusOfRoom(state, room.thread.id)}
         onSend={(input) => sendToRoom(room.thread.id, input)}
         onDecide={decide}
@@ -170,15 +223,16 @@ export function App(): ReactElement {
         onOpenContext={openContext}
       />
     );
-  } else if (bot) {
+  } else if (bot && selectedThreadId !== null) {
     main = (
       <ThreadView
-        key={bot.id}
+        key={selectedThreadId}
         bot={bot}
-        thread={state.threads[bot.id] ?? emptyThread}
-        loaded={state.threads[bot.id] !== undefined}
+        title={selectedThread?.title ?? bot.name}
+        thread={state.threads[selectedThreadId] ?? emptyThread}
+        loaded={state.threads[selectedThreadId] !== undefined}
         status={statusOfBot(state, bot.id)}
-        onSend={(content) => send(bot.id, content)}
+        onSend={(content) => send(selectedThreadId, bot.id, content)}
         onEdit={() => setBotDialog({ botId: bot.id })}
         onDecide={decide}
         onOpenBots={openBots}
@@ -190,10 +244,10 @@ export function App(): ReactElement {
       <div className="flex flex-1 items-center justify-center" data-avatar-zone>
         <EmptyState
           icon={<BotAvatar species="capivara" color="black" mood={state.error ? 'error' : state.ready ? 'idle' : 'thinking'} size={64} />}
-          title={state.error ?? (state.ready ? t('app.noBots') : t('app.tagline'))}
-          description={state.ready && !state.error ? t('app.noBotsBody') : undefined}
+          title={state.error ?? (noBots ? t('app.noBots') : t('app.tagline'))}
+          description={noBots && !state.error ? t('app.noBotsBody') : undefined}
           actions={
-            state.ready && !state.error ? (
+            noBots && !state.error ? (
               <Button variant="primary" onClick={newBot}>
                 <Plus size={16} />
                 {t('sidebar.newBot')}
@@ -207,6 +261,7 @@ export function App(): ReactElement {
 
   const fullWidth = selection?.kind === 'tasks' || selection?.kind === 'approvals' || selection?.kind === 'settings';
   const taskRoom = room ? { id: room.thread.id, title: room.thread.title, memberIds: membersOf(state, room.thread.id) } : undefined;
+  const noticeVisible = notice !== null && !(selection !== null && selectionKey(selection) === selectionKey(notice.selection) && (wide || pane === 'context'));
 
   return (
     <ClientProvider value={client}>
@@ -221,7 +276,9 @@ export function App(): ReactElement {
           <Sidebar
             bots={state.bots}
             rooms={state.rooms}
+            threadLists={state.threadLists}
             statusOf={(botId) => statusOfBot(state, botId)}
+            threadStatusOf={(threadId) => threadStatusOf(state, threadId)}
             roomStatusOf={(roomId) => statusOfRoom(state, roomId)}
             membersOf={(roomId) => membersOf(state, roomId)}
             activeTasks={activeTasks}
@@ -229,6 +286,10 @@ export function App(): ReactElement {
             ready={state.ready}
             selection={selection}
             onSelect={goTo}
+            onOpenBot={(botId) => void openBotPane(botId)}
+            onOpenThread={openThread}
+            onLoadThreads={loadThreads}
+            onNewThread={(botId) => void startThread(botId)}
             onNewRoom={() => setNewRoomOpen(true)}
             onNewBot={newBot}
             locale={locale}
@@ -253,12 +314,12 @@ export function App(): ReactElement {
           ) : null}
         </div>
 
-        {notice && !(bot?.id === notice.botId && (wide || pane === 'context')) ? (
+        {noticeVisible && notice !== null ? (
           <TakeoverNotice
-            takeover={notice}
-            name={botsById[notice.botId]?.name ?? t('team.unknownBot')}
+            takeover={notice.takeover}
+            name={botsById[notice.takeover.botId]?.name ?? t('team.unknownBot')}
             onOpen={() => {
-              select({ kind: 'bot', id: notice.botId });
+              select(notice.selection);
               setPane('context');
             }}
             onDismiss={() => setNotice(null)}

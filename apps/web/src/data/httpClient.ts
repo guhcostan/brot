@@ -7,6 +7,7 @@ import {
   CreateBot,
   CreateRoom,
   CreateTask,
+  CreateThread,
   Device,
   Message,
   PairingStartResponse,
@@ -21,6 +22,7 @@ import {
   UpdateBot,
   UpdateRoomMembers,
   UpdateTask,
+  UpdateThread,
   DESKTOP_HEIGHT,
   DESKTOP_WIDTH,
   type CanonicalEventType,
@@ -73,9 +75,10 @@ const EVENT_NAMES: Record<CanonicalEventType, true> = {
 };
 
 /**
- * Talks to a running Brot server over its /api routes (docs/TEAM-API.md). Each bot maps to its DM:
- * the first `kind=dm` thread the server lists, cached for the session. Reads never create threads;
- * the first postMessage creates one when a bot has none. Rooms are their own threads.
+ * Talks to a running Brot server over its /api routes (docs/TEAM-API.md). A bot has any number of DM
+ * threads; `threadId -> botId` is learned from the thread lists and creations, so live events reach
+ * the right conversation. A thread the client has not seen yet gets one lazy lookup across every
+ * known bot's threads and the rooms. Rooms are their own threads.
  */
 export function createHttpClient({
   baseUrl = '',
@@ -84,14 +87,15 @@ export function createHttpClient({
 }: HttpClientOptions = {}): BrotClient {
   const root = baseUrl.replace(/\/$/, '');
   const knownBots = new Set<string>();
-  const threadOfBot = new Map<string, string>();
   const botOfThread = new Map<string, string>();
-  const creatingThread = new Map<string, Promise<string>>();
+  const threadsOfBot = new Map<string, Thread[]>();
+  const creatingThread = new Map<string, Promise<Thread>>();
   const roomIds = new Set<string>();
   const listeners = new Set<(event: BotEvent) => void>();
   let roomsLoaded: Promise<void> | undefined;
   let stream: EventStream | undefined;
   let delivery: Promise<void> = Promise.resolve();
+  let threadsLookup: Promise<void> | undefined;
 
   async function request(path: string, init?: RequestInit): Promise<Response> {
     const response = await fetch(`${root}${path}`, init);
@@ -114,34 +118,45 @@ export function createHttpClient({
     });
   }
 
-  function remember(botId: string, threadId: string): string {
-    threadOfBot.set(botId, threadId);
-    botOfThread.set(threadId, botId);
-    return threadId;
+  function rememberThread(thread: Thread): Thread {
+    botOfThread.set(thread.id, thread.botId);
+    return thread;
   }
 
-  async function findThread(botId: string): Promise<string | undefined> {
-    const cached = threadOfBot.get(botId);
-    if (cached !== undefined) return cached;
-    const threads = await read(`/api/bots/${encodeURIComponent(botId)}/threads?kind=dm`, Thread.array());
-    const first = threads.find((thread) => (thread.kind ?? 'dm') === 'dm');
-    return first === undefined ? undefined : remember(botId, first.id);
+  function cacheThreads(botId: string, threads: Thread[]): Thread[] {
+    const dms = threads.filter((thread) => (thread.kind ?? 'dm') === 'dm');
+    for (const thread of dms) rememberThread(thread);
+    threadsOfBot.set(botId, dms);
+    return dms;
   }
 
-  async function createPrimaryThread(botId: string): Promise<string> {
-    const existing = await findThread(botId);
-    if (existing !== undefined) return existing;
-    const response = await write('POST', `/api/bots/${encodeURIComponent(botId)}/threads`, {});
-    return remember(botId, Thread.parse(await response.json()).id);
+  /** A bot's DM threads, most recently active first, straight from the server. */
+  async function fetchThreads(botId: string): Promise<Thread[]> {
+    return cacheThreads(botId, await read(`/api/bots/${encodeURIComponent(botId)}/threads?kind=dm`, Thread.array()));
   }
 
-  /** Returns the bot's primary thread, creating it on first use. Concurrent callers share one creation. */
-  function ensureThread(botId: string): Promise<string> {
-    const cached = threadOfBot.get(botId);
+  function addThread(botId: string, thread: Thread): Thread {
+    rememberThread(thread);
+    const cached = threadsOfBot.get(botId) ?? [];
+    threadsOfBot.set(botId, [thread, ...cached.filter((entry) => entry.id !== thread.id)]);
+    return thread;
+  }
+
+  async function createDmThread(botId: string, input: { title?: string } = {}): Promise<Thread> {
+    const body = CreateThread.parse(input);
+    const response = await write('POST', `/api/bots/${encodeURIComponent(botId)}/threads`, body);
+    return addThread(botId, Thread.parse(await response.json()));
+  }
+
+  /** The bot's most recent DM thread, creating the first one when it has none. Concurrent callers share it. */
+  function ensureThread(botId: string): Promise<Thread> {
+    const cached = threadsOfBot.get(botId)?.[0];
     if (cached !== undefined) return Promise.resolve(cached);
     let pending = creatingThread.get(botId);
     if (pending === undefined) {
-      pending = createPrimaryThread(botId).finally(() => creatingThread.delete(botId));
+      pending = (async () => (await fetchThreads(botId))[0] ?? (await createDmThread(botId)))().finally(() =>
+        creatingThread.delete(botId),
+      );
       creatingThread.set(botId, pending);
     }
     return pending;
@@ -159,25 +174,29 @@ export function createHttpClient({
     return rooms;
   }
 
+  /** One lazy lookup of every known bot's threads and the rooms, shared by concurrent unseen events. */
+  function lookupUnseen(): Promise<void> {
+    threadsLookup ??= (async () => {
+      await Promise.all([...knownBots].map((botId) => fetchThreads(botId).catch(() => undefined)));
+      if (roomsLoaded !== undefined) await fetchRooms().catch(() => undefined);
+    })().finally(() => {
+      threadsLookup = undefined;
+    });
+    return threadsLookup;
+  }
+
   /**
    * Maps a live event's thread to its conversation. A thread the client has not seen yet (created on
-   * another device, or by a routine) gets one lookup of the bots' DMs and one of the rooms.
+   * another device, or by a routine) gets one lookup before delivery.
    */
   async function targetOf(threadId: string): Promise<{ botId: string } | { roomId: string } | undefined> {
     const known = botOfThread.get(threadId);
     if (known !== undefined) return { botId: known };
     if (roomIds.has(threadId)) return { roomId: threadId };
-    await Promise.all(
-      [...knownBots]
-        .filter((botId) => !threadOfBot.has(botId))
-        .map((botId) => findThread(botId).catch(() => undefined)),
-    );
+    await lookupUnseen();
     const found = botOfThread.get(threadId);
     if (found !== undefined) return { botId: found };
-    if (roomsLoaded !== undefined) {
-      await fetchRooms().catch(() => undefined);
-      if (roomIds.has(threadId)) return { roomId: threadId };
-    }
+    if (roomIds.has(threadId)) return { roomId: threadId };
     return undefined;
   }
 
@@ -225,7 +244,7 @@ export function createHttpClient({
         const target = await targetOf(event.threadId);
         const isTask = event.type === 'task.created' || event.type === 'task.updated';
         if (target === undefined && !isTask) return;
-        const item: BotEvent = { ...target, event };
+        const item: BotEvent = { threadId: event.threadId, ...target, event };
         for (const listener of [...listeners]) listener(item);
       })
       .catch((error: unknown) => {
@@ -272,14 +291,33 @@ export function createHttpClient({
     async deleteBot(botId) {
       await request(botPath(botId), { method: 'DELETE' });
       knownBots.delete(botId);
-      const threadId = threadOfBot.get(botId);
-      threadOfBot.delete(botId);
-      if (threadId !== undefined) botOfThread.delete(threadId);
+      for (const thread of threadsOfBot.get(botId) ?? []) botOfThread.delete(thread.id);
+      threadsOfBot.delete(botId);
     },
 
-    async history(botId) {
-      const threadId = await findThread(botId);
-      if (threadId === undefined) return [];
+    listThreads(botId) {
+      return fetchThreads(botId);
+    },
+
+    createThread(botId, input) {
+      return createDmThread(botId, input);
+    },
+
+    async renameThread(threadId, title) {
+      const body = UpdateThread.parse({ title });
+      const response = await write('PATCH', `/api/threads/${encodeURIComponent(threadId)}`, body);
+      const thread = rememberThread(Thread.parse(await response.json()));
+      const cached = threadsOfBot.get(thread.botId);
+      if (cached !== undefined) {
+        threadsOfBot.set(
+          thread.botId,
+          cached.map((entry) => (entry.id === thread.id ? thread : entry)),
+        );
+      }
+      return thread;
+    },
+
+    history(threadId) {
       return threadEvents(threadId);
     },
 
@@ -295,9 +333,8 @@ export function createHttpClient({
       };
     },
 
-    async postMessage(botId, input) {
+    async postMessage(threadId, input) {
       const body = PostMessage.parse(input);
-      const threadId = await ensureThread(botId);
       await write('POST', `/api/threads/${encodeURIComponent(threadId)}/messages`, body);
     },
 
@@ -348,7 +385,7 @@ export function createHttpClient({
     },
 
     async createTask(input) {
-      const threadId = input.roomId ?? (await ensureThread(input.assigneeBotId));
+      const threadId = input.roomId ?? (await ensureThread(input.assigneeBotId)).id;
       const body = CreateTask.parse({
         title: input.title,
         ...(input.description ? { description: input.description } : {}),

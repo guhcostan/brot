@@ -69,7 +69,9 @@ describe('mock computer', () => {
     const client = createMockClient();
     const events: BotEvent[] = [];
     client.onEvent((event) => events.push(event));
-    await client.postMessage('bot_ara', { content: 'Post the release note on LinkedIn' });
+    const araThread = (await client.listThreads('bot_ara'))[0];
+    if (!araThread) throw new Error('bot_ara has no DM thread');
+    await client.postMessage(araThread.id, { content: 'Post the release note on LinkedIn' });
     await vi.advanceTimersByTimeAsync(8000);
 
     const asked = events.find((entry) => entry.event.type === 'computer.takeover');

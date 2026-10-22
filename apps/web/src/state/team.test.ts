@@ -138,12 +138,24 @@ describe('app store', () => {
 
   const withRoom = (): AppState => appReducer(initialAppState, { type: 'rooms-loaded', rooms: [room] });
 
-  it('routes room events to the room and task events to the task store', () => {
+  it('routes room events to the room thread and keeps task events live from unknown threads', () => {
     let state = withRoom();
-    state = appReducer(state, { type: 'event', roomId: 'room_1', event: { ...base, id: 'e1', type: 'task.created', task: root } });
-    state = appReducer(state, { type: 'event', event: { ...base, id: 'e2', type: 'task.updated', task: { ...root, status: 'in_progress', updatedAt: later(1) } } });
-    expect(state.roomThreads.room_1?.items).toHaveLength(1);
+    state = appReducer(state, {
+      type: 'event',
+      threadId: 'room_1',
+      roomId: 'room_1',
+      event: { ...base, id: 'e0', runId: 'r1', type: 'run.started', botId: 'bot_onca', engine: 'mock' },
+    });
+    state = appReducer(state, { type: 'event', threadId: 'room_1', roomId: 'room_1', event: { ...base, id: 'e1', type: 'task.created', task: root } });
+    state = appReducer(state, { type: 'event', threadId: 'room_1', event: { ...base, id: 'e2', type: 'task.updated', task: { ...root, status: 'in_progress', updatedAt: later(1) } } });
+    expect(state.threads.room_1?.items).toHaveLength(1);
     expect(state.tasks.root?.status).toBe('in_progress');
+
+    // A task event whose thread is unknown still reaches the board without inventing a thread.
+    const orphan = { id: 'e3', at: later(2), threadId: 't_unknown', type: 'task.updated' as const, task: { ...root, status: 'done' as const, updatedAt: later(2) } };
+    state = appReducer(state, { type: 'event', threadId: 't_unknown', event: orphan });
+    expect(state.threads.t_unknown).toBeUndefined();
+    expect(state.tasks.root?.status).toBe('done');
   });
 
   it('never lets an older task copy replace a newer one', () => {
@@ -154,11 +166,11 @@ describe('app store', () => {
 
   it('updates members from room.members and derives room and bot status', () => {
     let state = withRoom();
-    state = appReducer(state, { type: 'event', roomId: 'room_1', event: { ...base, id: 'm', type: 'room.members', botIds: ['bot_capy', 'bot_onca', 'bot_tamu'] } });
+    state = appReducer(state, { type: 'event', threadId: 'room_1', roomId: 'room_1', event: { ...base, id: 'm', type: 'room.members', botIds: ['bot_capy', 'bot_onca', 'bot_tamu'] } });
     expect(membersOf(state, 'room_1')).toEqual(['bot_capy', 'bot_onca', 'bot_tamu']);
     expect(state.rooms[0]?.memberIds).toHaveLength(3);
 
-    state = appReducer(state, { type: 'event', roomId: 'room_1', event: { ...base, id: 'r', runId: 'r1', type: 'run.started', botId: 'bot_onca', engine: 'mock' } });
+    state = appReducer(state, { type: 'event', threadId: 'room_1', roomId: 'room_1', event: { ...base, id: 'r', runId: 'r1', type: 'run.started', botId: 'bot_onca', engine: 'mock' } });
     expect(statusOfRoom(state, 'room_1')).toBe('working');
     expect(statusOfBot(state, 'bot_onca')).toBe('working');
     expect(statusOfBot(state, 'bot_capy')).toBe('idle');

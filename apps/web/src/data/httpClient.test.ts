@@ -180,52 +180,53 @@ describe('listProviders', () => {
   });
 });
 
-describe('history', () => {
-  it('returns no events and creates no thread when the bot has none', async () => {
-    const { fetch, calls } = fakeFetch(() => json([]));
+describe('threads', () => {
+  it('lists a bot DM threads', async () => {
+    const { fetch, calls } = fakeFetch(() => json([thread('thr_2'), thread('thr_1')]));
     const client = createHttpClient({ fetch, EventSource: FakeEventSource });
 
-    await expect(client.history('bot_1')).resolves.toEqual([]);
-    expect(calls.map((call) => `${call.method} ${call.path}${call.search}`)).toEqual(['GET /api/bots/bot_1/threads?kind=dm']);
+    await expect(client.listThreads('bot_1')).resolves.toEqual([thread('thr_2'), thread('thr_1')]);
+    expect(calls[0]).toMatchObject({ method: 'GET', path: '/api/bots/bot_1/threads', search: '?kind=dm' });
   });
 
-  it('reads the event log when the server has one', async () => {
-    const event = messageCompleted('evt_log', 'From the log');
-    const { fetch, calls } = fakeFetch(
-      (call) => {
-        if (call.path === '/api/bots/bot_1/threads') return json([thread('thr_1')]);
-        if (call.path === '/api/threads/thr_1/events') return json([event]);
-        return json({ error: 'unexpected' }, 500);
-      },
-      { eventLog: true },
-    );
+  it('creates a thread with an optional title and posts the body as JSON', async () => {
+    const { fetch, calls } = fakeFetch(() => json(thread('thr_9'), 201));
     const client = createHttpClient({ fetch, EventSource: FakeEventSource });
 
-    await expect(client.history('bot_1')).resolves.toEqual([event]);
-    expect(calls.map((call) => call.path)).toEqual(['/api/bots/bot_1/threads', '/api/threads/thr_1/events']);
+    await expect(client.createThread('bot_1', { title: 'Planning' })).resolves.toEqual(thread('thr_9'));
+    await client.createThread('bot_1');
+
+    expect(calls.map((call) => `${call.method} ${call.path}`)).toEqual(['POST /api/bots/bot_1/threads', 'POST /api/bots/bot_1/threads']);
+    expect(calls[0]?.body).toEqual({ title: 'Planning' });
+    expect(calls[1]?.body).toEqual({});
+  });
+
+  it('renames a thread with PATCH and rejects an empty title before any request', async () => {
+    const renamed = { ...thread('thr_1'), title: 'Planning' };
+    const { fetch, calls } = fakeFetch(() => json(renamed));
+    const client = createHttpClient({ fetch, EventSource: FakeEventSource });
+
+    await expect(client.renameThread('thr_1', 'Planning')).resolves.toEqual(renamed);
+    expect(calls[0]).toMatchObject({ method: 'PATCH', path: '/api/threads/thr_1', body: { title: 'Planning' } });
+
+    await expect(client.renameThread('thr_1', '')).rejects.toThrow();
+    expect(calls).toHaveLength(1);
+  });
+
+  it('reads a thread event log through its id', async () => {
+    const event = messageCompleted('evt_log', 'From the log');
+    const { fetch, calls } = fakeFetch((call) => (call.path === '/api/threads/thr_1/events' ? json([event]) : json([])), { eventLog: true });
+    const client = createHttpClient({ fetch, EventSource: FakeEventSource });
+
+    await expect(client.history('thr_1')).resolves.toEqual([event]);
+    expect(calls.map((call) => call.path)).toEqual(['/api/threads/thr_1/events']);
   });
 
   it('surfaces an event log failure other than 404 instead of replaying', async () => {
-    const { fetch } = fakeFetch(
-      (call) => (call.path === '/api/bots/bot_1/threads' ? json([thread('thr_1')]) : json({ error: 'boom' }, 500)),
-      { eventLog: true },
-    );
+    const { fetch } = fakeFetch(() => json({ error: 'boom' }, 500), { eventLog: true });
     const client = createHttpClient({ fetch, EventSource: FakeEventSource });
 
-    await expect(client.history('bot_1')).rejects.toThrow('500 boom');
-  });
-
-  it('skips a room the server lists among a bot\'s threads', async () => {
-    const room: Thread = { ...thread('room_1'), kind: 'room', leadBotId: 'bot_1', responder: 'lead' };
-    const { fetch, calls } = fakeFetch((call) => {
-      if (call.path === '/api/bots/bot_1/threads') return json([room, { ...thread('thr_1'), kind: 'dm' }]);
-      return json({ runId: 'run_1' }, 202);
-    });
-    const client = createHttpClient({ fetch, EventSource: FakeEventSource });
-
-    await client.postMessage('bot_1', { content: 'Hi' });
-
-    expect(calls.at(-1)?.path).toBe('/api/threads/thr_1/messages');
+    await expect(client.history('thr_1')).rejects.toThrow('500 boom');
   });
 
   it('rebuilds messages, runs, approvals and costs in time order', async () => {
@@ -267,7 +268,6 @@ describe('history', () => {
     const otherThreadApproval: Approval = { ...approval, id: 'appr_other', threadId: 'thr_9' };
 
     const { fetch } = fakeFetch((call) => {
-      if (call.path === '/api/bots/bot_1/threads') return json([thread('thr_1')]);
       if (call.path === '/api/threads/thr_1/messages') return json([userMessage, reply]);
       if (call.path === '/api/threads/thr_1/runs') return json([run]);
       if (call.path === '/api/approvals') return json([approval, otherThreadApproval]);
@@ -275,7 +275,7 @@ describe('history', () => {
     });
     const client = createHttpClient({ fetch, EventSource: FakeEventSource });
 
-    const events = await client.history('bot_1');
+    const events = await client.history('thr_1');
 
     expect(events.map((event) => event.type)).toEqual([
       'message.completed',
@@ -307,94 +307,86 @@ describe('history', () => {
       costUsd: 0,
     };
     const { fetch } = fakeFetch((call) => {
-      if (call.path === '/api/bots/bot_1/threads') return json([thread('thr_1')]);
       if (call.path === '/api/threads/thr_1/runs') return json([run]);
       return json([]);
     });
     const client = createHttpClient({ fetch, EventSource: FakeEventSource });
 
-    const events = await client.history('bot_1');
+    const events = await client.history('thr_1');
 
     expect(events.at(-1)).toMatchObject({ type: 'run.failed', error: 'Run cancelled.', runId: 'run_2' });
   });
-});
 
-describe('thread creation and caching', () => {
-  it('creates the first thread on first post, then posts the message with JSON', async () => {
-    const { fetch, calls } = fakeFetch((call) => {
-      if (call.method === 'GET') return json([]);
-      if (call.method === 'POST' && call.path === '/api/bots/bot_1/threads') return json(thread('thr_1'), 201);
-      return json({ runId: 'run_1' }, 202);
-    });
+  it('posts a message straight to its thread, with JSON', async () => {
+    const { fetch, calls } = fakeFetch(() => json({ runId: 'run_1' }, 202));
     const client = createHttpClient({ fetch, EventSource: FakeEventSource });
 
-    await client.postMessage('bot_1', { content: 'Morning' });
+    await client.postMessage('thr_1', { content: 'Morning' });
 
-    expect(calls.map((call) => `${call.method} ${call.path}`)).toEqual([
-      'GET /api/bots/bot_1/threads',
-      'POST /api/bots/bot_1/threads',
-      'POST /api/threads/thr_1/messages',
-    ]);
-    const message = calls[2];
-    expect(message?.headers.get('Content-Type')).toBe('application/json');
-    expect(message?.body).toEqual({ content: 'Morning' });
-  });
-
-  it('reuses the cached thread for later posts and history', async () => {
-    const { fetch, calls } = fakeFetch((call) => {
-      if (call.method === 'GET' && call.path === '/api/bots/bot_1/threads') return json([thread('thr_1')]);
-      if (call.path === '/api/threads/thr_1/runs') return json([]);
-      if (call.path === '/api/threads/thr_1/messages') return json([]);
-      if (call.path === '/api/approvals') return json([]);
-      return json({ runId: 'run_1' }, 202);
-    });
-    const client = createHttpClient({ fetch, EventSource: FakeEventSource });
-
-    await client.postMessage('bot_1', { content: 'One' });
-    await client.postMessage('bot_1', { content: 'Two' });
-    await client.history('bot_1');
-
-    expect(calls.filter((call) => call.path === '/api/bots/bot_1/threads')).toHaveLength(1);
-    expect(calls.filter((call) => call.method === 'POST' && call.path === '/api/threads/thr_1/messages')).toHaveLength(
-      2,
-    );
-  });
-
-  it('uses the first thread the server lists', async () => {
-    const { fetch, calls } = fakeFetch((call) => {
-      if (call.method === 'GET') return json([thread('thr_2'), thread('thr_1')]);
-      return json({ runId: 'run_1' }, 202);
-    });
-    const client = createHttpClient({ fetch, EventSource: FakeEventSource });
-
-    await client.postMessage('bot_1', { content: 'Hi' });
-
-    expect(calls.at(-1)?.path).toBe('/api/threads/thr_2/messages');
-  });
-
-  it('creates a single thread when posts race', async () => {
-    const { fetch, calls } = fakeFetch((call) => {
-      if (call.method === 'GET') return json([]);
-      if (call.method === 'POST' && call.path === '/api/bots/bot_1/threads') return json(thread('thr_1'), 201);
-      return json({ runId: 'run_1' }, 202);
-    });
-    const client = createHttpClient({ fetch, EventSource: FakeEventSource });
-
-    await Promise.all([
-      client.postMessage('bot_1', { content: 'A' }),
-      client.postMessage('bot_1', { content: 'B' }),
-    ]);
-
-    expect(calls.filter((call) => call.method === 'POST' && call.path === '/api/bots/bot_1/threads')).toHaveLength(1);
-    expect(calls.filter((call) => call.path === '/api/threads/thr_1/messages')).toHaveLength(2);
+    expect(calls.map((call) => `${call.method} ${call.path}`)).toEqual(['POST /api/threads/thr_1/messages']);
+    expect(calls[0]?.headers.get('Content-Type')).toBe('application/json');
+    expect(calls[0]?.body).toEqual({ content: 'Morning' });
   });
 
   it('rejects an empty message before any request', async () => {
     const { fetch, calls } = fakeFetch(() => json({}));
     const client = createHttpClient({ fetch, EventSource: FakeEventSource });
 
-    await expect(client.postMessage('bot_1', { content: '' })).rejects.toThrow();
+    await expect(client.postMessage('thr_1', { content: '' })).rejects.toThrow();
     expect(calls).toHaveLength(0);
+  });
+
+  it('creates a task in the most recent DM thread of its assignee', async () => {
+    const task = {
+      id: 'task_1',
+      title: 'Fix the export',
+      status: 'open' as const,
+      assigneeBotId: 'bot_2',
+      createdByUser: true,
+      threadId: 'thr_new',
+      chainId: 'task_1',
+      depth: 0,
+      createdAt: at,
+      updatedAt: at,
+    };
+    const { fetch, calls } = fakeFetch((call) => {
+      if (call.path === '/api/bots/bot_2/threads') return json([thread('thr_new', 'bot_2'), thread('thr_old', 'bot_2')]);
+      return json(task, 201);
+    });
+    const client = createHttpClient({ fetch, EventSource: FakeEventSource });
+
+    await client.createTask({ title: 'Fix the export', assigneeBotId: 'bot_2' });
+
+    expect(calls.filter((call) => call.method === 'POST').map((call) => call.body)).toEqual([
+      { title: 'Fix the export', assigneeBotId: 'bot_2', threadId: 'thr_new' },
+    ]);
+  });
+
+  it('creates the assignee first DM thread when a task needs one', async () => {
+    const task = {
+      id: 'task_1',
+      title: 'Fix the export',
+      status: 'open' as const,
+      assigneeBotId: 'bot_2',
+      createdByUser: true,
+      threadId: 'thr_created',
+      chainId: 'task_1',
+      depth: 0,
+      createdAt: at,
+      updatedAt: at,
+    };
+    const { fetch, calls } = fakeFetch((call) => {
+      if (call.path === '/api/bots/bot_2/threads') return call.method === 'POST' ? json(thread('thr_created', 'bot_2'), 201) : json([]);
+      return json(task, 201);
+    });
+    const client = createHttpClient({ fetch, EventSource: FakeEventSource });
+
+    await client.createTask({ title: 'Fix the export', assigneeBotId: 'bot_2' });
+
+    expect(calls.filter((call) => call.method === 'POST').map((call) => call.body)).toEqual([
+      {},
+      { title: 'Fix the export', assigneeBotId: 'bot_2', threadId: 'thr_created' },
+    ]);
   });
 });
 
@@ -440,18 +432,18 @@ describe('live events', () => {
     );
   });
 
-  it('maps a parsed event to its bot through the cached thread', async () => {
+  it('maps a parsed event to its bot through the learned thread list', async () => {
     const { fetch } = fakeFetch((call) => (call.path === '/api/bots/bot_1/threads' ? json([thread('thr_1')]) : json([])));
     const client = createHttpClient({ fetch, EventSource: FakeEventSource });
     const received: BotEvent[] = [];
     client.onEvent((item) => received.push(item));
-    await client.history('bot_1');
+    await client.listThreads('bot_1');
 
     const event = messageCompleted('evt_1', 'Done');
     FakeEventSource.created[0]?.send('message.completed', JSON.stringify(event));
     await flush();
 
-    expect(received).toEqual([{ botId: 'bot_1', event }]);
+    expect(received).toEqual([{ threadId: 'thr_1', botId: 'bot_1', event }]);
   });
 
   it('looks up a thread it has not seen yet once, for a bot that now has one', async () => {
@@ -471,7 +463,7 @@ describe('live events', () => {
     FakeEventSource.created[0]?.send('message.completed', JSON.stringify(event));
     await flush();
 
-    expect(received).toEqual([{ botId: 'bot_1', event }]);
+    expect(received).toEqual([{ threadId: 'thr_2', botId: 'bot_1', event }]);
     expect(calls.filter((call) => call.path === '/api/bots/bot_1/threads')).toHaveLength(1);
   });
 
@@ -480,7 +472,7 @@ describe('live events', () => {
     const client = createHttpClient({ fetch, EventSource: FakeEventSource });
     const received: BotEvent[] = [];
     client.onEvent((item) => received.push(item));
-    await client.history('bot_1');
+    await client.listThreads('bot_1');
 
     const stray = { ...messageCompleted('evt_3', 'Stray'), threadId: 'thr_unknown' };
     FakeEventSource.created[0]?.send('message.completed', JSON.stringify(stray));
@@ -495,7 +487,7 @@ describe('live events', () => {
     const client = createHttpClient({ fetch, EventSource: FakeEventSource });
     const received: BotEvent[] = [];
     client.onEvent((item) => received.push(item));
-    await client.history('bot_1');
+    await client.listThreads('bot_1');
     const source = FakeEventSource.created[0];
 
     source?.send('message.completed', '{not json');
@@ -659,6 +651,9 @@ describe('team routes', () => {
     await flush();
     await flush();
 
-    expect(received).toEqual([{ roomId: 'room_1', event: roomEvent }, { event: taskEvent }]);
+    expect(received).toEqual([
+      { threadId: 'room_1', roomId: 'room_1', event: roomEvent },
+      { threadId: 'thr_far', event: taskEvent },
+    ]);
   });
 });

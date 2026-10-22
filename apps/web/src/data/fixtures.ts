@@ -47,8 +47,20 @@ export const DEMO_BOTS: Bot[] = [
   bot('bot_mico', 'Mico', 'Quick tasks and triage', 'mico:brown', 'none', false),
 ];
 
-/** The DM thread id the mock uses for a bot. */
+/** The default DM thread id the mock seeds for a bot. More threads per bot are created at runtime. */
 export const dmThreadOf = (botId: string) => `thread_${botId}`;
+
+/** Titles of the seeded DM threads. Bots without an entry seed a thread named `DEFAULT_THREAD_TITLE`. */
+export const DEFAULT_THREAD_TITLE = 'New thread';
+
+export const DEMO_THREAD_TITLES: Record<string, string> = {
+  bot_capy: 'Morning check-in',
+  bot_onca: 'Acme export bug',
+  bot_tamu: 'Row limit check',
+  bot_tuca: 'Renewal follow-up',
+  bot_ara: 'LinkedIn release note',
+  bot_boto: 'Hacker News',
+};
 
 export const LAUNCH_ROOM = 'room_acme';
 export const WEEK_ROOM = 'room_week';

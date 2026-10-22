@@ -11,7 +11,8 @@ export interface TeamContextValue {
   tasks: Readonly<Record<string, Task>>;
   /** Bots with a pending approval anywhere, so a blocked task can say it waits for you. */
   waitingBots: ReadonlySet<string>;
-  openBot: (botId: string) => void;
+  /** Opens a bot's most recent thread, or a named one when the caller knows it. */
+  openBot: (botId: string, threadId?: string) => void;
   openRoom: (roomId: string) => void;
   openTask: (taskId: string) => void;
 }

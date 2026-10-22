@@ -12,6 +12,8 @@ import { Timeline } from './Timeline';
 
 export interface ThreadViewProps {
   bot: Bot;
+  /** The thread's title, as the sidebar and the server's auto-title show it. */
+  title: string;
   thread: ThreadState;
   /** False until the bot's history has loaded. */
   loaded: boolean;
@@ -35,7 +37,7 @@ export function useStickToBottom(deps: readonly unknown[]) {
   return ref;
 }
 
-export function ThreadView({ bot, thread, loaded, status, onSend, onEdit, onDecide, onOpenBots, onOpenContext }: ThreadViewProps): ReactElement {
+export function ThreadView({ bot, title, thread, loaded, status, onSend, onEdit, onDecide, onOpenBots, onOpenContext }: ThreadViewProps): ReactElement {
   const lastItem = thread.items.at(-1);
   const streaming = lastItem?.kind === 'message' && lastItem.streaming;
   const typing = thread.run === 'running' && !streaming;
@@ -49,8 +51,8 @@ export function ThreadView({ bot, thread, loaded, status, onSend, onEdit, onDeci
       <PaneHeader onOpenBots={onOpenBots} onOpenContext={onOpenContext}>
         <BotAvatar shape={avatar.shape} color={avatar.color} mood={mood} size={28} />
         <div className="flex min-w-0 flex-1 flex-col">
-          <h1 className="m-0 truncate text-md leading-tight font-semibold tracking-[var(--tracking-heading)]">{bot.name}</h1>
-          <p className="m-0 truncate text-sm text-ink-2">{bot.job}</p>
+          <h1 className="m-0 truncate text-md leading-tight font-semibold tracking-[var(--tracking-heading)]">{title}</h1>
+          <p className="m-0 truncate text-sm text-ink-2">{t('thread.subtitle', { name: bot.name, job: bot.job })}</p>
         </div>
         <StatusDot key={status} status={status} label={botStatusLabel(status)} className="hidden animate-[brot-fade_var(--dur-base)_linear_both] sm:inline-flex" />
         <Button variant="ghost" size="sm" onClick={onEdit} aria-label={t('thread.edit', { name: bot.name })} title={t('thread.edit', { name: bot.name })}>

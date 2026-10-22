@@ -1,4 +1,5 @@
 import type { ReactElement, ReactNode } from 'react';
+import { cx } from '@brot/ui';
 
 function Icon({ size = 18, children }: { size?: number; children: ReactNode }): ReactElement {
   return (
@@ -23,6 +24,15 @@ export const ChevronLeft = ({ size }: { size?: number }) => (
   <Icon size={size}>
     <path d="M12.5 4.5 7 10l5.5 5.5" />
   </Icon>
+);
+
+/** Points right; CSS rotates it a quarter turn when a row is expanded. */
+export const ChevronRight = ({ size, className }: { size?: number; className?: string }) => (
+  <span className={cx('inline-flex', className)}>
+    <Icon size={size}>
+      <path d="m7.5 4.5 5.5 5.5-5.5 5.5" />
+    </Icon>
+  </span>
 );
 
 export const Plus = ({ size }: { size?: number }) => (

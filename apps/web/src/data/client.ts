@@ -19,10 +19,12 @@ import type {
 } from '@brot/protocol';
 
 /**
- * A live event and the conversation it belongs to: a bot's DM (`botId`), a room (`roomId`), or
- * neither. Team task events arrive even when their thread is unknown, so the task board stays live.
+ * A live event and the conversation it belongs to: a bot's DM thread (`botId`), a room (`roomId`), or
+ * neither. Every event names its thread, so many threads of one bot stay apart. Team task events
+ * arrive even when their thread is unknown, so the task board stays live.
  */
 export interface BotEvent {
+  threadId: string;
   botId?: string;
   roomId?: string;
   event: CanonicalEvent;
@@ -50,7 +52,7 @@ export interface NewTask {
   title: string;
   description?: string;
   assigneeBotId: string;
-  /** Where the task is requested. Absent means the assignee's DM. */
+  /** Where the task is requested. Absent means the assignee's most recent DM thread. */
   roomId?: string;
 }
 
@@ -111,16 +113,25 @@ export interface ListBotsOptions {
  * What the web app needs from the Brot server. Posting returns before the run finishes; the run
  * arrives as canonical events through onEvent, the same way the server's SSE stream delivers them.
  * Two implementations exist: the in-process mock (mockClient.ts) and the HTTP/SSE client
- * (httpClient.ts), which maps each bot to its DM thread on the server (docs/TEAM-API.md).
+ * (httpClient.ts), which maps every conversation to its thread on the server (docs/TEAM-API.md).
+ * A bot has any number of independent DM threads; a room is a thread too.
  */
 export interface BrotClient {
   listBots(options?: ListBotsOptions): Promise<Bot[]>;
   createBot(input: CreateBotInput): Promise<Bot>;
   updateBot(botId: string, patch: UpdateBot): Promise<Bot>;
   deleteBot(botId: string): Promise<void>;
-  history(botId: string): Promise<CanonicalEvent[]>;
+
+  /** A bot's DM threads, most recently active first. */
+  listThreads(botId: string): Promise<Thread[]>;
+  createThread(botId: string, input?: { title?: string }): Promise<Thread>;
+  /** Renames a thread (`PATCH /api/threads/:id`) and returns the updated thread. */
+  renameThread(threadId: string, title: string): Promise<Thread>;
+  /** A DM thread's events, oldest first. */
+  history(threadId: string): Promise<CanonicalEvent[]>;
   onEvent(listener: (event: BotEvent) => void): () => void;
-  postMessage(botId: string, input: PostMessage): Promise<void>;
+  /** Sends a message into a DM thread and starts its run. */
+  postMessage(threadId: string, input: PostMessage): Promise<void>;
   resolveApproval(approvalId: string, input: ResolveApproval): Promise<void>;
 
   listRooms(): Promise<Room[]>;

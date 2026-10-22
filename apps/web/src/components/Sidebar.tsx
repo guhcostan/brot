@@ -1,11 +1,11 @@
 import { useMemo, useState, type ReactElement } from 'react';
-import type { Bot } from '@brot/protocol';
+import type { Bot, Thread } from '@brot/protocol';
 import { AvatarStack, BotAvatar, BrandMark, Button, Input, STATUS_MOOD, Skeleton, StatusDot, cx, type BotStatus } from '@brot/ui';
 import type { Room } from '../data/client';
 import { avatarOf } from '../format';
 import { t, type Locale } from '../i18n';
 import type { Selection } from '../state/store';
-import { Board, Gear, Inbox, Plus } from './icons';
+import { Board, ChevronRight, Gear, Inbox, Plus } from './icons';
 import { useLiveMood } from './mood';
 import { memberSummary } from './RoomView';
 import { botStatusLabel } from './taskLabels';
@@ -13,29 +13,49 @@ import { botStatusLabel } from './taskLabels';
 export interface SidebarProps {
   bots: Bot[];
   rooms: Room[];
+  /** Each bot's DM threads, most recently active first. Missing until the list has loaded. */
+  threadLists: Record<string, Thread[]>;
   statusOf: (botId: string) => BotStatus;
+  /** A single thread's status, for its row. */
+  threadStatusOf: (threadId: string) => BotStatus;
   roomStatusOf: (roomId: string) => BotStatus;
   membersOf: (roomId: string) => string[];
   activeTasks: number;
-  /** Pending approvals across every bot and room. */
+  /** Pending approvals across every loaded thread. */
   approvals: number;
   ready: boolean;
   selection: Selection | null;
   onSelect: (selection: Selection) => void;
+  /** Opens a bot's most recent thread. */
+  onOpenBot: (botId: string) => void;
+  onOpenThread: (botId: string, threadId: string) => void;
+  onLoadThreads: (botId: string) => Promise<Thread[]>;
+  onNewThread: (botId: string) => void;
   onNewRoom: () => void;
   onNewBot: () => void;
   /** Re-renders the sidebar's copy when the language changes. */
   locale: Locale;
+  /** Bots whose thread rows start expanded. */
+  defaultExpanded?: readonly string[];
   className?: string;
 }
 
 const rowClass =
   'flex w-full items-center gap-3 rounded-md px-2 py-2 text-left transition-colors duration-[var(--dur-fast)] hover:bg-surface-2 aria-[current=true]:bg-surface-2';
 
+const toggleIn = (set: ReadonlySet<string>, id: string, on: boolean): ReadonlySet<string> => {
+  const next = new Set(set);
+  if (on) next.add(id);
+  else next.delete(id);
+  return next;
+};
+
 export function Sidebar({
   bots,
   rooms,
+  threadLists,
   statusOf,
+  threadStatusOf,
   roomStatusOf,
   membersOf,
   activeTasks,
@@ -43,12 +63,19 @@ export function Sidebar({
   ready,
   selection,
   onSelect,
+  onOpenBot,
+  onOpenThread,
+  onLoadThreads,
+  onNewThread,
   onNewRoom,
   onNewBot,
+  defaultExpanded,
   className,
 }: SidebarProps): ReactElement {
   const [showArchived, setShowArchived] = useState(false);
   const [query, setQuery] = useState('');
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set(defaultExpanded ?? []));
+  const [loading, setLoading] = useState<ReadonlySet<string>>(new Set());
   const needle = query.trim().toLowerCase();
 
   const visible = useMemo(() => {
@@ -64,12 +91,42 @@ export function Sidebar({
     );
   }, [rooms, bots, needle, membersOf]);
 
+  const expand = (botId: string) => {
+    setExpanded((current) => toggleIn(current, botId, true));
+    if (threadLists[botId] !== undefined || loading.has(botId)) return;
+    setLoading((current) => new Set(current).add(botId));
+    void onLoadThreads(botId)
+      .catch((error: unknown) => console.warn('A bot thread list did not load', error))
+      .finally(() => setLoading((current) => toggleIn(current, botId, false)));
+  };
+
+  const toggle = (botId: string) => {
+    if (expanded.has(botId)) setExpanded((current) => toggleIn(current, botId, false));
+    else expand(botId);
+  };
+
+  const createThread = (botId: string) => {
+    setExpanded((current) => toggleIn(current, botId, true));
+    onNewThread(botId);
+  };
+
   const pinned = visible.filter((bot) => bot.pinned && !bot.archived);
   const others = visible.filter((bot) => !bot.pinned && !bot.archived);
   const archived = visible.filter((bot) => bot.archived);
   const selectedBot = selection?.kind === 'bot' ? selection.id : null;
+  const selectedThread = selection?.kind === 'bot' ? selection.threadId : null;
   const selectedRoom = selection?.kind === 'room' ? selection.id : null;
-  const rowProps = { statusOf, selectedId: selectedBot, onSelect: (id: string) => onSelect({ kind: 'bot', id }) };
+  const threadRows = {
+    threadLists,
+    threadStatusOf,
+    selectedThreadId: selectedThread,
+    expanded,
+    loading,
+    onOpenThread,
+    onToggle: toggle,
+    onNewThread: createThread,
+  };
+  const rowProps = { statusOf, selectedId: selectedBot, onOpenBot, ...threadRows };
   const nothing = ready && needle !== '' && visible.length === 0 && visibleRooms.length === 0;
 
   return (
@@ -196,7 +253,7 @@ export function Sidebar({
         {!ready ? <SidebarSkeleton /> : null}
         {pinned.length > 0 ? <BotSection title={t('sidebar.pinned')} bots={pinned} {...rowProps} /> : null}
         {others.length > 0 ? <BotSection title={t('sidebar.all')} bots={others} {...rowProps} /> : null}
-        {ready && pinned.length === 0 && others.length === 0 && !needle ? (
+        {ready && pinned.length === 0 && others.length === 0 && !needle && archived.length === 0 ? (
           <button type="button" onClick={onNewBot} data-avatar-zone className="flex flex-col items-center gap-2 rounded-lg border border-dashed border-line px-3 py-5 text-center text-sm text-ink-2 hover:bg-surface-2">
             <BotAvatar species="capivara" color="black" size={36} />
             {t('sidebar.noBots')}
@@ -237,12 +294,23 @@ export function Sidebar({
   );
 }
 
-interface BotSectionProps {
+interface ThreadRowsProps {
+  threadLists: Record<string, Thread[]>;
+  threadStatusOf: (threadId: string) => BotStatus;
+  selectedThreadId: string | null;
+  expanded: ReadonlySet<string>;
+  loading: ReadonlySet<string>;
+  onOpenThread: (botId: string, threadId: string) => void;
+  onToggle: (botId: string) => void;
+  onNewThread: (botId: string) => void;
+}
+
+interface BotSectionProps extends ThreadRowsProps {
   title: string;
   bots: Bot[];
   statusOf: (botId: string) => BotStatus;
   selectedId: string | null;
-  onSelect: (botId: string) => void;
+  onOpenBot: (botId: string) => void;
 }
 
 function BotSection({ title, ...rest }: BotSectionProps): ReactElement {
@@ -254,39 +322,91 @@ function BotSection({ title, ...rest }: BotSectionProps): ReactElement {
   );
 }
 
-function BotList({ bots, statusOf, selectedId, onSelect }: Omit<BotSectionProps, 'title'>): ReactElement {
+function BotList({ bots, statusOf, selectedId, onOpenBot, ...threadRows }: Omit<BotSectionProps, 'title'>): ReactElement {
   return (
     <ul className="m-0 flex list-none flex-col gap-0.5 p-0">
       {bots.map((bot) => (
         <li key={bot.id} className="animate-[brot-enter_var(--dur-base)_var(--ease)_both]">
-          <BotRow bot={bot} status={statusOf(bot.id)} selected={bot.id === selectedId} onSelect={onSelect} />
+          <BotRow bot={bot} status={statusOf(bot.id)} selected={bot.id === selectedId} onOpenBot={onOpenBot} {...threadRows} />
         </li>
       ))}
     </ul>
   );
 }
 
-function BotRow({ bot, status, selected, onSelect }: { bot: Bot; status: BotStatus; selected: boolean; onSelect: (botId: string) => void }): ReactElement {
+interface BotRowProps extends ThreadRowsProps {
+  bot: Bot;
+  status: BotStatus;
+  selected: boolean;
+  onOpenBot: (botId: string) => void;
+}
+
+function BotRow({ bot, status, selected, onOpenBot, threadLists, threadStatusOf, selectedThreadId, expanded, loading, onOpenThread, onToggle, onNewThread }: BotRowProps): ReactElement {
   const avatar = avatarOf(bot);
   const mood = useLiveMood(status);
+  const open = expanded.has(bot.id);
+  const threads = threadLists[bot.id];
+  const busy = loading.has(bot.id);
   return (
-    <button
-      type="button"
-      data-avatar-zone
-      aria-current={selected ? 'true' : undefined}
-      onClick={() => onSelect(bot.id)}
-      className={cx(rowClass, bot.archived && 'opacity-60')}
-    >
-      <BotAvatar shape={avatar.shape} color={avatar.color} mood={bot.archived ? 'sleeping' : mood} size="md" />
-      <span className="flex min-w-0 flex-1 flex-col">
-        <span className="truncate text-base font-medium text-ink">{bot.name}</span>
-        {status === 'idle' ? (
-          <span className="truncate text-sm text-ink-2">{bot.job}</span>
-        ) : (
-          <StatusDot status={status} label={botStatusLabel(status)} className="text-sm" />
-        )}
-      </span>
-    </button>
+    <div className="flex flex-col">
+      <div className={cx('group flex items-center rounded-md pr-1 transition-colors duration-[var(--dur-fast)] hover:bg-surface-2', selected && 'bg-surface-2')}>
+        <button
+          type="button"
+          data-avatar-zone
+          aria-current={selected ? 'true' : undefined}
+          onClick={() => onOpenBot(bot.id)}
+          className={cx('flex min-w-0 flex-1 items-center gap-3 py-2 pl-2 text-left', bot.archived && 'opacity-60')}
+        >
+          <BotAvatar shape={avatar.shape} color={avatar.color} mood={bot.archived ? 'sleeping' : mood} size="md" />
+          <span className="flex min-w-0 flex-1 flex-col">
+            <span className="truncate text-base font-medium text-ink">{bot.name}</span>
+            {status === 'idle' ? (
+              <span className="truncate text-sm text-ink-2">{bot.job}</span>
+            ) : (
+              <StatusDot status={status} label={botStatusLabel(status)} className="text-sm" />
+            )}
+          </span>
+        </button>
+        <button
+          type="button"
+          aria-expanded={open}
+          aria-label={t(open ? 'sidebar.collapseThreads' : 'sidebar.expandThreads', { name: bot.name })}
+          title={t(open ? 'sidebar.collapseThreads' : 'sidebar.expandThreads', { name: bot.name })}
+          onClick={() => onToggle(bot.id)}
+          className="flex size-7 flex-none items-center justify-center rounded-md text-ink-3 hover:bg-surface-2 hover:text-ink"
+        >
+          <ChevronRight size={14} className={cx('transition-transform duration-[var(--dur-fast)]', open && 'rotate-90')} />
+        </button>
+      </div>
+      {open ? (
+        <div role="group" aria-label={t('sidebar.threads', { name: bot.name })} className="flex animate-[brot-enter_var(--dur-base)_var(--ease)_both] flex-col gap-0.5 pt-0.5 pb-1 pl-11">
+          {busy && threads === undefined ? <span className="px-2 py-1 text-xs text-ink-3">{t('app.loading')}</span> : null}
+          {(threads ?? []).map((thread) => {
+            const threadStatus = threadStatusOf(thread.id);
+            return (
+              <button
+                key={thread.id}
+                type="button"
+                aria-current={thread.id === selectedThreadId ? 'true' : undefined}
+                onClick={() => onOpenThread(bot.id, thread.id)}
+                className="flex w-full items-center gap-2 rounded-md py-1.5 pr-2 pl-2 text-left transition-colors duration-[var(--dur-fast)] hover:bg-surface-2 aria-[current=true]:bg-surface-2"
+              >
+                <span className={cx('min-w-0 flex-1 truncate text-sm', thread.id === selectedThreadId ? 'text-ink' : 'text-ink-2')}>{thread.title}</span>
+                {threadStatus !== 'idle' ? <StatusDot status={threadStatus} label={botStatusLabel(threadStatus)} className="flex-none text-xs" /> : null}
+              </button>
+            );
+          })}
+          <button
+            type="button"
+            onClick={() => onNewThread(bot.id)}
+            className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sm text-ink-3 transition-colors duration-[var(--dur-fast)] hover:bg-surface-2 hover:text-ink-2"
+          >
+            <Plus size={14} />
+            {t('sidebar.newThread')}
+          </button>
+        </div>
+      ) : null}
+    </div>
   );
 }
 

@@ -77,7 +77,7 @@ export function ApprovalsView({ entries, onDecide, onOpenBots }: ApprovalsViewPr
                       </span>
                       <button
                         type="button"
-                        onClick={() => (roomId ? openRoom(roomId) : openBot(approval.botId))}
+                        onClick={() => (roomId ? openRoom(roomId) : openBot(approval.botId, approval.threadId))}
                         className="flex-none rounded-md px-2 py-1 text-xs text-ink-2 transition-colors duration-[var(--dur-fast)] hover:bg-surface-2 hover:text-ink"
                       >
                         {t('approvals.open')}
