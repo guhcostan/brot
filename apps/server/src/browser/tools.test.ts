@@ -44,6 +44,9 @@ function fakeHostBrowser(): FakeHostBrowser {
     async close() {
       fake.state = { state: 'stopped' };
     },
+    async deleteProfile() {
+      fake.state = { state: 'stopped' };
+    },
     async closeAll() {
       fake.state = { state: 'stopped' };
     },

@@ -9,6 +9,7 @@ interface FakeHostBrowser extends HostBrowserService {
   readonly statusCalls: string[];
   readonly loginCalls: string[];
   readonly closeCalls: string[];
+  readonly deleteCalls: string[];
 }
 
 function fakeHostBrowser(): FakeHostBrowser {
@@ -17,6 +18,7 @@ function fakeHostBrowser(): FakeHostBrowser {
     statusCalls: [],
     loginCalls: [],
     closeCalls: [],
+    deleteCalls: [],
     async browser() {
       return {};
     },
@@ -31,6 +33,10 @@ function fakeHostBrowser(): FakeHostBrowser {
     },
     async close(bot) {
       fake.closeCalls.push(bot.id);
+      fake.state = { state: 'stopped' };
+    },
+    async deleteProfile(bot) {
+      fake.deleteCalls.push(bot.id);
       fake.state = { state: 'stopped' };
     },
     async closeAll() {
@@ -176,5 +182,20 @@ describe('POST /api/bots/:id/browser/close', () => {
     expect(res.status).toBe(409);
     expect(await res.json()).toEqual({ error: 'This bot has no browser' });
     expect(host.closeCalls).toHaveLength(0);
+  });
+});
+
+describe('DELETE /api/bots/:id', () => {
+  it('closes and deletes the bot browser profile before removing the bot', async () => {
+    const res = await call(app, 'DELETE', `/api/bots/${browserBot.id}`);
+    expect(res.status).toBe(204);
+    expect(host.deleteCalls).toEqual([browserBot.id]);
+    expect((await call(app, 'GET', `/api/bots/${browserBot.id}`)).status).toBe(404);
+  });
+
+  it('answers 404 for a bot that does not exist and touches no profile', async () => {
+    const res = await call(app, 'DELETE', '/api/bots/nope');
+    expect(res.status).toBe(404);
+    expect(host.deleteCalls).toHaveLength(0);
   });
 });

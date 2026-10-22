@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -48,6 +48,17 @@ describe('host browser service without a usable Chrome', () => {
     const bot = botFor('bot_1');
     await expect(service.openForLogin(bot)).rejects.toThrow(new RegExp(MISSING));
     expect(await service.status(bot)).toEqual({ state: 'stopped' });
+  });
+
+  it('deletes the profile directory with the bot', async () => {
+    const { service, home } = await startService();
+    const bot = botFor('bot_1');
+    const profile = join(home, 'browser-profiles', bot.id);
+    await mkdir(profile, { recursive: true });
+    await service.deleteProfile(bot);
+    await service.deleteProfile(bot);
+    await expect(stat(profile)).rejects.toThrow();
+    await expect(service.status(bot)).resolves.toEqual({ state: 'stopped' });
   });
 
   it('keeps bots independent', async () => {

@@ -1,3 +1,4 @@
+import { rm } from 'node:fs/promises';
 import type { Bot } from '@brot/protocol';
 import { ensurePage, runBrowserCommand } from './driver';
 import { createBotEgress, type BotEgress } from './egress';
@@ -147,6 +148,14 @@ export function createHostBrowserService(deps: HostBrowserDeps): HostBrowserServ
           return;
         }
         await removeDevToolsState(profileDir(deps.home, bot.id)).catch(() => undefined);
+      });
+    },
+
+    deleteProfile(bot) {
+      return serial(bot.id, async () => {
+        const info = browsers.get(bot.id);
+        if (info !== undefined) await end(info, bot.id);
+        await rm(profileDir(deps.home, bot.id), { recursive: true, force: true });
       });
     },
 

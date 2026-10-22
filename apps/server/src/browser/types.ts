@@ -31,6 +31,8 @@ export interface HostBrowserService extends BrowserDriver {
   openForLogin(bot: Bot): Promise<HostBrowserStatus>;
   /** Closes the bot's browser, saving its profile. Idempotent. */
   close(bot: Bot): Promise<void>;
+  /** Closes the browser and deletes its profile, for a bot that is being deleted. Idempotent. */
+  deleteProfile(bot: Bot): Promise<void>;
   closeAll(): Promise<void>;
 }
 

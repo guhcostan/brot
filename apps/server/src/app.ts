@@ -217,8 +217,11 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
 
   app.delete('/api/bots/:id', async (c) => {
     const id = c.req.param('id');
-    if (!(await repos.bots.get(id))) return notFound(c, 'Bot');
+    const bot = await repos.bots.get(id);
+    if (!bot) return notFound(c, 'Bot');
     await harness.cancelBotRuns(id);
+    // The profile holds the bot's logins, so it goes with the bot; closing first releases Chrome's lock.
+    await browser.deleteProfile(bot);
     await repos.bots.remove(id);
     await scheduler.sync();
     return c.body(null, 204);
