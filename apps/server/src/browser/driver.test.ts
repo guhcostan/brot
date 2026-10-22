@@ -1,8 +1,10 @@
 import { Script } from 'node:vm';
 import { describe, expect, it } from 'vitest';
 import {
+  BROWSER_VIEWPORT,
   FIELD_PAGE_SOURCE,
   SNAPSHOT_PAGE_SOURCE,
+  inputProblem,
   parseRef,
   resolveOpenUrl,
   sensitiveReason,
@@ -95,5 +97,27 @@ describe('page source strings', () => {
       expect(source).not.toContain('__name');
       expect(() => new Script(`(${source})`)).not.toThrow();
     }
+  });
+});
+
+describe('browser input validation', () => {
+  it('uses the fixed 1280x800 viewport and accepts coordinates inside it', () => {
+    expect(BROWSER_VIEWPORT).toEqual({ width: 1280, height: 800 });
+    expect(inputProblem({ type: 'move', x: 0, y: 0 })).toBeUndefined();
+    expect(inputProblem({ type: 'click', x: 1279, y: 799, button: 'left', double: true })).toBeUndefined();
+    expect(inputProblem({ type: 'scroll', x: 640, y: 400, dy: -3 })).toBeUndefined();
+    expect(inputProblem({ type: 'type', text: 'hello' })).toBeUndefined();
+    expect(inputProblem({ type: 'key', key: 'ctrl+l' })).toBeUndefined();
+  });
+
+  it('refuses coordinates outside the viewport or not finite', () => {
+    expect(inputProblem({ type: 'move', x: 1280, y: 10 })).toMatch(/outside the 1280x800 browser viewport/);
+    expect(inputProblem({ type: 'click', x: 10, y: 800, button: 'left', double: false })).toMatch(/outside/);
+    expect(inputProblem({ type: 'move', x: -1, y: 0 })).toMatch(/outside/);
+    expect(inputProblem({ type: 'scroll', x: Number.NaN, y: 0, dy: 1 })).toMatch(/finite/);
+  });
+
+  it('refuses an unknown key modifier before it reaches the page', () => {
+    expect(inputProblem({ type: 'key', key: 'hyper+l' })).toMatch(/unknown modifier/);
   });
 });

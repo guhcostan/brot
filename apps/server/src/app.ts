@@ -3,6 +3,7 @@ import type { Repos, TaskFilter } from '@brot/db';
 import type { EngineRegistry } from '@brot/engines';
 import {
   ApprovalStatus,
+  ComputerInput,
   CreateBot,
   CreateBrowserProfile,
   CreateMcpServer,
@@ -21,6 +22,7 @@ import {
   PROTOCOL_VERSION,
   ResolveApproval,
   RoutineRunStatus,
+  SetBrowserTakeover,
   TaskStatus,
   ThreadKind,
   UpdateBot,
@@ -52,6 +54,7 @@ import { triggerIssues, type Scheduler } from './scheduler';
 import type { BrotMcpService } from './mcp/types';
 import type { LlmRelay, ProviderSpec } from './llm';
 import { botBrowserKind } from './browser/tools';
+import { BrowserError } from './browser/service';
 import type { HostBrowserService } from './browser/types';
 import { mountAttachmentRoutes, type AttachmentStorage } from './attachments';
 import { mountTeamPackageRoutes } from './team-packages';
@@ -387,6 +390,58 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     await browser.close(bot);
     return c.body(null, 204);
   });
+
+  /**
+   * Runs a host-browser route for a bot that opted in. The service reports its own conflicts through
+   * `BrowserError`: 409 while the person is signing in, during a takeover, or when the browser cannot start.
+   */
+  async function withBrowserBot(c: Context<AppEnv>, run: (bot: Bot) => Promise<Response>): Promise<Response> {
+    const bot = await repos.bots.get(c.req.param('id') ?? '');
+    if (!bot) return notFound(c, 'Bot');
+    if (bot.browser !== true) return c.json({ error: 'This bot has no browser' }, 409);
+    try {
+      return await run(bot);
+    } catch (error) {
+      if (error instanceof BrowserError) return c.json({ error: error.message }, error.status);
+      throw error;
+    }
+  }
+
+  /** A frame of the bot's browser for the live view. Opening the panel starts the browser. */
+  app.get('/api/bots/:id/browser/screen', (c) =>
+    withBrowserBot(c, async (bot) => {
+      const jpeg = await browser.browserScreen(bot);
+      const body = new Uint8Array(jpeg.byteLength);
+      body.set(jpeg);
+      return new Response(body, {
+        headers: { 'content-type': 'image/jpeg', 'cache-control': 'no-store' },
+      });
+    }),
+  );
+
+  /** Who holds the bot's browser. A shared profile reports one state to every bot that uses it. */
+  app.get('/api/bots/:id/browser/takeover', (c) =>
+    withBrowserBot(c, async (bot) => c.json(await browser.browserTakeover(bot))),
+  );
+
+  /** Takes or hands back control of the browser. Writing needs a full device, like the computer takeover. */
+  app.post('/api/bots/:id/browser/takeover', (c) =>
+    withBrowserBot(c, async (bot) => {
+      const body = await parseBody(c, SetBrowserTakeover);
+      if (!body.ok) return body.response;
+      return c.json(await browser.setBrowserTakeover(bot, body.data, 'user'));
+    }),
+  );
+
+  /** One mouse or keyboard event from the person while they hold the browser. */
+  app.post('/api/bots/:id/browser/input', (c) =>
+    withBrowserBot(c, async (bot) => {
+      const body = await parseBody(c, ComputerInput);
+      if (!body.ok) return body.response;
+      await browser.browserInput(bot, body.data);
+      return c.body(null, 204);
+    }),
+  );
 
   /** Without `kind`, every thread the bot owns (its DM, and rooms it leads). `kind=room` lists rooms it is a member of. */
   app.get('/api/bots/:id/threads', async (c) => {

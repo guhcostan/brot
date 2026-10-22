@@ -4,6 +4,7 @@ import {
   Approval,
   Bot,
   BrowserProfile,
+  BrowserTakeover,
   Computer,
   Device,
   Memory,
@@ -97,6 +98,14 @@ describe('entity schemas', () => {
     const message = { id: 'm1', threadId: 't1', role: 'user', content: 'See files', createdAt: at, attachments: [attachment, image] };
     expect(roundTrip(Message, message)).toEqual(message);
     expect(() => Message.parse({ ...message, attachments: [{ ...attachment, kind: 'video' }] })).toThrow();
+  });
+
+  it('round-trips a browser takeover', () => {
+    const active = { active: true, since: at, reason: 'Sign in to X' };
+    expect(roundTrip(BrowserTakeover, active)).toEqual(active);
+    const handedBack = { active: false };
+    expect(roundTrip(BrowserTakeover, handedBack)).toEqual(handedBack);
+    expect(() => BrowserTakeover.parse({ active: true, reason: 'x'.repeat(501) })).toThrow();
   });
 
   it('round-trips approval, policy, memory, and skill', () => {

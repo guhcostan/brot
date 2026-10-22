@@ -1,4 +1,4 @@
-import type { Bot } from '@brot/protocol';
+import type { Bot, ComputerInput } from '@brot/protocol';
 import type { Browser, Page } from 'playwright-core';
 import { hostAllowedForBot } from './egress';
 
@@ -10,6 +10,11 @@ import { hostAllowedForBot } from './egress';
  */
 
 const SNAPSHOT_LIMIT_BYTES = 40 * 1024;
+/** The host browser's fixed window and screenshot size. Input coordinates from the person use these pixels. */
+export const BROWSER_VIEWPORT = { width: 1280, height: 800 } as const;
+const SCREENSHOT_QUALITY = 70;
+/** One notch of a remote scroll event, in CSS pixels. */
+const WHEEL_STEP_PX = 120;
 const SENSITIVE_NAME = /(password|passwd|pwd|card|cc-?num|cvv|cvc|credit|iban|account[-_ ]?number|ssn)/i;
 const SENSITIVE_AUTOCOMPLETE = /^(current-password|new-password|cc-|one-time-code)/;
 const REF = /^\d{1,6}$/;
@@ -85,11 +90,73 @@ export function currentPage(browser: Browser): Page | undefined {
     .at(-1);
 }
 
+function hasFixedViewport(page: Page): boolean {
+  const viewport = page.viewportSize();
+  return viewport !== null && viewport.width === BROWSER_VIEWPORT.width && viewport.height === BROWSER_VIEWPORT.height;
+}
+
+/**
+ * The page commands run on. It is always the fixed browser viewport, so the live view and the person's clicks
+ * see the same geometry a bot command does.
+ */
 export async function ensurePage(browser: Browser): Promise<Page> {
   const existing = currentPage(browser);
-  if (existing !== undefined) return existing;
   const context = browser.contexts()[0] ?? (await browser.newContext());
-  return context.newPage();
+  const page = existing ?? (await context.newPage());
+  if (!hasFixedViewport(page)) await page.setViewportSize(BROWSER_VIEWPORT);
+  return page;
+}
+
+/** A JPEG of the page for the person watching the bot browse. */
+export async function screenshot(page: Page): Promise<Uint8Array> {
+  const image = await page.screenshot({ type: 'jpeg', quality: SCREENSHOT_QUALITY, animations: 'disabled', caret: 'hide' });
+  return new Uint8Array(image);
+}
+
+/**
+ * Why a remote input event cannot reach the page, or undefined when it fits. The protocol bounds x/y at
+ * 7680x4320 for the desktop; the host browser is smaller, so the coordinates must fit its viewport.
+ */
+export function inputProblem(input: ComputerInput): string | undefined {
+  if (input.type === 'key') {
+    try {
+      toPlaywrightKey(input.key);
+    } catch (error) {
+      return firstLine(error);
+    }
+    return undefined;
+  }
+  if (input.type === 'type') return undefined;
+  const { x, y } = input;
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return 'input coordinates must be finite numbers';
+  if (x < 0 || x >= BROWSER_VIEWPORT.width || y < 0 || y >= BROWSER_VIEWPORT.height) {
+    return `input is outside the ${BROWSER_VIEWPORT.width}x${BROWSER_VIEWPORT.height} browser viewport`;
+  }
+  return undefined;
+}
+
+/** Applies one input event the person sent while holding a browser takeover. */
+export async function applyInput(page: Page, input: ComputerInput): Promise<void> {
+  const problem = inputProblem(input);
+  if (problem !== undefined) throw new RangeError(problem);
+  switch (input.type) {
+    case 'move':
+      await page.mouse.move(input.x, input.y);
+      return;
+    case 'click':
+      await page.mouse.click(input.x, input.y, { button: input.button, clickCount: input.double ? 2 : 1 });
+      return;
+    case 'scroll':
+      await page.mouse.move(input.x, input.y);
+      await page.mouse.wheel(0, input.dy * WHEEL_STEP_PX);
+      return;
+    case 'type':
+      await page.keyboard.type(input.text);
+      return;
+    case 'key':
+      await page.keyboard.press(toPlaywrightKey(input.key));
+      return;
+  }
 }
 
 function describe(page: Page): Promise<{ title: string; url: string }> {

@@ -1,4 +1,4 @@
-import type { Bot } from '@brot/protocol';
+import type { Bot, BrowserTakeover, ComputerInput, SetBrowserTakeover } from '@brot/protocol';
 
 /** What a bot's host browser is doing. `login` means a headed window is open for the person to sign in. */
 export type HostBrowserState = 'stopped' | 'running' | 'login';
@@ -43,6 +43,28 @@ export interface HostBrowserService extends BrowserDriver {
    * Idempotent.
    */
   deleteProfile(bot: Bot): Promise<void>;
+  /**
+   * A JPEG of the bot's browser for the live view. Starts the browser lazily when the panel is opened, so the
+   * person can watch before the bot's first command. Refused for a bot without `browser: true`.
+   */
+  browserScreen(bot: Bot): Promise<Uint8Array>;
+  /** The takeover state of the bot's effective profile. */
+  browserTakeover(bot: Bot): Promise<BrowserTakeover>;
+  /**
+   * Sets the takeover state of the bot's effective profile, so every bot sharing it is in control (or free)
+   * together. While active, bot browser commands are refused; input and screenshots are still allowed.
+   */
+  setBrowserTakeover(
+    bot: Bot,
+    change: SetBrowserTakeover,
+    requestedBy: 'user' | 'bot',
+    threadId?: string,
+  ): Promise<BrowserTakeover>;
+  /**
+   * Applies one remote input event to the bot's browser. Refused unless the person's takeover is active on the
+   * bot's profile, and while a sign-in window is open (that local window is the input surface then).
+   */
+  browserInput(bot: Bot, input: ComputerInput): Promise<void>;
   /** The state of one profile's browser, by profile key (a shared profile id, or a bot id for an own profile). */
   statusForProfile(profileId: string): Promise<HostBrowserStatus>;
   /** Closes the browser serving a shared profile, saving it. Idempotent. */

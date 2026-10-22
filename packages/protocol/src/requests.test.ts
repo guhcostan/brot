@@ -10,6 +10,7 @@ import {
   PairingComplete,
   PostMessage,
   ResolveApproval,
+  SetBrowserTakeover,
   UpdateBot,
   UpdateBrowserProfile,
   UpdateRoomMembers,
@@ -43,6 +44,13 @@ describe('request schemas', () => {
     expect(() => BrowserStatus.parse({ state: 'opening', profile: { kind: 'own' } })).toThrow();
     expect(() => BrowserStatus.parse({ state: 'login' })).toThrow();
     expect(() => BrowserStatus.parse({ state: 'login', profile: { kind: 'team' } })).toThrow();
+  });
+
+  it('validates a browser takeover request', () => {
+    expect(SetBrowserTakeover.parse({ active: true, reason: 'Sign in' })).toEqual({ active: true, reason: 'Sign in' });
+    expect(SetBrowserTakeover.parse({ active: false })).toEqual({ active: false });
+    expect(() => SetBrowserTakeover.parse({ active: 'yes' })).toThrow();
+    expect(() => SetBrowserTakeover.parse({ active: true, reason: 'x'.repeat(501) })).toThrow();
   });
 
   it('accepts a browser flag on CreateBot and UpdateBot', () => {

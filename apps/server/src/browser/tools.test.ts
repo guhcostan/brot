@@ -47,6 +47,18 @@ function fakeHostBrowser(): FakeHostBrowser {
     async deleteProfile() {
       fake.state = { state: 'stopped' };
     },
+    async browserScreen() {
+      return new Uint8Array([0xff, 0xd8, 0xff, 0xd9]);
+    },
+    async browserTakeover() {
+      return { active: false };
+    },
+    async setBrowserTakeover() {
+      return { active: false };
+    },
+    async browserInput() {
+      return undefined;
+    },
     async statusForProfile() {
       return fake.state;
     },

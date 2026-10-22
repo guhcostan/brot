@@ -313,8 +313,9 @@ const ScreenX = z.number().int().min(0).max(7680);
 const ScreenY = z.number().int().min(0).max(4320);
 
 /**
- * One input event from the person who took over a bot's desktop. `key` uses xdotool key names
- * (`Return`, `ctrl+l`, `BackSpace`). `type` text is sent literally.
+ * One input event from the person who took over a bot's desktop or host browser. `key` uses xdotool key names
+ * (`Return`, `ctrl+l`, `BackSpace`). `type` text is sent literally. The host browser reuses this shape; its
+ * coordinates are browser viewport pixels (1280x800).
  */
 export const ComputerInput = z.discriminatedUnion('type', [
   z.object({ type: z.literal('click'), x: ScreenX, y: ScreenY, button: z.enum(['left', 'middle', 'right']).default('left'), double: z.boolean().default(false) }),
@@ -331,6 +332,16 @@ export const SetTakeover = z.object({
   reason: z.string().max(500).optional(),
 });
 export type SetTakeover = z.infer<typeof SetTakeover>;
+
+/**
+ * Starts or ends a person's takeover of a bot's host browser. Like the desktop takeover, but the state belongs
+ * to a browser profile, so it applies to every bot that shares the profile.
+ */
+export const SetBrowserTakeover = z.object({
+  active: z.boolean(),
+  reason: z.string().max(500).optional(),
+});
+export type SetBrowserTakeover = z.infer<typeof SetBrowserTakeover>;
 
 /**
  * A profile name as a person types it: trimmed, 1 to 60 characters, one line. Blank names and line breaks are

@@ -227,6 +227,18 @@ export const Takeover = z.object({
 });
 export type Takeover = z.infer<typeof Takeover>;
 
+/**
+ * The person watching a bot's host browser and, while `active`, driving it (a sign-in, a CAPTCHA, a 2FA code).
+ * The state belongs to a browser profile, so every bot sharing that profile sees the same takeover.
+ */
+export const BrowserTakeover = z.object({
+  active: z.boolean(),
+  /** When the person took control. Absent once they hand it back. */
+  since: IsoDateTime.optional(),
+  reason: z.string().max(500).optional(),
+});
+export type BrowserTakeover = z.infer<typeof BrowserTakeover>;
+
 export const MessageRole = z.enum(['user', 'assistant', 'system']);
 export type MessageRole = z.infer<typeof MessageRole>;
 

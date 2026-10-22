@@ -1,6 +1,6 @@
 import { rm } from 'node:fs/promises';
-import type { Bot } from '@brot/protocol';
-import { ensurePage, runBrowserCommand } from './driver';
+import type { Bot, BrowserTakeover, ComputerInput } from '@brot/protocol';
+import { applyInput, ensurePage, inputProblem, runBrowserCommand, screenshot } from './driver';
 import { botAllowlist, createBotEgress, type BotEgress } from './egress';
 import { launchChrome, removeDevToolsState, resolveChromeBinary, type ChromeHandle } from './launch';
 import { ensureProfileDir, profileDir } from './profile';
@@ -8,6 +8,28 @@ import type { HostBrowserDeps, HostBrowserService, HostBrowserState } from './ty
 
 /** What the bot is told when it asks for the browser while the person's sign-in window is open. */
 const LOGIN_REFUSAL = 'the person is signing in; try again when the window closes';
+
+/** What the bot is told when it asks to drive while the person has the browser. */
+export const BROWSER_TAKEOVER_REFUSAL = 'The person is in control of the browser; wait until they hand it back.';
+/** Input during a sign-in window goes to that local window, not the API. */
+const LOGIN_INPUT_REFUSAL = 'The browser is in its sign-in window; type and click in that window.';
+
+/** A host-browser failure a route can report with a status code. */
+export class BrowserError extends Error {
+  constructor(
+    readonly status: 400 | 404 | 409,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+/** A profile's takeover as the API reports it, plus who asked for it (kept for the bot-initiated case). */
+interface TakeoverRecord {
+  readonly takeover: BrowserTakeover;
+  readonly requestedBy: 'user' | 'bot';
+  readonly threadId?: string;
+}
 
 interface ProfileBrowser {
   readonly state: Exclude<HostBrowserState, 'stopped'>;
@@ -45,10 +67,28 @@ function sameAllowlist(left: readonly string[], right: readonly string[]): boole
  * The login hand-off: `openForLogin` starts a headed, unproxied Chrome and reports `login`; every bot sharing
  * that profile sees it and its commands are refused. Once the person closes the window, the profile (with the
  * new session) is reused by the next command, which relaunches Chrome headless through the bot's egress proxy.
+ *
+ * The person can also watch any running browser (a JPEG per poll) and take control of a profile. A takeover
+ * covers every bot sharing that profile: their commands are refused until it is handed back, while screenshots
+ * and input stay allowed. The sign-in window is the exception that wins: while it is open the local window is
+ * the input surface, so API input is refused until the person closes it.
  */
 export function createHostBrowserService(deps: HostBrowserDeps): HostBrowserService {
   const browsers = new Map<string, ProfileBrowser>();
   const queues = new Map<string, Promise<unknown>>();
+  const takeovers = new Map<string, TakeoverRecord>();
+  const screenInFlight = new Map<string, Promise<Uint8Array>>();
+
+  const errorLine = (error: unknown): string =>
+    error instanceof Error ? (error.message.split('\n')[0] ?? '') : String(error);
+
+  function takeoverOf(key: string): BrowserTakeover {
+    return takeovers.get(key)?.takeover ?? { active: false };
+  }
+
+  function requireBrowser(bot: Bot): void {
+    if (bot.browser !== true) throw new BrowserError(409, 'This bot has no browser');
+  }
 
   function serial<T>(key: string, work: () => Promise<T>): Promise<T> {
     const previous = queues.get(key) ?? Promise.resolve();
@@ -156,6 +196,7 @@ export function createHostBrowserService(deps: HostBrowserDeps): HostBrowserServ
       return serial(key, async () => {
         let info = await live(key);
         if (info !== undefined && info.state === 'login') throw new Error(LOGIN_REFUSAL);
+        if (takeoverOf(key).active) throw new Error(BROWSER_TAKEOVER_REFUSAL);
         const allow = botAllowlist(bot);
         if (info !== undefined && !sameAllowlist(info.allow, allow)) {
           // A profile has one Chrome and one egress policy at a time. A bot with a different policy restarts it
@@ -170,6 +211,75 @@ export function createHostBrowserService(deps: HostBrowserDeps): HostBrowserServ
           // A dead Chrome is reaped here so the next command starts a fresh one; command errors keep it running.
           if (!info.chrome.isRunning()) await end(info, key);
           throw error;
+        }
+      });
+    },
+
+    browserScreen(bot) {
+      const key = profileKey(bot);
+      // The panel polls several times a second; concurrent polls for one profile share a single capture.
+      const pending = screenInFlight.get(key);
+      if (pending !== undefined) return pending;
+      const capture = serial(key, async () => {
+        requireBrowser(bot);
+        let info = await live(key);
+        if (info === undefined) {
+          // Opening the panel starts the browser, so the person can see the page before the bot's first command.
+          try {
+            info = await launchForBrowsing(bot, key);
+          } catch (error) {
+            throw new BrowserError(409, `The browser could not start: ${errorLine(error)}`);
+          }
+        }
+        try {
+          return await screenshot(await ensurePage(info.chrome.browser));
+        } catch (error) {
+          throw new BrowserError(409, `The browser is not running: ${errorLine(error)}`);
+        }
+      }).finally(() => screenInFlight.delete(key));
+      screenInFlight.set(key, capture);
+      return capture;
+    },
+
+    browserTakeover(bot) {
+      const key = profileKey(bot);
+      return serial(key, async () => {
+        requireBrowser(bot);
+        return takeoverOf(key);
+      });
+    },
+
+    setBrowserTakeover(bot, change, requestedBy, threadId) {
+      const key = profileKey(bot);
+      return serial(key, async () => {
+        requireBrowser(bot);
+        const takeover: BrowserTakeover = {
+          active: change.active,
+          ...(change.active ? { since: new Date().toISOString() } : {}),
+          ...(change.reason === undefined ? {} : { reason: change.reason }),
+        };
+        // No bus event exists for a host-browser takeover: the panel polls this state. requestedBy and threadId
+        // are kept on the record so a bot-initiated takeover can be surfaced without changing the API shape.
+        takeovers.set(key, { takeover, requestedBy, ...(threadId === undefined ? {} : { threadId }) });
+        return takeover;
+      });
+    },
+
+    browserInput(bot, input: ComputerInput) {
+      const key = profileKey(bot);
+      return serial(key, async () => {
+        requireBrowser(bot);
+        if (!takeoverOf(key).active) throw new BrowserError(409, 'No takeover is active.');
+        const problem = inputProblem(input);
+        if (problem !== undefined) throw new BrowserError(400, problem);
+        const info = await live(key);
+        if (info === undefined) throw new BrowserError(409, 'The browser is not running.');
+        // The sign-in window is the person's local input surface; routing clicks here too would fight it.
+        if (info.state === 'login') throw new BrowserError(409, LOGIN_INPUT_REFUSAL);
+        try {
+          await applyInput(await ensurePage(info.chrome.browser), input);
+        } catch (error) {
+          throw new BrowserError(409, errorLine(error));
         }
       });
     },
@@ -193,6 +303,7 @@ export function createHostBrowserService(deps: HostBrowserDeps): HostBrowserServ
       return serial(key, async () => {
         const info = browsers.get(key);
         if (info !== undefined) await end(info, key);
+        takeovers.delete(key);
         await rm(profileDir(deps.home, key), { recursive: true, force: true });
       });
     },
@@ -216,6 +327,7 @@ export function createHostBrowserService(deps: HostBrowserDeps): HostBrowserServ
       return serial(profileId, async () => {
         const info = browsers.get(profileId);
         if (info !== undefined) await end(info, profileId);
+        takeovers.delete(profileId);
         await rm(profileDir(deps.home, profileId), { recursive: true, force: true });
       });
     },
@@ -230,6 +342,8 @@ export function createHostBrowserService(deps: HostBrowserDeps): HostBrowserServ
           }),
         ),
       );
+      takeovers.clear();
+      screenInFlight.clear();
     },
   };
 }

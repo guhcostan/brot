@@ -13,6 +13,44 @@ import { createHostBrowserService } from './service';
 import { botFor } from './test-helpers';
 import type { HostBrowserService } from './types';
 
+/** A bot that opted into the host browser, for the live view and takeover methods. */
+function hostBotFor(id: string, allow?: readonly string[], browserProfileId?: string): Bot {
+  return { ...botFor(id, allow, browserProfileId), browser: true };
+}
+
+/** The pixel size of a JPEG, read from its SOF marker. */
+function jpegSize(bytes: Uint8Array): { width: number; height: number } | undefined {
+  if (bytes[0] !== 0xff || bytes[1] !== 0xd8 || bytes[2] !== 0xff) return undefined;
+  let index = 2;
+  while (index + 9 < bytes.length) {
+    if (bytes[index] !== 0xff) {
+      index += 1;
+      continue;
+    }
+    const marker = bytes[index + 1] ?? 0;
+    if (marker === 0xd8 || marker === 0xd9) {
+      index += 2;
+      continue;
+    }
+    const length = ((bytes[index + 2] ?? 0) << 8) | (bytes[index + 3] ?? 0);
+    if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+      const height = ((bytes[index + 5] ?? 0) << 8) | (bytes[index + 6] ?? 0);
+      const width = ((bytes[index + 7] ?? 0) << 8) | (bytes[index + 8] ?? 0);
+      return { width, height };
+    }
+    index += 2 + length;
+  }
+  return undefined;
+}
+
+function expectJpegFrame(bytes: Uint8Array): void {
+  expect(bytes[0]).toBe(0xff);
+  expect(bytes[1]).toBe(0xd8);
+  expect(bytes[2]).toBe(0xff);
+  expect(bytes.length).toBeGreaterThan(1000);
+  expect(jpegSize(bytes)).toEqual({ width: 1280, height: 800 });
+}
+
 /** The suite launches the real Chrome on this machine; when there is none it skips instead of failing. */
 function chromeInstalled(): boolean {
   try {
@@ -252,6 +290,77 @@ describe.skipIf(!chromeFound)('host browser against the real Chrome', () => {
         await service.deleteProfile(ownBot);
         expect(await service.status(ownBot)).toEqual({ state: 'stopped' });
         await expect(stat(join(home, 'browser-profiles', ownBot.id))).rejects.toThrow();
+      } finally {
+        await service.closeAll();
+        await rm(home, { recursive: true, force: true });
+      }
+    },
+    180_000,
+  );
+
+  it(
+    'streams a live JPEG and lets the person take over, drive the page and hand back',
+    async () => {
+      const home = await mkdtemp(join(tmpdir(), 'brot-browser-'));
+      const service = createHostBrowserService({ home });
+      const bot = hostBotFor(`bot_live_${Date.now()}`, ['example.com']);
+      try {
+        // Opening the panel starts the browser before any bot command, and the frame is deterministic.
+        expectJpegFrame(await service.browserScreen(bot));
+        expect(await service.status(bot)).toEqual({ state: 'running' });
+
+        const opened = await service.browser(bot, 'open', { url: 'https://example.com' });
+        expect(String(opened.title)).toBe('Example Domain');
+        expectJpegFrame(await service.browserScreen(bot));
+
+        // Input is refused until the person takes control, and then bot commands are refused instead.
+        await expect(service.browserInput(bot, { type: 'key', key: 'Tab' })).rejects.toThrow(/No takeover is active/);
+        const taken = await service.setBrowserTakeover(bot, { active: true, reason: 'Sign in' }, 'user');
+        expect(taken).toMatchObject({ active: true, reason: 'Sign in' });
+        expect(await service.browserTakeover(bot)).toMatchObject({ active: true });
+        await expect(service.browser(bot, 'snapshot', {})).rejects.toThrow(/person is in control of the browser/);
+
+        // The person can move, click, scroll, type and press keys on the live page.
+        await service.browserInput(bot, { type: 'move', x: 200, y: 200 });
+        await service.browserInput(bot, { type: 'click', x: 100, y: 120, button: 'left', double: false });
+        await service.browserInput(bot, { type: 'scroll', x: 400, y: 300, dy: -1 });
+        await service.browserInput(bot, { type: 'key', key: 'Tab' });
+        await service.browserInput(bot, { type: 'type', text: 'example' });
+        expectJpegFrame(await service.browserScreen(bot));
+
+        // Handing back lets the bot drive again.
+        expect(await service.setBrowserTakeover(bot, { active: false }, 'user')).toEqual({ active: false });
+        expect(String((await service.browser(bot, 'snapshot', {})).title)).toBe('Example Domain');
+        await expect(service.browserInput(bot, { type: 'key', key: 'Tab' })).rejects.toThrow(/No takeover is active/);
+      } finally {
+        await service.closeAll();
+        await rm(home, { recursive: true, force: true });
+      }
+    },
+    180_000,
+  );
+
+  it(
+    'shares one takeover across the bots of a profile',
+    async () => {
+      const home = await mkdtemp(join(tmpdir(), 'brot-browser-'));
+      const service = createHostBrowserService({ home });
+      const profileId = 'bp_it_live_shared';
+      const first = hostBotFor(`bot_live_a_${Date.now()}`, ['example.com'], profileId);
+      const second = hostBotFor(`bot_live_b_${Date.now()}`, ['example.com'], profileId);
+      try {
+        await service.browser(first, 'open', { url: 'https://example.com' });
+        await service.setBrowserTakeover(first, { active: true, reason: 'Sign in' }, 'user');
+        expect(await service.browserTakeover(second)).toMatchObject({ active: true });
+
+        // The sibling bot in the profile is blocked from driving and its input goes to the same page.
+        await expect(service.browser(second, 'snapshot', {})).rejects.toThrow(/person is in control of the browser/);
+        await service.browserInput(second, { type: 'key', key: 'Escape' });
+        expectJpegFrame(await service.browserScreen(second));
+
+        await service.setBrowserTakeover(second, { active: false }, 'user');
+        expect(await service.browserTakeover(first)).toEqual({ active: false });
+        expect(String((await service.browser(first, 'snapshot', {})).title)).toBe('Example Domain');
       } finally {
         await service.closeAll();
         await rm(home, { recursive: true, force: true });

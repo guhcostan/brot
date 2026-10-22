@@ -1,8 +1,14 @@
+import { randomBytes } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { Bot, BrowserProfile } from '@brot/protocol';
+import type { Bot, BrowserProfile, BrowserTakeover, ComputerInput } from '@brot/protocol';
 import { createApp } from '../app';
+import { hashDeviceToken } from '../auth';
 import { call, createTestContext, type TestContext } from '../testing';
+import { BrowserError } from './service';
 import type { HostBrowserService, HostBrowserStatus } from './types';
+
+/** A tiny JPEG: enough for the screen route to pass bytes through unchanged. */
+const FAKE_JPEG = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01, 0xff, 0xd9]);
 
 /** The profile a bot's host browser runs: a shared profile id, or its own id when it names none. */
 function profileKeyOf(bot: Bot): string {
@@ -12,25 +18,38 @@ function profileKeyOf(bot: Bot): string {
 interface FakeHostBrowser extends HostBrowserService {
   /** State per profile key, so bots sharing a profile share one state the way the real service does. */
   readonly states: Map<string, HostBrowserStatus>;
+  readonly takeovers: Map<string, BrowserTakeover>;
   readonly statusCalls: string[];
   readonly loginCalls: string[];
   readonly closeCalls: string[];
   readonly deleteCalls: string[];
   readonly closeProfileCalls: string[];
   readonly deleteProfileDirCalls: string[];
+  readonly screenCalls: string[];
+  readonly takeoverCalls: string[];
+  readonly inputCalls: Array<{ botId: string; input: ComputerInput }>;
+  screenBytes: Uint8Array;
+  screenError?: BrowserError;
+  inputError?: BrowserError;
 }
 
 function fakeHostBrowser(): FakeHostBrowser {
   const states = new Map<string, HostBrowserStatus>();
   const stateOf = (key: string): HostBrowserStatus => states.get(key) ?? { state: 'stopped' };
+  const takeovers = new Map<string, BrowserTakeover>();
   const fake: FakeHostBrowser = {
     states,
+    takeovers,
     statusCalls: [],
     loginCalls: [],
     closeCalls: [],
     deleteCalls: [],
     closeProfileCalls: [],
     deleteProfileDirCalls: [],
+    screenCalls: [],
+    takeoverCalls: [],
+    inputCalls: [],
+    screenBytes: FAKE_JPEG,
     async browser() {
       return {};
     },
@@ -52,6 +71,29 @@ function fakeHostBrowser(): FakeHostBrowser {
       fake.deleteCalls.push(bot.id);
       states.set(profileKeyOf(bot), { state: 'stopped' });
     },
+    async browserScreen(bot) {
+      fake.screenCalls.push(bot.id);
+      if (fake.screenError !== undefined) throw fake.screenError;
+      return fake.screenBytes;
+    },
+    async browserTakeover(bot) {
+      fake.takeoverCalls.push(bot.id);
+      return takeovers.get(profileKeyOf(bot)) ?? { active: false };
+    },
+    async setBrowserTakeover(bot, change) {
+      const takeover: BrowserTakeover = {
+        active: change.active,
+        ...(change.active ? { since: new Date().toISOString() } : {}),
+        ...(change.reason === undefined ? {} : { reason: change.reason }),
+      };
+      takeovers.set(profileKeyOf(bot), takeover);
+      return takeover;
+    },
+    async browserInput(bot, input) {
+      fake.inputCalls.push({ botId: bot.id, input });
+      if (fake.inputError !== undefined) throw fake.inputError;
+      if (takeovers.get(profileKeyOf(bot))?.active !== true) throw new BrowserError(409, 'No takeover is active.');
+    },
     async statusForProfile(profileId) {
       return stateOf(profileId);
     },
@@ -65,6 +107,7 @@ function fakeHostBrowser(): FakeHostBrowser {
     },
     async closeAll() {
       states.clear();
+      takeovers.clear();
     },
   };
   return fake;
@@ -345,5 +388,139 @@ describe('DELETE /api/bots/:id', () => {
     const res = await call(app, 'DELETE', '/api/bots/nope');
     expect(res.status).toBe(404);
     expect(host.deleteCalls).toHaveLength(0);
+  });
+});
+
+describe('GET /api/bots/:id/browser/screen', () => {
+  it('returns the frame as no-store JPEG bytes', async () => {
+    const res = await call(app, 'GET', `/api/bots/${browserBot.id}/browser/screen`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toBe('image/jpeg');
+    expect(res.headers.get('cache-control')).toBe('no-store');
+    expect(Array.from(new Uint8Array(await res.arrayBuffer()))).toEqual(Array.from(FAKE_JPEG));
+    expect(host.screenCalls).toEqual([browserBot.id]);
+  });
+
+  it('answers 404 for an unknown bot and 409 for a bot without a browser', async () => {
+    expect((await call(app, 'GET', '/api/bots/nope/browser/screen')).status).toBe(404);
+    expect((await call(app, 'GET', `/api/bots/${plainBot.id}/browser/screen`)).status).toBe(409);
+    expect(host.screenCalls).toHaveLength(0);
+  });
+
+  it('passes a service conflict through when the browser cannot start', async () => {
+    host.screenError = new BrowserError(409, 'The browser could not start.');
+    const res = await call(app, 'GET', `/api/bots/${browserBot.id}/browser/screen`);
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: 'The browser could not start.' });
+  });
+
+  it('is readable by a viewer device, since viewers may watch', async () => {
+    const token = randomBytes(24).toString('base64url');
+    await ctx.services.repos.devices.create({ name: 'Phone', role: 'viewer', publicKey: 'test-public-key', tokenHash: hashDeviceToken(token) });
+    const res = await call(ctx.remote, 'GET', `/api/bots/${browserBot.id}/browser/screen`, undefined, {
+      authorization: `Bearer ${token}`,
+    });
+    expect(res.status).toBe(200);
+  });
+});
+
+describe('browser takeover', () => {
+  it('reports no takeover, takes control with a reason, and hands it back', async () => {
+    const before = await call(app, 'GET', `/api/bots/${browserBot.id}/browser/takeover`);
+    expect(before.status).toBe(200);
+    expect(await before.json()).toEqual({ active: false });
+
+    const taken = await call(app, 'POST', `/api/bots/${browserBot.id}/browser/takeover`, { active: true, reason: 'Sign in to X' });
+    expect(taken.status).toBe(200);
+    const takeover = (await taken.json()) as BrowserTakeover;
+    expect(takeover).toMatchObject({ active: true, reason: 'Sign in to X' });
+    expect(Number.isNaN(new Date(takeover.since ?? '').getTime())).toBe(false);
+
+    expect(await (await call(app, 'GET', `/api/bots/${browserBot.id}/browser/takeover`)).json()).toMatchObject({ active: true });
+
+    const handedBack = await call(app, 'POST', `/api/bots/${browserBot.id}/browser/takeover`, { active: false });
+    expect(await handedBack.json()).toEqual({ active: false });
+  });
+
+  it('reports one takeover for every bot sharing the profile', async () => {
+    const profile = await createProfile();
+    const first = await createBot({ browser: true, browserProfileId: profile.id });
+    const second = await createBot({ browser: true, browserProfileId: profile.id });
+
+    await call(app, 'POST', `/api/bots/${first.id}/browser/takeover`, { active: true, reason: 'Sign in' });
+    const seenBySecond = await call(app, 'GET', `/api/bots/${second.id}/browser/takeover`);
+    expect(await seenBySecond.json()).toMatchObject({ active: true, reason: 'Sign in' });
+
+    await call(app, 'POST', `/api/bots/${second.id}/browser/takeover`, { active: false });
+    expect(await (await call(app, 'GET', `/api/bots/${first.id}/browser/takeover`)).json()).toEqual({ active: false });
+  });
+
+  it('rejects a takeover body without a boolean active', async () => {
+    const res = await call(app, 'POST', `/api/bots/${browserBot.id}/browser/takeover`, { active: 'yes' });
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: 'Invalid request' });
+  });
+
+  it('answers 404 for an unknown bot and 409 for a bot without a browser', async () => {
+    expect((await call(app, 'GET', '/api/bots/nope/browser/takeover')).status).toBe(404);
+    expect((await call(app, 'POST', '/api/bots/nope/browser/takeover', { active: true })).status).toBe(404);
+    expect((await call(app, 'POST', `/api/bots/${plainBot.id}/browser/takeover`, { active: true })).status).toBe(409);
+    expect(host.takeoverCalls).toHaveLength(0);
+  });
+});
+
+describe('POST /api/bots/:id/browser/input', () => {
+  it('accepts input while a takeover is active', async () => {
+    await call(app, 'POST', `/api/bots/${browserBot.id}/browser/takeover`, { active: true });
+    const res = await call(app, 'POST', `/api/bots/${browserBot.id}/browser/input`, { type: 'click', x: 100, y: 120 });
+    expect(res.status).toBe(204);
+    expect(host.inputCalls).toEqual([
+      { botId: browserBot.id, input: { type: 'click', x: 100, y: 120, button: 'left', double: false } },
+    ]);
+  });
+
+  it('refuses input until the person has taken over', async () => {
+    const res = await call(app, 'POST', `/api/bots/${browserBot.id}/browser/input`, { type: 'move', x: 1, y: 1 });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: 'No takeover is active.' });
+    expect(host.inputCalls).toHaveLength(1);
+  });
+
+  it('rejects an input event that does not match the contract', async () => {
+    await call(app, 'POST', `/api/bots/${browserBot.id}/browser/takeover`, { active: true });
+    const res = await call(app, 'POST', `/api/bots/${browserBot.id}/browser/input`, { type: 'key', key: 'bad key;rm' });
+    expect(res.status).toBe(400);
+    expect(host.inputCalls).toHaveLength(0);
+  });
+
+  it('passes through the out-of-viewport 400 and the sign-in 409', async () => {
+    await call(app, 'POST', `/api/bots/${browserBot.id}/browser/takeover`, { active: true });
+
+    host.inputError = new BrowserError(400, 'input is outside the 1280x800 browser viewport');
+    const outside = await call(app, 'POST', `/api/bots/${browserBot.id}/browser/input`, { type: 'move', x: 5000, y: 20 });
+    expect(outside.status).toBe(400);
+    expect(await outside.json()).toEqual({ error: 'input is outside the 1280x800 browser viewport' });
+
+    host.inputError = new BrowserError(409, 'The browser is in its sign-in window; type and click in that window.');
+    const signingIn = await call(app, 'POST', `/api/bots/${browserBot.id}/browser/input`, { type: 'key', key: 'Tab' });
+    expect(signingIn.status).toBe(409);
+    expect(await signingIn.json()).toEqual({ error: 'The browser is in its sign-in window; type and click in that window.' });
+  });
+
+  it('answers 404 for an unknown bot and 409 for a bot without a browser', async () => {
+    expect((await call(app, 'POST', '/api/bots/nope/browser/input', { type: 'move', x: 1, y: 1 })).status).toBe(404);
+    expect((await call(app, 'POST', `/api/bots/${plainBot.id}/browser/input`, { type: 'move', x: 1, y: 1 })).status).toBe(409);
+    expect(host.inputCalls).toHaveLength(0);
+  });
+
+  it('lets a viewer watch but not drive: takeover and input need a full device', async () => {
+    const token = randomBytes(24).toString('base64url');
+    await ctx.services.repos.devices.create({ name: 'Phone', role: 'viewer', publicKey: 'test-public-key', tokenHash: hashDeviceToken(token) });
+    const auth = { authorization: `Bearer ${token}` };
+    expect((await call(ctx.remote, 'GET', `/api/bots/${browserBot.id}/browser/takeover`, undefined, auth)).status).toBe(200);
+    expect((await call(ctx.remote, 'POST', `/api/bots/${browserBot.id}/browser/takeover`, { active: true }, auth)).status).toBe(403);
+    expect(
+      (await call(ctx.remote, 'POST', `/api/bots/${browserBot.id}/browser/input`, { type: 'move', x: 1, y: 1 }, auth)).status,
+    ).toBe(403);
   });
 });
