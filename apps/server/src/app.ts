@@ -593,6 +593,25 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     }
   });
 
+  /**
+   * Deletes a room thread. Its active runs are cancelled first through the harness (the same path the bot-delete
+   * route uses), then the thread row goes: messages, runs, events, approvals, notifications, members, sessions and
+   * tasks requested in the room cascade with it. A task whose work thread was this room keeps existing with that
+   * link cleared (`workThreadId` FK is SET NULL). No event is published; the web refreshes its room list.
+   */
+  app.delete('/api/rooms/:id', async (c) => {
+    const id = c.req.param('id');
+    const thread = await repos.threads.get(id);
+    if (!thread || thread.kind !== 'room') return notFound(c, 'Room');
+    for (const run of await repos.runs.listByThread(id)) {
+      if (run.status === 'running' || run.status === 'waiting_approval') await harness.cancelRun(run.id);
+    }
+    // Another request may have deleted the room while its runs were stopping.
+    if ((await repos.threads.get(id)) === undefined) return c.body(null, 204);
+    await repos.threads.remove(id);
+    return c.body(null, 204);
+  });
+
   app.get('/api/teams', async (c) => c.json(await repos.teams.list()));
 
   app.post('/api/teams', async (c) => {

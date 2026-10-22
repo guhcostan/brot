@@ -113,5 +113,15 @@ export function createThreadRepo(db: Db) {
         .returning();
       return rows[0] ? toThread(rows[0]) : undefined;
     },
+
+    /**
+     * Deletes a thread. Everything that belongs to it goes with it by foreign-key cascade: messages, runs, events,
+     * approvals, notifications, room members, thread sessions, routine runs and tasks requested in it. Tasks whose
+     * `workThreadId` was this thread keep existing with that link cleared.
+     */
+    async remove(id: string): Promise<boolean> {
+      const rows = await db.delete(threads).where(eq(threads.id, id)).returning({ id: threads.id });
+      return rows.length > 0;
+    },
   };
 }
