@@ -308,6 +308,20 @@ mapped in `docs/MAUSBOT-PARITY.md` (34 bots / 7 teams, 33 bots with a browser an
 - Suite: 2026 tests (197 files), typecheck 12/12, lint clean. Known flakes seen under full-suite load (both
   pass isolated and on rerun): desktop takeover timing, browser viewer screen route, and the tasks chain-max
   route. Gaps found: no API/UI to delete a room yet.
+## Wave 22: thread model picker, room deletion (2026-10-22)
+
+- **Thread model picker.** DM headers show the effective model (`thread.model ?? bot.model`, with a default
+  hint) and open a picker listing the bot's model plus every provider model grouped by provider
+  (unconfigured ones dimmed with the reason). Picking patches the thread and null restores the bot's model;
+  the client's renameThread became `updateThread({title?, model?})` with protocol validation.
+- **Room deletion.** DELETE /api/rooms/:id cancels running/waiting runs of the room, then deletes the
+  thread so messages, runs, events, approvals, members, sessions and room-requested tasks cascade (tasks
+  whose work thread pointed at it survive with the link cleared). 404 for unknown ids or DM threads, repeat
+  delete 404s, no event. The room header gained an actions menu with Delete room behind the confirmation and
+  selection falls back to the lead bot. Verified live: delete 204, repeat/DM 404, rename still works.
+- Suite: 2051 tests (203 files), typecheck 12/12, lint clean. Follow-ups found: deleting a room leaves its
+  attachment rows/files orphaned (the boot sweep only removes files with no row), stale in-memory room baton
+  entries, and a narrow new-message-vs-delete race.
 ## Next
 
 1. Re-run the eval suite on a live model once OpenCode Go has quota (`apps/evals`, `--base` to the server), including B8 and C; the 2026-10-20 results predate the read auto-allow and the fixes above.
