@@ -14,6 +14,7 @@ import type {
   CreateSavedLogin,
   CreateRoutineInput,
   CreateSkill,
+  CreateWorkspaceMemory,
   CreateTeamInput,
   Device,
   McpServer,
@@ -64,11 +65,13 @@ export type {
   CreateSavedLogin,
   CreateRoutineInput,
   CreateSkill,
+  CreateWorkspaceMemory,
   McpServer,
   McpServerTestResult,
   McpServerTransport,
   Memory,
   MemoryKind,
+  MemoryScope,
   Notification,
   NotificationKind,
   Routine,
@@ -281,6 +284,7 @@ export interface BrotClient {
   /** What a bot remembers, oldest first. */
   listMemories(botId: string): Promise<Memory[]>;
   createMemory(botId: string, input: CreateMemory): Promise<Memory>;
+  /** Updates a memory of either scope; the returned record carries its scope when the server sends one. */
   updateMemory(memoryId: string, patch: UpdateMemory): Promise<Memory>;
   deleteMemory(memoryId: string): Promise<void>;
 
@@ -407,6 +411,10 @@ export interface BrotClient {
   updateSavedLogin(loginId: string, patch: UpdateSavedLogin): Promise<SavedLogin>;
   /** Deletes the login and the vault values behind it. */
   deleteSavedLogin(loginId: string): Promise<void>;
+
+  /** The workspace facts ("About me") every bot receives. */
+  listWorkspaceMemories(): Promise<Memory[]>;
+  createWorkspaceMemory(input: CreateWorkspaceMemory): Promise<Memory>;
 
   /** Full-text message search, newest first; snippets are plain text. */
   searchMessages(filter: MessageSearchFilter): Promise<SearchHit[]>;

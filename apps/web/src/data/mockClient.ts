@@ -31,6 +31,7 @@ import {
   CreateBot,
   CreateMcpServer,
   CreateMemory,
+  CreateWorkspaceMemory,
   CreateSavedLogin,
   CreateRoutine,
   CreateSkill,
@@ -97,6 +98,7 @@ import {
   DEMO_SKILLS,
   DEMO_TASKS,
   DEMO_TEAMS,
+  DEMO_WORKSPACE_MEMORIES,
   DEMO_THREAD_TITLES,
   OPEN_ASK,
   PENDING_SEND,
@@ -331,6 +333,10 @@ export function createMockClient(): BrotClient {
   const batons = new Map<string, string>();
   /** Uploaded attachment metadata and the conversation it was uploaded to, keyed by attachment id. */
   const attachments = new Map<string, { attachment: Attachment; threadId: string }>();
+  /** Workspace facts (About me): no botId, scope 'workspace'. */
+  const workspaceMemories = new Map<string, Memory>(
+    DEMO_WORKSPACE_MEMORIES.map((memory) => [memory.id, structuredClone(memory)]),
+  );
   const memories = new Map<string, Memory>(DEMO_MEMORIES.map((memory) => [memory.id, structuredClone(memory)]));
   const notifications = new Map<string, Notification>(
     DEMO_NOTIFICATIONS.map((notification) => [notification.id, structuredClone(notification)]),
@@ -970,27 +976,61 @@ export function createMockClient(): BrotClient {
       if (!bots.has(botId)) throw new Error(`Unknown bot: ${botId}`);
       const data = CreateMemory.parse(input);
       const at = now();
-      const created: Memory = { id: nextId('mem'), botId, kind: data.kind, content: data.content, createdAt: at, updatedAt: at };
+      const created: Memory = { id: nextId('mem'), botId, scope: 'bot', kind: data.kind, content: data.content, createdAt: at, updatedAt: at };
       memories.set(created.id, created);
       return structuredClone(created);
     },
 
     async updateMemory(memoryId, patch) {
-      const current = memories.get(memoryId);
-      if (!current) throw new Error(`Unknown memory: ${memoryId}`);
       const data = UpdateMemory.parse(patch);
+      const current = memories.get(memoryId);
+      if (current) {
+        const next: Memory = {
+          ...current,
+          ...(data.kind === undefined ? {} : { kind: data.kind }),
+          ...(data.content === undefined ? {} : { content: data.content }),
+          updatedAt: now(),
+        };
+        memories.set(memoryId, next);
+        return structuredClone(next);
+      }
+      const workspace = workspaceMemories.get(memoryId);
+      if (!workspace) throw new Error(`Unknown memory: ${memoryId}`);
       const next: Memory = {
-        ...current,
+        ...workspace,
         ...(data.kind === undefined ? {} : { kind: data.kind }),
         ...(data.content === undefined ? {} : { content: data.content }),
         updatedAt: now(),
       };
-      memories.set(memoryId, next);
+      workspaceMemories.set(memoryId, next);
       return structuredClone(next);
     },
 
     async deleteMemory(memoryId) {
-      if (!memories.delete(memoryId)) throw new Error(`Unknown memory: ${memoryId}`);
+      if (memories.delete(memoryId)) return;
+      if (workspaceMemories.delete(memoryId)) return;
+      throw new Error(`Unknown memory: ${memoryId}`);
+    },
+
+    async listWorkspaceMemories() {
+      return [...workspaceMemories.values()]
+        .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt) || a.id.localeCompare(b.id))
+        .map((memory) => structuredClone(memory));
+    },
+
+    async createWorkspaceMemory(input) {
+      const data = CreateWorkspaceMemory.parse(input);
+      const at = now();
+      const created: Memory = {
+        id: nextId('wmem'),
+        scope: 'workspace',
+        kind: data.kind,
+        content: data.content,
+        createdAt: at,
+        updatedAt: at,
+      };
+      workspaceMemories.set(created.id, created);
+      return structuredClone(created);
     },
 
     async listSkills(botId?: string) {

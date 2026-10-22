@@ -25,6 +25,7 @@ const bot: Bot = {
 
 const memory = (extra: Partial<Memory> & Pick<Memory, 'id' | 'kind' | 'content'>): Memory => ({
   botId: bot.id,
+  scope: 'bot',
   createdAt: at,
   updatedAt: at,
   ...extra,

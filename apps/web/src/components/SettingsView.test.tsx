@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { createMockClient } from '../data/mockClient';
-import { DEMO_BOTS, DEMO_BROWSER_PROFILES, DEMO_MCP_SERVERS, DEMO_SAVED_LOGINS, DEMO_TEAMS } from '../data/fixtures';
+import { DEMO_BOTS, DEMO_BROWSER_PROFILES, DEMO_MCP_SERVERS, DEMO_SAVED_LOGINS, DEMO_TEAMS, DEMO_WORKSPACE_MEMORIES } from '../data/fixtures';
 import { TEAM_PACKAGE_FORMAT, TEAM_PACKAGE_VERSION, formatTeamPackage, type TeamPackage } from '@brot/protocol';
 import type { VoiceInfo } from '../voice';
 import { t } from '../i18n';
@@ -40,6 +40,7 @@ function render(overrides: Partial<SettingsViewProps> = {}, bots = botsRecord): 
     initialBrowserProfiles: DEMO_BROWSER_PROFILES,
     initialMcpServers: DEMO_MCP_SERVERS,
     initialSavedLogins: DEMO_SAVED_LOGINS,
+    initialWorkspaceMemories: DEMO_WORKSPACE_MEMORIES,
     ...overrides,
   };
   return renderToStaticMarkup(
@@ -229,5 +230,25 @@ describe('settings voice', () => {
     expect(text).toContain(t('settings.voiceKeySaved'));
     expect(text).toContain(t('settings.voiceUnavailable', { reason: 'The speech key is missing.' }));
     expect(text).toContain('https://api.example.com/v1');
+  });
+});
+
+describe('settings about me', () => {
+  it('renders the workspace facts with kinds and the new-fact action', () => {
+    const text = textOf(render());
+
+    expect(text).toContain(t('settings.aboutMe'));
+    expect(text).toContain(t('settings.aboutMeBody'));
+    expect(text).toContain(t('settings.aboutMeCount', { count: '3' }));
+    expect(text).toContain(t('settings.aboutMeNew'));
+    expect(text).toContain(t('memory.kind.preference'));
+    expect(text).toContain('Prefers Portuguese (pt-BR) in conversation; writes English with customers.');
+  });
+
+  it('shows the empty state when there are no facts', () => {
+    const text = textOf(render({ initialWorkspaceMemories: [] }));
+
+    expect(text).toContain(t('settings.aboutMeEmptyTitle'));
+    expect(text).toContain(t('settings.aboutMeEmptyBody'));
   });
 });

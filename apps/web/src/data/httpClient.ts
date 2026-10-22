@@ -10,6 +10,7 @@ import {
   CreateBot,
   CreateBrowserProfile,
   CreateMemory,
+  CreateWorkspaceMemory,
   CreateSavedLogin,
   CreateRoom,
   CreateRoutine,
@@ -831,6 +832,16 @@ export function createHttpClient({
 
     async deleteSavedLogin(loginId) {
       await request(`/api/logins/${encodeURIComponent(loginId)}`, { method: 'DELETE' });
+    },
+
+    listWorkspaceMemories() {
+      return read('/api/profile/memories', Memory.array());
+    },
+
+    async createWorkspaceMemory(input) {
+      const body = CreateWorkspaceMemory.parse(input);
+      const response = await write('POST', '/api/profile/memories', body);
+      return Memory.parse(await response.json());
     },
 
     async searchMessages(filter) {

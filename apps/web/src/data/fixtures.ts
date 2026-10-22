@@ -315,6 +315,7 @@ function capyDm(): CanonicalEvent[] {
     memory: {
       id: 'mem_capy_1',
       botId: 'bot_capy',
+      scope: 'bot',
       kind: 'preference',
       content: 'Short summaries before 10am.',
       sourceRunId: 'run_capy_1',
@@ -571,6 +572,7 @@ export const DEMO_MEMORIES: Memory[] = [
   {
     id: 'mem_capy_1',
     botId: 'bot_capy',
+    scope: 'bot',
     kind: 'preference',
     content: 'Prefers short summaries before 10am, with the three priorities at the top.',
     createdAt: CREATED,
@@ -579,6 +581,7 @@ export const DEMO_MEMORIES: Memory[] = [
   {
     id: 'mem_capy_2',
     botId: 'bot_capy',
+    scope: 'bot',
     kind: 'fact',
     content: 'The Acme renewal is the top priority until Nov 1. Keep every draft focused on it.',
     createdAt: CREATED,
@@ -587,6 +590,7 @@ export const DEMO_MEMORIES: Memory[] = [
   {
     id: 'mem_sol_1',
     botId: 'bot_sol',
+    scope: 'bot',
     kind: 'summary',
     content: 'Morning brief runs on weekdays at 08:00: check email, then Slack, then the task board, in that order.',
     createdAt: CREATED,
@@ -595,6 +599,7 @@ export const DEMO_MEMORIES: Memory[] = [
   {
     id: 'mem_onca_1',
     botId: 'bot_onca',
+    scope: 'bot',
     kind: 'fact',
     content: 'The CSV export timeout came from loading every row into memory before writing. Stream it in pages instead.',
     createdAt: CREATED,
@@ -741,6 +746,34 @@ export const DEMO_SAVED_LOGINS: SavedLogin[] = [
     host: 'x.com',
     label: 'Work account',
     hasTotp: false,
+    createdAt: CREATED,
+    updatedAt: CREATED,
+  },
+];
+
+/** Workspace facts every bot receives; they belong to the person, not to one bot. */
+export const DEMO_WORKSPACE_MEMORIES: Memory[] = [
+  {
+    id: 'wmem_language',
+    scope: 'workspace' as const,
+    kind: 'preference' as const,
+    content: 'Prefers Portuguese (pt-BR) in conversation; writes English with customers.',
+    createdAt: CREATED,
+    updatedAt: CREATED,
+  },
+  {
+    id: 'wmem_home',
+    scope: 'workspace' as const,
+    kind: 'fact' as const,
+    content: 'Lives in São Sebastião, on the coast of São Paulo.',
+    createdAt: CREATED,
+    updatedAt: CREATED,
+  },
+  {
+    id: 'wmem_solo',
+    scope: 'workspace' as const,
+    kind: 'fact' as const,
+    content: 'Works solo on Brot and does not have a team to delegate to.',
     createdAt: CREATED,
     updatedAt: CREATED,
   },

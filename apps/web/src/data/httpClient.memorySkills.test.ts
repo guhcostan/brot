@@ -7,6 +7,7 @@ const at = '2026-10-19T09:00:00.000Z';
 const memory: Memory = {
   id: 'mem_1',
   botId: 'bot_1',
+  scope: 'bot',
   kind: 'preference',
   content: 'Prefers short summaries before 10am.',
   createdAt: at,
