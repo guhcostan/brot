@@ -8,6 +8,7 @@ import type {
   ComputerState,
   Device,
   Memory,
+  McpServer,
   Message,
   Notification,
   PostMessage,
@@ -23,6 +24,7 @@ import type {
 } from '@brot/protocol';
 import {
   CreateBot,
+  CreateMcpServer,
   CreateMemory,
   CreateRoutine,
   CreateSkill,
@@ -32,7 +34,9 @@ import {
   DESKTOP_WIDTH,
   MAX_ROOM_BOTS,
   MIN_ROOM_BOTS,
+  McpServer as McpServerSchema,
   UpdateBot,
+  UpdateMcpServer,
   UpdateMemory,
   UpdateRoomMembers,
   UpdateRoutine,
@@ -65,6 +69,7 @@ import {
   DEMO_BOTS,
   DEMO_BROWSER_PROFILES,
   DEMO_HISTORY,
+  DEMO_MCP_SERVERS,
   DEMO_MEMORIES,
   DEMO_NOTIFICATIONS,
   DEMO_ROOM_HISTORY,
@@ -240,6 +245,7 @@ export function createMockClient(): BrotClient {
   const devices = DEMO_DEVICES.map((device) => ({ ...device }));
   const screens = new Map<string, FakeScreen>();
   const browserProfiles = new Map<string, BrowserProfile>(DEMO_BROWSER_PROFILES.map((profile) => [profile.id, structuredClone(profile)]));
+  const mcpServers = new Map<string, McpServer>(DEMO_MCP_SERVERS.map((server) => [server.id, structuredClone(server)]));
   /** Browser session state keyed by effective profile: `own:<botId>` or `profile:<id>`. */
   const browserStates = new Map<string, BrowserStatus['state']>();
   const takeoverWaiters = new Map<string, () => void>();
@@ -1429,6 +1435,59 @@ export function createMockClient(): BrotClient {
         if (bot.browserProfileId !== profileId) continue;
         bots.set(botId, clearBrowserProfile(bot));
       }
+    },
+
+    async listMcpServers() {
+      return [...mcpServers.values()]
+        .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id))
+        .map((server) => structuredClone(server));
+    },
+
+    async createMcpServer(input) {
+      const data = CreateMcpServer.parse(input);
+      if ([...mcpServers.values()].some((server) => server.name === data.name)) {
+        throw new Error(`An MCP server named ${data.name} already exists`);
+      }
+      const at = now();
+      const created: McpServer = McpServerSchema.parse({
+        id: nextId('mcp'),
+        name: data.name,
+        transport: data.transport,
+        args: data.args,
+        env: data.env,
+        enabled: data.enabled,
+        ...(data.command === undefined ? {} : { command: data.command }),
+        ...(data.url === undefined ? {} : { url: data.url }),
+        createdAt: at,
+        updatedAt: at,
+      });
+      mcpServers.set(created.id, created);
+      return structuredClone(created);
+    },
+
+    async updateMcpServer(serverId, patch) {
+      const current = mcpServers.get(serverId);
+      if (!current) throw new Error(`Unknown MCP server: ${serverId}`);
+      const data = UpdateMcpServer.parse(patch);
+      const next = McpServerSchema.parse({ ...current, ...data, updatedAt: now() });
+      if ([...mcpServers.values()].some((server) => server.id !== serverId && server.name === next.name)) {
+        throw new Error(`An MCP server named ${next.name} already exists`);
+      }
+      mcpServers.set(serverId, next);
+      return structuredClone(next);
+    },
+
+    async deleteMcpServer(serverId) {
+      if (!mcpServers.delete(serverId)) throw new Error(`Unknown MCP server: ${serverId}`);
+    },
+
+    async testMcpServer(serverId) {
+      const server = mcpServers.get(serverId);
+      if (!server) throw new Error(`Unknown MCP server: ${serverId}`);
+      const configured = server.transport === 'stdio' ? server.command !== undefined && server.command !== '' : server.url !== undefined && server.url !== '';
+      if (!configured) return { ok: false, error: `The ${server.transport} server has no ${server.transport === 'stdio' ? 'command' : 'URL'}` };
+      const tools = server.transport === 'stdio' ? ['read_file', 'list_directory'] : ['search'];
+      return { ok: true, tools, latencyMs: server.transport === 'stdio' ? 18 : 42 };
     },
   };
 }

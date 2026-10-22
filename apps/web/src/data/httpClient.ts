@@ -18,7 +18,10 @@ import {
   CreateThread,
   Device,
   Memory,
+  CreateMcpServer,
   MarkNotificationsRead,
+  McpServer,
+  McpServerTestResult,
   Message,
   Notification,
   PairingStartResponse,
@@ -36,6 +39,7 @@ import {
   Thread,
   UpdateBot,
   UpdateBrowserProfile,
+  UpdateMcpServer,
   UpdateMemory,
   UpdateRoomMembers,
   UpdateRoutine,
@@ -653,6 +657,31 @@ export function createHttpClient({
 
     async deleteBrowserProfile(profileId) {
       await request(`/api/browser/profiles/${encodeURIComponent(profileId)}`, { method: 'DELETE' });
+    },
+
+    listMcpServers() {
+      return read('/api/mcp/servers', McpServer.array());
+    },
+
+    async createMcpServer(input) {
+      const body = CreateMcpServer.parse(input);
+      const response = await write('POST', '/api/mcp/servers', body);
+      return McpServer.parse(await response.json());
+    },
+
+    async updateMcpServer(serverId, patch) {
+      const body = UpdateMcpServer.parse(patch);
+      const response = await write('PATCH', `/api/mcp/servers/${encodeURIComponent(serverId)}`, body);
+      return McpServer.parse(await response.json());
+    },
+
+    async deleteMcpServer(serverId) {
+      await request(`/api/mcp/servers/${encodeURIComponent(serverId)}`, { method: 'DELETE' });
+    },
+
+    async testMcpServer(serverId) {
+      const response = await write('POST', `/api/mcp/servers/${encodeURIComponent(serverId)}/test`, {});
+      return McpServerTestResult.parse(await response.json());
     },
   };
 }

@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { createMockClient } from '../data/mockClient';
-import { DEMO_BOTS, DEMO_BROWSER_PROFILES } from '../data/fixtures';
+import { DEMO_BOTS, DEMO_BROWSER_PROFILES, DEMO_MCP_SERVERS } from '../data/fixtures';
 import { t } from '../i18n';
 import { ClientProvider } from './client';
 import { SettingsView, type SettingsViewProps } from './SettingsView';
@@ -36,6 +36,7 @@ function render(overrides: Partial<SettingsViewProps> = {}, bots = botsRecord): 
     onThemeChange: noop,
     onOpenBots: noop,
     initialBrowserProfiles: DEMO_BROWSER_PROFILES,
+    initialMcpServers: DEMO_MCP_SERVERS,
     ...overrides,
   };
   return renderToStaticMarkup(
@@ -74,5 +75,32 @@ describe('settings browser profiles', () => {
 
     expect(text).toContain(t('settings.browserProfilesEmpty'));
     expect(text).toContain(t('settings.newBrowserProfile'));
+  });
+});
+
+describe('settings MCP servers', () => {
+  it('lists the servers with their transport, endpoint and enable switch', () => {
+    const html = render();
+    const text = textOf(html);
+
+    expect(text).toContain(t('settings.mcpServers'));
+    expect(text).toContain(t('settings.mcpServersBody'));
+    expect(text).toContain('filesystem');
+    expect(text).toContain('search');
+    expect(text).toContain(t('settings.mcpBadgeStdio'));
+    expect(text).toContain(t('settings.mcpBadgeHttp'));
+    expect(text).toContain('npx -y @modelcontextprotocol/server-filesystem /data');
+    expect(text).toContain('https://mcp.example.com/search');
+    expect(text).toContain(t('settings.addMcpServer'));
+    expect(text).toContain(t('settings.mcpTest'));
+    expect(text).toContain(t('settings.mcpEditNamed', { name: 'filesystem' }));
+    expect(text).toContain(t('settings.mcpDeleteNamed', { name: 'search' }));
+  });
+
+  it('shows an empty line and the add action when no server exists', () => {
+    const text = textOf(render({ initialMcpServers: [] }));
+
+    expect(text).toContain(t('settings.mcpServersEmpty'));
+    expect(text).toContain(t('settings.addMcpServer'));
   });
 });

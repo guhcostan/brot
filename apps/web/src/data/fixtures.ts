@@ -1,4 +1,4 @@
-import type { Approval, Bot, CanonicalEvent, Memory, Message, Notification, Routine, RoutineRun, Skill, Task, Team, Thread } from '@brot/protocol';
+import type { Approval, Bot, CanonicalEvent, McpServer, Memory, Message, Notification, Routine, RoutineRun, Skill, Task, Team, Thread } from '@brot/protocol';
 import type { BrowserProfile } from './client';
 
 const CREATED = '2026-10-01T09:00:00.000Z';
@@ -697,3 +697,29 @@ export const DEMO_BOT_BROWSER_PROFILES: Record<string, string> = {
   bot_tuca: 'profile_shared',
   bot_mico: 'profile_promo',
 };
+
+/** One local (stdio) and one remote (http) MCP server so the Settings panel has both shapes. */
+export const DEMO_MCP_SERVERS: McpServer[] = [
+  {
+    id: 'mcp_filesystem',
+    name: 'filesystem',
+    transport: 'stdio',
+    command: 'npx',
+    args: ['-y', '@modelcontextprotocol/server-filesystem', '/data'],
+    env: { MCP_LOG_LEVEL: 'info', GITHUB_TOKEN: 'secret://github_token' },
+    enabled: true,
+    createdAt: CREATED,
+    updatedAt: CREATED,
+  },
+  {
+    id: 'mcp_search',
+    name: 'search',
+    transport: 'http',
+    args: [],
+    env: {},
+    url: 'https://mcp.example.com/search',
+    enabled: false,
+    createdAt: CREATED,
+    updatedAt: CREATED,
+  },
+];

@@ -8,11 +8,14 @@ import type {
   ComputerState,
   CreateBotInput,
   CreateBrowserProfile,
+  CreateMcpServerInput,
   CreateMemory,
   CreateRoutineInput,
   CreateSkill,
   CreateTeamInput,
   Device,
+  McpServer,
+  McpServerTestResult,
   Memory,
   Notification,
   PairingStartResponse,
@@ -31,6 +34,7 @@ import type {
   Thread,
   UpdateBot,
   UpdateBrowserProfile,
+  UpdateMcpServer,
   UpdateMemory,
   UpdateRoomMembers,
   UpdateRoutine,
@@ -44,9 +48,13 @@ export type {
   BrowserProfileRef,
   BrowserStatus,
   CreateBrowserProfile,
+  CreateMcpServerInput,
   CreateMemory,
   CreateRoutineInput,
   CreateSkill,
+  McpServer,
+  McpServerTestResult,
+  McpServerTransport,
   Memory,
   MemoryKind,
   Notification,
@@ -56,6 +64,7 @@ export type {
   RoutineRunStatus,
   Skill,
   UpdateBrowserProfile,
+  UpdateMcpServer,
   UpdateMemory,
   UpdateRoutine,
   UpdateSkill,
@@ -283,4 +292,12 @@ export interface BrotClient {
   updateBrowserProfile(profileId: string, input: UpdateBrowserProfile): Promise<BrowserProfile>;
   /** Deletes the profile's saved logins and ungroups its bots, which fall back to their own profiles. */
   deleteBrowserProfile(profileId: string): Promise<void>;
+
+  /** User MCP servers whose tools every run can call. */
+  listMcpServers(): Promise<McpServer[]>;
+  createMcpServer(input: CreateMcpServerInput): Promise<McpServer>;
+  updateMcpServer(serverId: string, patch: UpdateMcpServer): Promise<McpServer>;
+  deleteMcpServer(serverId: string): Promise<void>;
+  /** Runs a real handshake with the server; a failed handshake is a normal result with `ok: false`. */
+  testMcpServer(serverId: string): Promise<McpServerTestResult>;
 }
