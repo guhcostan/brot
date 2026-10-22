@@ -1,11 +1,12 @@
-import { useMemo, useState, type ReactElement } from 'react';
-import type { Bot, Team, Thread } from '@brot/protocol';
+import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
+import type { Bot, SearchHit, Team, Thread } from '@brot/protocol';
 import { AvatarStack, BotAvatar, BrandMark, Button, Input, STATUS_MOOD, Skeleton, StatusDot, cx, type BotStatus } from '@brot/ui';
-import type { Room } from '../data/client';
+import type { MessageSearchFilter, Room } from '../data/client';
 import { avatarOf } from '../format';
 import { t, type Locale } from '../i18n';
 import type { Selection } from '../state/store';
 import { Bell, Board, Chart, ChevronRight, Clock, Gear, Inbox, Pencil, Plus } from './icons';
+import { MessageSearchResults } from './MessageSearchResults';
 import { useLiveMood } from './mood';
 import { memberSummary } from './RoomView';
 import { botStatusLabel } from './taskLabels';
@@ -39,6 +40,8 @@ export interface SidebarProps {
   onNewTeam: () => void;
   /** Opens the team dialog for an existing team. */
   onEditTeam: (teamId: string) => void;
+  /** Full-text message search; snippets come back as plain text. */
+  onSearchMessages: (filter: MessageSearchFilter) => Promise<SearchHit[]>;
   /** Re-renders the sidebar's copy when the language changes. */
   locale: Locale;
   /** Bots whose thread rows start expanded. */
@@ -82,6 +85,7 @@ export function Sidebar({
   onNewBot,
   onNewTeam,
   onEditTeam,
+  onSearchMessages,
   defaultExpanded,
   className,
 }: SidebarProps): ReactElement {
@@ -90,7 +94,62 @@ export function Sidebar({
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set(defaultExpanded ?? []));
   const [loading, setLoading] = useState<ReadonlySet<string>>(new Set());
   const [collapsedGroups, setCollapsedGroups] = useState<ReadonlySet<string>>(new Set());
+  const [hits, setHits] = useState<SearchHit[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const searchRequest = useRef(0);
   const needle = query.trim().toLowerCase();
+  const searchTerm = query.trim();
+
+  // Debounced global message search; a stale response (or one from an earlier query) never wins.
+  useEffect(() => {
+    if (searchTerm.length < 2) {
+      searchRequest.current += 1;
+      setHits([]);
+      setSearching(false);
+      setSearchError(null);
+      return;
+    }
+    const request = (searchRequest.current += 1);
+    setSearching(true);
+    const timer = setTimeout(() => {
+      onSearchMessages({ q: searchTerm, limit: 20 })
+        .then((result) => {
+          if (searchRequest.current !== request) return;
+          setHits(result);
+          setSearchError(null);
+        })
+        .catch((error: unknown) => {
+          if (searchRequest.current !== request) return;
+          setHits([]);
+          setSearchError(error instanceof Error ? error.message : String(error));
+        })
+        .finally(() => {
+          if (searchRequest.current === request) setSearching(false);
+        });
+    }, 250);
+    return () => clearTimeout(timer);
+  }, [searchTerm, onSearchMessages]);
+
+  /** Opens a hit: its room when it is one, else the bot's thread by id, else the bot's newest thread. */
+  const openHit = async (hit: SearchHit) => {
+    if (rooms.some((room) => room.thread.id === hit.threadId)) {
+      onSelect({ kind: 'room', id: hit.threadId });
+      return;
+    }
+    if (hit.botId === undefined) return;
+    let threads = threadLists[hit.botId];
+    if (threads === undefined || !threads.some((thread) => thread.id === hit.threadId)) {
+      try {
+        threads = await onLoadThreads(hit.botId);
+      } catch (error) {
+        console.warn('A thread list did not load', error);
+        threads = undefined;
+      }
+    }
+    if (threads?.some((thread) => thread.id === hit.threadId)) onOpenThread(hit.botId, hit.threadId);
+    else onOpenBot(hit.botId);
+  };
 
   const visible = useMemo(() => {
     if (!needle) return bots;
@@ -185,6 +244,9 @@ export function Sidebar({
         placeholder={t('sidebar.searchPlaceholder')}
         value={query}
         onChange={(event) => setQuery(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Escape') setQuery('');
+        }}
       />
 
       <div className="-mx-1 flex min-h-0 flex-1 flex-col gap-5 overflow-y-auto px-1">
@@ -366,6 +428,15 @@ export function Sidebar({
             <Plus size={14} />
             {t('sidebar.newTeam')}
           </button>
+        ) : null}
+        {searchTerm.length >= 2 ? (
+          <MessageSearchResults
+            hits={hits}
+            loading={searching}
+            error={searchError}
+            bots={bots}
+            onOpenHit={(hit) => void openHit(hit)}
+          />
         ) : null}
         {archived.length > 0 ? (
           <section className="flex flex-col gap-1">

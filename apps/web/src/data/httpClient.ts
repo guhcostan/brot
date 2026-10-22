@@ -27,6 +27,7 @@ import {
   McpServerTestResult,
   Message,
   SavedLogin,
+  SearchHit,
   Notification,
   PairingStartResponse,
   PostMessage,
@@ -53,6 +54,7 @@ import {
   UpdateSkill,
   UpdateTask,
   UpdateTeam,
+  SearchQuery,
   UpdateThread,
   UsageSummary,
   DESKTOP_HEIGHT,
@@ -777,6 +779,18 @@ export function createHttpClient({
 
     async deleteSavedLogin(loginId) {
       await request(`/api/logins/${encodeURIComponent(loginId)}`, { method: 'DELETE' });
+    },
+
+    async searchMessages(filter) {
+      const query = SearchQuery.parse({ ...filter, q: filter.q.trim() });
+      const suffix = querySuffix({
+        q: query.q,
+        botId: query.botId,
+        threadId: query.threadId,
+        limit: String(query.limit),
+        before: query.before,
+      });
+      return read(`/api/search${suffix}`, SearchHit.array());
     },
   };
 }

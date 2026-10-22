@@ -51,6 +51,7 @@ function render(overrides: Partial<SidebarProps> = {}): string {
     onOpenBot: noop,
     onOpenThread: noop,
     onLoadThreads: async () => [],
+    onSearchMessages: async () => [],
     onNewThread: noop,
     onNewRoom: noop,
     onNewBot: noop,

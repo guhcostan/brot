@@ -28,6 +28,7 @@ import type {
   RoutineRun,
   RoutineRunStatus,
   SavedLogin,
+  SearchHit,
   SetBrowserTakeover,
   SetTakeover,
   Skill,
@@ -73,6 +74,7 @@ export type {
   RoutineRun,
   RoutineRunStatus,
   SavedLogin,
+  SearchHit,
   SetBrowserTakeover,
   Skill,
   TodayBot,
@@ -178,6 +180,15 @@ export interface TodayFilter {
   from?: string;
   to?: string;
   tz?: string;
+}
+
+/** What `GET /api/search` narrows down. `q` is the required search text. */
+export interface MessageSearchFilter {
+  q: string;
+  botId?: string;
+  threadId?: string;
+  limit?: number;
+  before?: string;
 }
 
 /** The window and grouping behind `GET /api/usage`. */
@@ -378,4 +389,7 @@ export interface BrotClient {
   updateSavedLogin(loginId: string, patch: UpdateSavedLogin): Promise<SavedLogin>;
   /** Deletes the login and the vault values behind it. */
   deleteSavedLogin(loginId: string): Promise<void>;
+
+  /** Full-text message search, newest first; snippets are plain text. */
+  searchMessages(filter: MessageSearchFilter): Promise<SearchHit[]>;
 }

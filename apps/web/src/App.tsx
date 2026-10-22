@@ -360,6 +360,7 @@ export function App(): ReactElement {
             onNewBot={newBot}
             onNewTeam={() => setTeamDialog({})}
             onEditTeam={(teamId) => setTeamDialog({ teamId })}
+            onSearchMessages={client.searchMessages}
             locale={locale}
             className={pane === 'bots' ? 'flex' : 'hidden md:flex'}
           />

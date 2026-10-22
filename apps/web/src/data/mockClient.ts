@@ -18,6 +18,7 @@ import type {
   Routine,
   RoutineRun,
   RoutineRunStatus,
+  SearchHit,
   Skill,
   Takeover,
   Task,
@@ -40,6 +41,7 @@ import {
   MAX_ROOM_BOTS,
   MIN_ROOM_BOTS,
   McpServer as McpServerSchema,
+  SearchQuery,
   TEAM_PACKAGE_FORMAT,
   TEAM_PACKAGE_VERSION,
   UpdateBot,
@@ -99,6 +101,7 @@ import {
   dmThreadOf,
 } from './fixtures';
 import { findMentions } from '../mentions';
+import { buildSearchSnippet } from '../search';
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 const now = () => new Date().toISOString();
@@ -1070,7 +1073,7 @@ export function createMockClient(): BrotClient {
       const data = UpdateThread.parse({ title });
       const thread = threads.get(threadId);
       if (!thread) throw new Error(`Unknown thread: ${threadId}`);
-      const next = { ...thread, title: data.title, updatedAt: now() };
+      const next = { ...thread, ...(data.title === undefined ? {} : { title: data.title }), updatedAt: now() };
       remember(next);
       if (next.kind === 'room') {
         const room = rooms.get(threadId);
@@ -1751,6 +1754,38 @@ export function createMockClient(): BrotClient {
         skills: pkg.skills.length,
       };
     },
+    async searchMessages(filter) {
+      const query = SearchQuery.parse(filter);
+      const needle = query.q.trim().toLowerCase();
+      const hits: SearchHit[] = [];
+      for (const [threadId, events] of histories) {
+        if (query.threadId !== undefined && query.threadId !== threadId) continue;
+        const thread = threads.get(threadId);
+        if (!thread) continue;
+        const botId = thread.kind === 'room' ? thread.leadBotId : thread.botId;
+        const bot = botId === undefined ? undefined : bots.get(botId);
+        if (query.botId !== undefined && query.botId !== botId) continue;
+        for (const event of events) {
+          if (event.type !== 'message.completed') continue;
+          const { message } = event;
+          if (query.before !== undefined && message.createdAt >= query.before) continue;
+          if (!message.content.toLowerCase().includes(needle)) continue;
+          hits.push({
+            messageId: message.id,
+            threadId,
+            threadTitle: thread.title,
+            ...(botId === undefined ? {} : { botId }),
+            ...(bot === undefined ? {} : { botName: bot.name }),
+            role: message.role,
+            snippet: buildSearchSnippet(message.content, query.q),
+            createdAt: message.createdAt,
+          });
+        }
+      }
+      hits.sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : b.messageId.localeCompare(a.messageId)));
+      return hits.slice(0, query.limit);
+    },
+
     async listSavedLogins() {
       return [...savedLogins.values()]
         .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id))
