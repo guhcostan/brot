@@ -47,6 +47,8 @@ export interface BotDialogProps {
   initialBrowserStatus?: BrowserStatus;
   /** MCP servers to render before the load resolves, e.g. in an SSR render. */
   initialMcpServers?: McpServer[];
+  /** Providers to render before the load resolves, e.g. in an SSR render. */
+  initialProviders?: Provider[];
   /** The MCP mode to render for a new bot, e.g. in an SSR render. */
   initialMcpMode?: 'all' | 'custom';
   onClose: () => void;
@@ -123,6 +125,8 @@ interface FormState {
   /** Every enabled MCP server, or only the listed ones. */
   mcpMode: 'all' | 'custom';
   mcpServerIds: string[];
+  /** Ordered fallback model refs, tried after the main model fails. */
+  fallbackModels: string[];
 }
 
 function computerOf(bot: Pick<Bot, 'computer' | 'desktop'>): ComputerChoice {
@@ -151,6 +155,7 @@ function initialState(bot: Bot | undefined, initialMcpMode: 'all' | 'custom' = '
       speakReplies: false,
       mcpMode: initialMcpMode,
       mcpServerIds: [],
+      fallbackModels: [],
     };
   }
   const avatar = avatarOf(bot);
@@ -173,6 +178,7 @@ function initialState(bot: Bot | undefined, initialMcpMode: 'all' | 'custom' = '
     speakReplies: bot.speakReplies === true,
     mcpMode: bot.mcpServerIds == null ? 'all' : 'custom',
     mcpServerIds: bot.mcpServerIds ?? [],
+    fallbackModels: [...(bot.fallbackModels ?? [])],
   };
 }
 
@@ -208,11 +214,12 @@ function BotForm({
   loadMcpServers,
   initialMcpServers,
   initialMcpMode = 'all',
+  initialProviders,
   onClose,
 }: BotDialogProps): ReactElement {
   const [form, setForm] = useState<FormState>(() => initialState(bot, initialMcpMode));
   const [template, setTemplate] = useState<string | null>(null);
-  const [providers, setProviders] = useState<Provider[] | null>(null);
+  const [providers, setProviders] = useState<Provider[] | null>(initialProviders ?? null);
   const [providerError, setProviderError] = useState<string | null>(null);
   const [tried, setTried] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -389,6 +396,7 @@ function BotForm({
           ...(form.approvalMode === 'edits' ? { approvalMode: 'edits' as const } : {}),
           ...(form.speakReplies ? { speakReplies: true } : {}),
           ...(form.mcpMode === 'custom' ? { mcpServerIds: grants } : {}),
+          ...(form.fallbackModels.length > 0 ? { fallbackModels: form.fallbackModels } : {}),
           egress,
           ...(form.teamId === '' ? {} : { teamId: form.teamId }),
           ...(form.model ? { engine: DSH_ENGINE, model: form.model } : {}),
@@ -431,6 +439,11 @@ function BotForm({
         } else if (!sameIds(currentGrants, grants)) {
           patch.mcpServerIds = [...grants];
         }
+        const currentFallbacks = bot.fallbackModels ?? [];
+        const fallbacksChanged =
+          currentFallbacks.length !== form.fallbackModels.length ||
+          currentFallbacks.some((model, index) => model !== form.fallbackModels[index]);
+        if (fallbacksChanged) patch.fallbackModels = form.fallbackModels.length === 0 ? null : [...form.fallbackModels];
         const profileId = bot.browserProfileId ?? '';
         if (form.browserProfileId !== profileId) {
           patch.browserProfileId = form.browserProfileId === '' ? null : form.browserProfileId;
@@ -518,6 +531,66 @@ function BotForm({
           onOpenSettings();
         }}
       />
+
+      <fieldset className="m-0 flex flex-col gap-2 border-0 p-0">
+        <legend className="mb-1 p-0 text-sm font-medium">{t('botForm.fallbackModels')}</legend>
+        <p className="m-0 text-xs text-ink-2">{t('botForm.fallbackHint')}</p>
+        {form.fallbackModels.length === 0 ? (
+          <p className="m-0 text-sm text-ink-3">{t('botForm.fallbackEmpty')}</p>
+        ) : (
+          <ul className="m-0 flex list-none flex-col overflow-hidden rounded-lg border border-line p-0">
+            {form.fallbackModels.map((ref, index) => {
+              const label = providers?.flatMap((provider) => provider.models).find((model) => model.id === ref)?.label;
+              return (
+                <li key={ref} className="flex items-center gap-2 border-b border-line px-3 py-2 last:border-b-0">
+                  <span className="w-4 flex-none text-xs text-ink-3 tabular-nums">{index + 1}</span>
+                  <span className="flex min-w-0 flex-1 flex-col">
+                    <span className="truncate text-sm font-medium">{label ?? ref}</span>
+                    <code className="truncate font-mono text-xs text-ink-3">{ref}</code>
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => set('fallbackModels', form.fallbackModels.filter((model) => model !== ref))}
+                    aria-label={t('botForm.fallbackRemove', { model: label ?? ref })}
+                    title={t('botForm.fallbackRemove', { model: label ?? ref })}
+                    className="text-ink-3"
+                  >
+                    <Close size={14} />
+                  </Button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            aria-label={t('botForm.fallbackAdd')}
+            value=""
+            disabled={form.fallbackModels.length >= 3 || providers === null}
+            onChange={(event) => {
+              const ref = event.target.value;
+              if (ref === '') return;
+              set('fallbackModels', [...form.fallbackModels, ref]);
+            }}
+            className="brot-input !w-auto !min-h-[30px] !py-1 text-sm"
+          >
+            <option value="">{form.fallbackModels.length >= 3 ? t('botForm.fallbackMax') : t('botForm.fallbackAdd')}</option>
+            {(providers ?? []).map((provider) => (
+              <optgroup key={provider.id} label={provider.label}>
+                {provider.models
+                  .filter((model) => model.id !== form.model && !form.fallbackModels.includes(model.id))
+                  .map((model) => (
+                    <option key={model.id} value={model.id} disabled={!provider.configured}>
+                      {provider.configured ? model.label : `${model.label} — ${t('botForm.fallbackUnconfigured')}`}
+                    </option>
+                  ))}
+              </optgroup>
+            ))}
+          </select>
+          <span className="text-xs text-ink-3">{t('botForm.fallbackMax')}</span>
+        </div>
+      </fieldset>
 
       <ComputerPicker value={form.computer} allowHost={bot?.computer === 'host'} onChange={(value) => set('computer', value)} />
 

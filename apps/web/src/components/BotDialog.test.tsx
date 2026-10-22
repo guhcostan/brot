@@ -287,3 +287,66 @@ describe('BotDialog MCP grants', () => {
     expect(text).toContain(t('botForm.mcpNoneSelected'));
   });
 });
+
+describe('BotDialog fallback models', () => {
+  const refs = ['opencode-go/kimi-k2', 'opencode-go/deepseek-v4.1-flash'];
+  const providers = [
+    {
+      id: 'opencode-go',
+      label: 'OpenCode Go',
+      secretName: 'opencode_go_key',
+      configured: true,
+      models: [
+        { id: 'opencode-go/deepseek-v4.1-flash', label: 'DeepSeek V4.1 Flash' },
+        { id: 'opencode-go/kimi-k2', label: 'Kimi K2' },
+      ],
+    },
+    {
+      id: 'anthropic',
+      label: 'Anthropic',
+      secretName: 'anthropic_key',
+      configured: false,
+      models: [{ id: 'anthropic/claude-sonnet-5', label: 'Claude Sonnet 5' }],
+    },
+  ];
+
+  it('explains the retry order and starts with the failure copy when empty', () => {
+    const text = textOf(render({ loadProviders: async () => providers, initialProviders: providers }));
+
+    expect(text).toContain(t('botForm.fallbackModels'));
+    expect(text).toContain(t('botForm.fallbackHint'));
+    expect(text).toContain(t('botForm.fallbackEmpty'));
+    expect(text).toContain(t('botForm.fallbackAdd'));
+  });
+
+  it('renders the selected fallbacks in order and offers a remove action each', () => {
+    const html = render({ bot: { ...bot, fallbackModels: refs }, loadProviders: async () => providers, initialProviders: providers });
+    const text = textOf(html);
+
+    const sectionStart = text.indexOf(t('botForm.fallbackModels'));
+    const section = text.slice(sectionStart, sectionStart + 6000);
+    const kimi = section.indexOf('Kimi K2');
+    const deepseek = section.indexOf('DeepSeek V4.1 Flash');
+    expect(kimi).toBeGreaterThan(-1);
+    expect(deepseek).toBeGreaterThan(-1);
+    expect(kimi).toBeLessThan(deepseek);
+    expect(html.match(new RegExp(`aria-label="${t('botForm.fallbackRemove', { model: 'Kimi K2' })}"`, 'g')) ?? []).toHaveLength(1);
+    expect(html.match(new RegExp(`aria-label="${t('botForm.fallbackRemove', { model: 'DeepSeek V4.1 Flash' })}"`, 'g')) ?? []).toHaveLength(1);
+  });
+
+  it('disables adding once three fallbacks are chosen', () => {
+    const three = ['opencode-go/deepseek-v4.1-flash', 'opencode-go/kimi-k2', 'anthropic/claude-sonnet-5'];
+    const html = render({ bot: { ...bot, fallbackModels: three }, loadProviders: async () => providers, initialProviders: providers });
+    const select = html.match(new RegExp(`<select[^>]*aria-label="${t('botForm.fallbackAdd')}"[^>]*>`))?.[0] ?? '';
+
+    expect(select).toContain('disabled=""');
+    expect(textOf(html).match(new RegExp(t('botForm.fallbackMax'), 'g'))?.length ?? 0).toBeGreaterThanOrEqual(1);
+  });
+
+  it('marks unconfigured provider models as needing their key', () => {
+    const text = textOf(render({ loadProviders: async () => providers, initialProviders: providers }));
+
+    expect(text).toContain(t('botForm.fallbackUnconfigured'));
+    expect(text).toContain('Claude Sonnet 5');
+  });
+});

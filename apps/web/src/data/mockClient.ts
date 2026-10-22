@@ -124,7 +124,7 @@ const nextId = (prefix: string) => `${prefix}_${(counter += 1).toString(36)}`;
 /** How long the seeded open question waits before Tamu answers it. */
 const OPEN_ASK_DELAY_MS = 30_000;
 
-const DEMO_PROVIDERS: Provider[] = [
+export const DEMO_PROVIDERS: Provider[] = [
   {
     id: 'opencode-go',
     label: 'OpenCode Go',
@@ -282,6 +282,15 @@ export function createMockClient(): BrotClient {
     }
   };
   const providers = DEMO_PROVIDERS.map((provider) => structuredClone(provider));
+
+  /** The server's fallback rules: at most 3 ordered refs, no repeats, each a known `<provider>/<model>`. */
+  const validateFallbackModels = (models: readonly string[]): void => {
+    if (models.length > 3) throw new Error('A bot has at most 3 fallback models');
+    if (new Set(models).size !== models.length) throw new Error('Fallback models must be unique');
+    for (const ref of models) {
+      if (!providers.some((provider) => provider.models.some((model) => model.id === ref))) throw new Error(`Unknown model: ${ref}`);
+    }
+  };
   const devices = DEMO_DEVICES.map((device) => ({ ...device }));
   const screens = new Map<string, FakeScreen>();
   const browserProfiles = new Map<string, BrowserProfile>(DEMO_BROWSER_PROFILES.map((profile) => [profile.id, structuredClone(profile)]));
@@ -835,7 +844,7 @@ export function createMockClient(): BrotClient {
         throw new Error(`Unknown browser profile: ${parsed.browserProfileId}`);
       }
       const at = now();
-      const { hostAcknowledged: _ack, approvalMode, speakReplies, ...fields } = parsed;
+      const { hostAcknowledged: _ack, approvalMode, speakReplies, fallbackModels, ...fields } = parsed;
       const created: Bot = {
         ...fields,
         ...(approvalMode === 'edits' ? { approvalMode } : {}),
@@ -851,6 +860,10 @@ export function createMockClient(): BrotClient {
         for (const serverId of created.mcpServerIds) if (!mcpServers.has(serverId)) throw new Error(`Unknown MCP server: ${serverId}`);
         if (created.mcpServerIds.length === 0) created.mcpServerIds = [];
       }
+      if (fallbackModels !== undefined && fallbackModels.length > 0) {
+        validateFallbackModels(fallbackModels);
+        created.fallbackModels = [...fallbackModels];
+      }
       bots.set(created.id, created);
 
       if (created.browser === true) setBrowserStateOf(created, 'stopped');
@@ -860,7 +873,7 @@ export function createMockClient(): BrotClient {
     async updateBot(botId, patch) {
       const current = bots.get(botId);
       if (!current) throw new Error(`Unknown bot: ${botId}`);
-      const { teamBudgetUsd, teamId, hostAcknowledged: _ack, browserProfileId, approvalMode, speakReplies, mcpServerIds, ...rest } = UpdateBot.parse(patch);
+      const { teamBudgetUsd, teamId, hostAcknowledged: _ack, browserProfileId, approvalMode, speakReplies, mcpServerIds, fallbackModels, ...rest } = UpdateBot.parse(patch);
       if (browserProfileId !== undefined && browserProfileId !== null && !browserProfiles.has(browserProfileId)) {
         throw new Error(`Unknown browser profile: ${browserProfileId}`);
       }
@@ -869,6 +882,11 @@ export function createMockClient(): BrotClient {
       else if (approvalMode === 'ask') delete next.approvalMode;
       if (speakReplies === true) next.speakReplies = true;
       else if (speakReplies === false) delete next.speakReplies;
+      if (fallbackModels === null || (fallbackModels !== undefined && fallbackModels.length === 0)) delete next.fallbackModels;
+      else if (fallbackModels !== undefined) {
+        validateFallbackModels(fallbackModels);
+        next.fallbackModels = [...fallbackModels];
+      }
       if (mcpServerIds === null) delete next.mcpServerIds;
       else if (mcpServerIds !== undefined) {
         for (const serverId of mcpServerIds) if (!mcpServers.has(serverId)) throw new Error(`Unknown MCP server: ${serverId}`);
