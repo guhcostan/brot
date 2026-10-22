@@ -252,6 +252,18 @@ mapped in `docs/MAUSBOT-PARITY.md` (34 bots / 7 teams, 33 bots with a browser an
   midnight in an IANA zone (Intl only, DST-safe) with explicit bounds accepted; the web page lands next.
 - Suite: 1887 tests (177 files), typecheck 12/12, lint clean.
 
+## Wave 18: insights page, per-bot approval mode (2026-10-22)
+
+- **Insights page.** A top-level pane with Today (stat tiles, routine status line, per-bot table, clickable
+  highlights, range control) and Usage (range/group-by selector, totals, localized table, CSV download of
+  the same window). Numbers, currency and dates use Intl; skeletons, inline retry and empty states.
+- **Per-bot approval mode.** Bots are `ask` (default) or `edits`. In edits mode a write tool call of kind
+  shell/file_write/other runs without an approval, record or event and the run never leaves running; send,
+  publish, delete, purchase and permission always ask in every mode, and deny policies always win.
+  Migration 0012 adds bots.approval_mode. Verified live: an edits-mode DSH run pressed a key with zero
+  approvals, and after switching to ask the same action paused for approval (deny completed the run).
+- Suite: 1919 tests (181 files), typecheck 12/12, lint clean.
+
 ## Next
 
 1. Re-run the eval suite on a live model once OpenCode Go has quota (`apps/evals`, `--base` to the server), including B8 and C; the 2026-10-20 results predate the read auto-allow and the fixes above.
