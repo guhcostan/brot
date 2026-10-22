@@ -15,6 +15,7 @@ import { createRoomRepo } from './rooms';
 import { createRoutineRepo } from './routines';
 import { createRoutineRunRepo } from './routine-runs';
 import { createRunRepo } from './runs';
+import { createSettingsRepo } from './settings';
 import { createSavedLoginRepo } from './saved-logins';
 import { createSkillRepo } from './skills';
 import { createTaskRepo } from './tasks';
@@ -44,6 +45,7 @@ export function createRepos(db: Db) {
     events: createEventRepo(db),
     rooms: createRoomRepo(db),
     threadSessions: createThreadSessionRepo(db),
+    settings: createSettingsRepo(db),
     tasks: createTaskRepo(db),
     teams: createTeamRepo(db),
   };
@@ -61,3 +63,4 @@ export type { CreateAttachmentRecord, StoredAttachment } from './attachments';
 export type { CreateNotificationInput, NotificationFilter } from './notifications';
 export type { CreateSavedLoginOptions, SavedLoginSecretNames } from './saved-logins';
 export type { TaskFilter } from './tasks';
+export type { SettingsValueParser } from './settings';

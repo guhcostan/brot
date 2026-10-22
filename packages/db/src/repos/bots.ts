@@ -21,6 +21,7 @@ export function toBot(row: BotRow): Bot {
     ...(row.browser ? { browser: true } : {}),
     ...(row.browserProfileId === null ? {} : { browserProfileId: row.browserProfileId }),
     ...(row.notifications ? {} : { notifications: false }),
+    ...(row.speakReplies ? { speakReplies: true } : {}),
     ...(row.approvalMode === 'ask' ? {} : { approvalMode: row.approvalMode }),
     egress: row.egress,
     teamBudgetUsd: row.teamBudgetUsd ?? undefined,

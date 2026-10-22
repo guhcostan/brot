@@ -44,6 +44,7 @@ export const CreateBot = z
     /** Browse with a shared profile instead of the bot's own. */
     browserProfileId: z.string().min(1).optional(),
     notifications: z.boolean().default(true),
+    speakReplies: z.boolean().default(false),
     approvalMode: ApprovalMode.default('ask'),
     avatar: z.string().optional(),
     teamId: z.string().min(1).optional(),
@@ -69,6 +70,7 @@ export const UpdateBot = z
     /** A shared profile id, or `null` to go back to the bot's own profile. */
     browserProfileId: z.string().min(1).nullable().optional(),
     notifications: z.boolean().optional(),
+    speakReplies: z.boolean().optional(),
     /** `ask` pauses every risky action; `edits` auto-allows shell, file writes and other write actions. */
     approvalMode: ApprovalMode.optional(),
     /** `null` removes the bot from its team. */

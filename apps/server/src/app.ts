@@ -40,6 +40,8 @@ import {
   UpdateTask,
   UpdateTeam,
   UpdateThread,
+  UpdateVoiceSettings,
+  VoiceSpeakRequest,
   type Bot,
   type BrowserProfileRef,
   type CanonicalEvent,
@@ -74,6 +76,14 @@ import type { RoomService } from './rooms/service';
 import type { TaskService } from './rooms/tasks';
 import { normalizeBase32 } from './browser/totp';
 import { savedLoginSecretNames, SecretBody, SecretName, type Vault } from './vault';
+import {
+  VoiceUnavailableError,
+  getVoiceSettings,
+  saveVoiceSettings,
+  speak,
+  voiceAvailability,
+  type VoiceOptions,
+} from './voice';
 
 export const SERVER_VERSION = '0.1.0';
 
@@ -115,6 +125,8 @@ export interface AppDeps {
   providers?: readonly ProviderSpec[];
   /** Clock the usage range defaults read. Tests inject a fixed time. */
   now?: () => Date;
+  /** Speech seams (platform, command runner, outbound fetch). Tests inject a fake; production leaves it unset. */
+  voice?: VoiceOptions;
 }
 
 type Parsed<T> = { ok: true; data: T } | { ok: false; response: Response };
@@ -281,6 +293,7 @@ function ruleViolation(c: Context<AppEnv>, error: unknown): Response {
 export function createApp(deps: AppDeps): Hono<AppEnv> {
   const { repos, bus, broker, harness, scheduler, vault, pairing, engines, rooms, tasks, config, browser, attachments } = deps;
   const trustLoopback = deps.trustLoopback ?? true;
+  const voiceDeps = { vault, ...(deps.voice ?? {}) };
   const app = new Hono<AppEnv>();
 
   app.use('/api/*', cors({ origin: ALLOWED_ORIGINS, allowHeaders: ['Authorization', 'Content-Type'] }));
@@ -1159,6 +1172,44 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
   app.delete('/api/devices/:id', async (c) =>
     (await repos.devices.remove(c.req.param('id'))) ? c.body(null, 204) : notFound(c, 'Device'),
   );
+
+  // Speech: the settings, a cheap capability probe, and the speak call. The API key stays in the vault.
+
+  app.get('/api/voice', async (c) => {
+    const settings = await getVoiceSettings(repos);
+    return c.json({ settings, ...(await voiceAvailability(settings, voiceDeps)) });
+  });
+
+  app.put('/api/voice', async (c) => {
+    const body = await parseBody(c, UpdateVoiceSettings);
+    if (!body.ok) return body.response;
+    try {
+      return c.json(await saveVoiceSettings(repos, body.data));
+    } catch (error) {
+      if (error instanceof z.ZodError) return invalid(c, error);
+      throw error;
+    }
+  });
+
+  /** Speaks text with the configured provider. Audio only: JSON errors, `no-store`, no key ever returned. */
+  app.post('/api/voice/speak', async (c) => {
+    const body = await parseBody(c, VoiceSpeakRequest);
+    if (!body.ok) return body.response;
+    const settings = await getVoiceSettings(repos);
+    const availability = await voiceAvailability(settings, voiceDeps);
+    if (!availability.available) return c.json({ error: availability.reason ?? 'Speech is unavailable.' }, 503);
+    try {
+      const audio = await speak(body.data.text, settings, voiceDeps);
+      const bytes = new Uint8Array(audio.bytes.byteLength);
+      bytes.set(audio.bytes);
+      return new Response(bytes, {
+        headers: { 'content-type': audio.contentType, 'cache-control': 'no-store' },
+      });
+    } catch (error) {
+      if (error instanceof VoiceUnavailableError) return c.json({ error: error.message }, 503);
+      throw error;
+    }
+  });
 
   app.get('/api/providers', async (c) => {
     const listed = await Promise.all(

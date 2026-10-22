@@ -35,6 +35,7 @@ describe('request schemas', () => {
       computer: 'sandbox',
       browser: false,
       notifications: true,
+      speakReplies: false,
       approvalMode: 'ask',
       egress: { mode: 'deny', allow: [] },
     });
@@ -107,6 +108,12 @@ describe('request schemas', () => {
     expect(() => CreateBrowserProfile.parse({ name: '   ' })).toThrow();
     expect(() => CreateBrowserProfile.parse({ name: 'x'.repeat(61) })).toThrow();
     expect(() => CreateBrowserProfile.parse({ name: 'two\nlines' })).toThrow(/single line/);
+  });
+
+  it('defaults spoken replies off and lets CreateBot or UpdateBot turn them on', () => {
+    expect(CreateBot.parse({ name: 'Ada', job: 'Researcher' }).speakReplies).toBe(false);
+    expect(CreateBot.parse({ name: 'Ada', job: 'Researcher', speakReplies: true }).speakReplies).toBe(true);
+    expect(UpdateBot.parse({ speakReplies: true })).toEqual({ speakReplies: true });
   });
 
   it('defaults the notification toggle on and lets UpdateBot turn it off', () => {

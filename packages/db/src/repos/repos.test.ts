@@ -74,6 +74,17 @@ describe('bots', () => {
     expect((await repos.bots.update(asking.id, { approvalMode: 'edits' }))?.approvalMode).toBe('edits');
   });
 
+  it('stores the spoken-replies toggle and leaves it unset when false', async () => {
+    const plain = await repos.bots.create({ name: 'Ada', job: 'x' });
+    expect(plain.speakReplies).toBeUndefined();
+    const spoken = await repos.bots.create({ name: 'Bo', job: 'x', speakReplies: true });
+    expect(spoken.speakReplies).toBe(true);
+    expect((await repos.bots.get(spoken.id))?.speakReplies).toBe(true);
+
+    expect((await repos.bots.update(spoken.id, { speakReplies: false }))?.speakReplies).toBeUndefined();
+    expect((await repos.bots.update(plain.id, { speakReplies: true }))?.speakReplies).toBe(true);
+  });
+
   it('stores a host browser flag and leaves it unset when false', async () => {
     const plain = await repos.bots.create({ name: 'Ada', job: 'x' });
     expect(plain.browser).toBeUndefined();
@@ -1725,5 +1736,62 @@ describe('notifications', () => {
     await notification(bot.id, thread.id);
     expect(await repos.bots.remove(bot.id)).toBe(true);
     expect(await repos.notifications.list()).toEqual([]);
+  });
+});
+
+describe('settings', () => {
+  /** A tiny parser standing in for a schema: any object with `parse` works, including zod schemas. */
+  function parser<T>(accept: (value: unknown) => value is T): { parse(value: unknown): T } {
+    return {
+      parse(value: unknown): T {
+        if (!accept(value)) throw new Error('invalid value');
+        return value;
+      },
+    };
+  }
+
+  it('stores any JSON value under a key and reads it back through its schema', async () => {
+    expect(await repos.settings.get('voice', parser((value): value is { provider: string } => {
+      return typeof value === 'object' && value !== null && 'provider' in value;
+    }))).toBeUndefined();
+
+    await repos.settings.set('voice', { provider: 'system', voice: '' });
+    expect(
+      await repos.settings.get('voice', parser((value): value is { provider: string; voice: string } => {
+        return typeof value === 'object' && value !== null && 'provider' in value && 'voice' in value;
+      })),
+    ).toEqual({ provider: 'system', voice: '' });
+
+    await repos.settings.set('voice', { provider: 'openai-compatible', model: 'tts-1' });
+    expect(
+      await repos.settings.get('voice', parser((value): value is { provider: string } => {
+        return typeof value === 'object' && value !== null && 'provider' in value;
+      })),
+    ).toEqual({ provider: 'openai-compatible', model: 'tts-1' });
+  });
+
+  it('treats a stored value that no longer parses as absent', async () => {
+    await repos.settings.set('count', 'not a number');
+    expect(await repos.settings.get('count', parser((value): value is number => typeof value === 'number'))).toBeUndefined();
+    await repos.settings.set('count', 3);
+    expect(await repos.settings.get('count', parser((value): value is number => typeof value === 'number'))).toBe(3);
+  });
+
+  it('removes a key and reports the change', async () => {
+    await repos.settings.set('voice', { provider: 'system' });
+    expect(await repos.settings.remove('voice')).toBe(true);
+    expect(await repos.settings.remove('voice')).toBe(false);
+    expect(await repos.settings.get('voice', parser((value): value is unknown => value !== undefined))).toBeUndefined();
+  });
+
+  it('keeps keys independent', async () => {
+    await repos.settings.set('voice', { provider: 'system' });
+    await repos.settings.set('other', [1, 2, 3]);
+    expect(
+      await repos.settings.get('other', parser((value): value is number[] => Array.isArray(value) && value.length === 3)),
+    ).toEqual([1, 2, 3]);
+    expect(
+      await repos.settings.get('voice', parser((value): value is { provider: string } => typeof value === 'object' && value !== null && 'provider' in value)),
+    ).toEqual({ provider: 'system' });
   });
 });

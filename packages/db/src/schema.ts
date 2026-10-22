@@ -52,6 +52,8 @@ export const bots = sqliteTable('bots', {
    */
   browserProfileId: text('browser_profile_id'),
   notifications: integer('notifications', { mode: 'boolean' }).notNull().default(true),
+  /** Whether the chat may speak this bot's replies. */
+  speakReplies: integer('speak_replies', { mode: 'boolean' }).notNull().default(false),
   /** How the broker treats write actions: `ask` pauses all of them, `edits` only the irreversible kinds. */
   approvalMode: text('approval_mode').$type<ApprovalMode>().notNull().default('ask'),
   /** The bot's team. Plain text, not a foreign key: deleting a team ungroups its bots instead of touching them. */
@@ -462,3 +464,13 @@ export const mcpServers = sqliteTable(
   },
   (t) => [uniqueIndex('mcp_servers_name_uq').on(t.name)],
 );
+
+/**
+ * Generic server settings: one JSON value per key. The voice settings live under `voice`; adding another
+ * setting needs no migration. Read values with the schema that owns the key (see `repos.settings.get`).
+ */
+export const settings = sqliteTable('settings', {
+  key: text('key').primaryKey(),
+  value: text('value', { mode: 'json' }).$type<unknown>().notNull(),
+  updatedAt: text('updated_at').notNull(),
+});

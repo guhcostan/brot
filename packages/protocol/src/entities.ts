@@ -86,6 +86,11 @@ export const Bot = z.object({
    */
   notifications: z.boolean().optional(),
   /**
+   * Whether the chat may speak this bot's replies aloud. Absent means false. The audio comes from the
+   * server's voice settings, so a bot needs no voice of its own.
+   */
+  speakReplies: z.boolean().optional(),
+  /**
    * How the bot handles approvals. Absent means `ask`. In `edits` mode the broker auto-allows shell, file
    * writes and other write actions; send, publish, delete, purchase and permission changes always ask.
    */

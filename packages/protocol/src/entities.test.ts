@@ -216,10 +216,11 @@ describe('entity schemas', () => {
   });
 
   it('round-trips a bot with a host browser flag and a notification toggle', () => {
-    const withBrowser = { ...bot, browser: true, notifications: false };
+    const withBrowser = { ...bot, browser: true, notifications: false, speakReplies: true };
     expect(roundTrip(Bot, withBrowser)).toEqual(withBrowser);
     expect(Bot.parse(bot).browser).toBeUndefined();
     expect(Bot.parse(bot).notifications).toBeUndefined();
+    expect(Bot.parse(bot).speakReplies).toBeUndefined();
   });
 
   it('round-trips a bot grouped in a team', () => {
