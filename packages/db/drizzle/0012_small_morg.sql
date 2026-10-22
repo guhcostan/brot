@@ -1,0 +1,1 @@
+ALTER TABLE `bots` ADD `approval_mode` text DEFAULT 'ask' NOT NULL;

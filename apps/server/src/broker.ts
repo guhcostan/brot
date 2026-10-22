@@ -1,5 +1,12 @@
 import type { Repos } from '@brot/db';
-import type { Approval, ApprovalDecision, Policy, ToolDecision, ToolRequest } from '@brot/protocol';
+import type {
+  Approval,
+  ApprovalDecision,
+  ApprovalKind,
+  Policy,
+  ToolDecision,
+  ToolRequest,
+} from '@brot/protocol';
 import type { EventBus } from './bus';
 
 export type PolicyVerdict = 'allow' | 'deny' | 'ask';
@@ -44,6 +51,12 @@ export function verdictFor(policies: Policy[], req: Pick<ToolRequest, 'tool' | '
   return 'ask';
 }
 
+/**
+ * Kinds that `approvalMode: 'edits'` may run without a person: edits to the bot's own computer. Everything
+ * irreversible — send, publish, delete, purchase and permission changes — keeps asking in every mode.
+ */
+const EDIT_KINDS: ReadonlySet<ApprovalKind> = new Set(['shell', 'file_write', 'other']);
+
 export function createBroker(deps: { repos: Repos; bus: EventBus }): Broker {
   const { repos, bus } = deps;
   const waiters = new Map<string, Waiter>();
@@ -58,6 +71,12 @@ export function createBroker(deps: { repos: Repos; bus: EventBus }): Broker {
     // A read changes nothing outside the computer, and the egress allowlist still bounds where it reaches.
     if (verdict === 'allow' || (verdict === 'ask' && req.risk === 'read')) return { allowed: true };
     if (verdict === 'deny') return { allowed: false, reply: 'Denied by policy.' };
+    // Only 'ask' reaches this point. In 'edits' mode the bot can change its own computer without asking, but the
+    // safety floor holds: an irreversible action always needs a person, so those kinds never take this path.
+    if (req.risk === 'write' && EDIT_KINDS.has(req.kind)) {
+      const bot = await repos.bots.get(scope.botId);
+      if (bot?.approvalMode === 'edits') return { allowed: true };
+    }
 
     const approval = await repos.approvals.create({
       runId: scope.runId,

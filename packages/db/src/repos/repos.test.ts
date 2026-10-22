@@ -63,6 +63,17 @@ describe('bots', () => {
     expect((await repos.bots.update(off.id, { notifications: true }))?.notifications).toBeUndefined();
   });
 
+  it('stores the approval mode and leaves it unset for ask', async () => {
+    const asking = await repos.bots.create({ name: 'Ada', job: 'x' });
+    expect(asking.approvalMode).toBeUndefined();
+    const editing = await repos.bots.create({ name: 'Bo', job: 'x', approvalMode: 'edits' });
+    expect(editing.approvalMode).toBe('edits');
+    expect((await repos.bots.get(editing.id))?.approvalMode).toBe('edits');
+    expect((await repos.bots.list()).find((bot) => bot.id === editing.id)?.approvalMode).toBe('edits');
+    expect((await repos.bots.update(editing.id, { approvalMode: 'ask' }))?.approvalMode).toBeUndefined();
+    expect((await repos.bots.update(asking.id, { approvalMode: 'edits' }))?.approvalMode).toBe('edits');
+  });
+
   it('stores a host browser flag and leaves it unset when false', async () => {
     const plain = await repos.bots.create({ name: 'Ada', job: 'x' });
     expect(plain.browser).toBeUndefined();

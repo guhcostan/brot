@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { TEAM_MAX_DEPTH } from './constants';
 import {
   Approval,
+  ApprovalMode,
   Bot,
   BrowserProfile,
   BrowserTakeover,
@@ -48,6 +49,14 @@ const roundTrip = <T>(schema: { parse: (input: unknown) => T }, value: unknown):
 describe('entity schemas', () => {
   it('round-trips a bot through JSON', () => {
     expect(roundTrip(Bot, bot)).toEqual(bot);
+  });
+
+  it('round-trips a bot approval mode, and leaves it absent for the default', () => {
+    const edits = { ...bot, approvalMode: 'edits' as const };
+    expect(roundTrip(Bot, edits)).toEqual(edits);
+    expect(Bot.parse(bot).approvalMode).toBeUndefined();
+    expect(ApprovalMode.options).toEqual(['ask', 'edits']);
+    expect(() => Bot.parse({ ...bot, approvalMode: 'always' })).toThrow();
   });
 
   it('round-trips a browser profile and a bot that shares it', () => {

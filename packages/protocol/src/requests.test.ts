@@ -32,8 +32,18 @@ describe('request schemas', () => {
       computer: 'sandbox',
       browser: false,
       notifications: true,
+      approvalMode: 'ask',
       egress: { mode: 'deny', allow: [] },
     });
+  });
+
+  it('defaults the bot approval mode to ask and accepts edits', () => {
+    expect(CreateBot.parse({ name: 'Ada', job: 'Researcher' }).approvalMode).toBe('ask');
+    expect(CreateBot.parse({ name: 'Ada', job: 'Researcher', approvalMode: 'edits' }).approvalMode).toBe('edits');
+    expect(UpdateBot.parse({ approvalMode: 'edits' })).toEqual({ approvalMode: 'edits' });
+    expect(UpdateBot.parse({ approvalMode: 'ask' })).toEqual({ approvalMode: 'ask' });
+    expect(() => CreateBot.parse({ name: 'Ada', job: 'Researcher', approvalMode: 'always' })).toThrow();
+    expect(() => UpdateBot.parse({ approvalMode: 'auto' })).toThrow();
   });
 
   it('validates a host browser status and the profile behind it', () => {

@@ -69,7 +69,7 @@ describe('migrate', () => {
     ]);
 
     const applied = await handle.client.execute('SELECT COUNT(*) AS count FROM __drizzle_migrations');
-    expect(Number(applied.rows[0]?.count)).toBe(12);
+    expect(Number(applied.rows[0]?.count)).toBe(13);
   });
 
   it('adds shared browser profiles and the runs started index on a fresh database', async () => {
@@ -637,6 +637,43 @@ describe('migrate', () => {
       title: '"Ada" finished',
       body: 'Done.',
     })).toMatchObject({ kind: 'finished', title: '"Ada" finished' });
+  });
+
+  it('adds the bot approval mode in place, defaulting existing bots to ask', async () => {
+    const { handle } = await tempDb();
+    const journal = JSON.parse(await readFile(join(migrationsFolder, 'meta', '_journal.json'), 'utf8')) as {
+      entries: Array<{ tag: string; when: number }>;
+    };
+    const applied = journal.entries.slice(0, 12);
+    if (applied.length !== 12 || applied[11]?.tag !== '0011_brown_skullbuster') {
+      throw new Error('journal must start with the 0000 to 0011 migrations');
+    }
+
+    for (const entry of applied) {
+      await handle.client.executeMultiple(await readFile(join(migrationsFolder, `${entry.tag}.sql`), 'utf8'));
+    }
+    await handle.client.execute(
+      'CREATE TABLE "__drizzle_migrations" ("id" INTEGER PRIMARY KEY AUTOINCREMENT, "hash" text NOT NULL, "created_at" numeric)',
+    );
+    for (const entry of applied) {
+      await handle.client.execute({
+        sql: 'INSERT INTO "__drizzle_migrations" ("hash", "created_at") VALUES (?, ?)',
+        args: [entry.tag, entry.when],
+      });
+    }
+    await handle.client.execute(
+      `INSERT INTO bots (id, name, job, instructions, engine, computer, pinned, archived, created_at, updated_at)
+       VALUES ('bot_old', 'Ada', 'Researcher', '', 'mock', 'none', 0, 0, '2026-10-19T10:00:00.000Z', '2026-10-19T10:00:00.000Z')`,
+    );
+
+    await migrate(handle.db);
+
+    expect(await columnNames(handle, 'bots')).toContain('approval_mode');
+    const repos = createRepos(handle.db);
+    expect((await repos.bots.get('bot_old'))?.approvalMode).toBeUndefined();
+    expect((await repos.bots.update('bot_old', { approvalMode: 'edits' }))?.approvalMode).toBe('edits');
+    expect((await repos.bots.get('bot_old'))?.approvalMode).toBe('edits');
+    expect((await repos.bots.update('bot_old', { approvalMode: 'ask' }))?.approvalMode).toBeUndefined();
   });
 
   it('enables foreign keys on the connection', async () => {

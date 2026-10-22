@@ -12,6 +12,7 @@ import {
 import type {
   ApprovalDecision,
   ApprovalKind,
+  ApprovalMode,
   ApprovalStatus,
   CanonicalEventType,
   ComputerKind,
@@ -51,6 +52,8 @@ export const bots = sqliteTable('bots', {
    */
   browserProfileId: text('browser_profile_id'),
   notifications: integer('notifications', { mode: 'boolean' }).notNull().default(true),
+  /** How the broker treats write actions: `ask` pauses all of them, `edits` only the irreversible kinds. */
+  approvalMode: text('approval_mode').$type<ApprovalMode>().notNull().default('ask'),
   /** The bot's team. Plain text, not a foreign key: deleting a team ungroups its bots instead of touching them. */
   teamId: text('team_id'),
   egress: text('egress', { mode: 'json' })

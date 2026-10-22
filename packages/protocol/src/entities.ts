@@ -45,6 +45,14 @@ export const BrowserProfile = z.object({
 });
 export type BrowserProfile = z.infer<typeof BrowserProfile>;
 
+/**
+ * How a bot handles risky tool calls. `ask` pauses every risky action for a person. `edits` lets the bot
+ * change its own computer freely (shell, file writes and other write actions) while everything irreversible
+ * still asks.
+ */
+export const ApprovalMode = z.enum(['ask', 'edits']);
+export type ApprovalMode = z.infer<typeof ApprovalMode>;
+
 export const Bot = z.object({
   id: z.string(),
   name: z.string(),
@@ -77,6 +85,11 @@ export const Bot = z.object({
    * notify, because those need a person.
    */
   notifications: z.boolean().optional(),
+  /**
+   * How the bot handles approvals. Absent means `ask`. In `edits` mode the broker auto-allows shell, file
+   * writes and other write actions; send, publish, delete, purchase and permission changes always ask.
+   */
+  approvalMode: ApprovalMode.optional(),
   /** Absent means deny-all. Stored bots always carry a policy; the default is `{ mode: 'deny', allow: [] }`. */
   egress: EgressPolicy.optional(),
   /**
