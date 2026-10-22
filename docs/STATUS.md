@@ -239,6 +239,19 @@ mapped in `docs/MAUSBOT-PARITY.md` (34 bots / 7 teams, 33 bots with a browser an
   arrive paused" warnings, parser issues, a confirmation dialog and the created counts.
 - Suite: 1839 tests (170 files), typecheck 12/12, lint clean.
 
+## Wave 17: browser panel, today summary (2026-10-22)
+
+- **Live browser panel (web).** The bot dialog's browser section opens a live view: JPEG frames poll
+  every 1.5 s while open and visible, click/double-click/wheel map to the 1280x800 viewport, a
+  Take control / Hand back toggle drives the per-profile takeover, and a controls row types text and
+  presses Enter/Escape/Tab/Backspace. Input is only enabled while the person holds control; 409s
+  (sign-in window, no browser) stop polling with an inline explanation and a retry.
+- **Today summary (server).** GET /api/today returns run totals with terminal counts and token/cost
+  sums, a per-bot breakdown sorted by cost, routine run counts by status, workspace-wide pending
+  approvals and up to five highlights (last assistant message, 200 chars). The window defaults to local
+  midnight in an IANA zone (Intl only, DST-safe) with explicit bounds accepted; the web page lands next.
+- Suite: 1887 tests (177 files), typecheck 12/12, lint clean.
+
 ## Next
 
 1. Re-run the eval suite on a live model once OpenCode Go has quota (`apps/evals`, `--base` to the server), including B8 and C; the 2026-10-20 results predate the read auto-allow and the fixes above.

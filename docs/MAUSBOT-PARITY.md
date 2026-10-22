@@ -69,7 +69,7 @@ Legend: ✅ parity or better · 🟡 partial · ❌ absent · 🎯 current wave.
 | Teams: named section, shared instructions, roster, Chief | ✅ | ✅ teams with brief, chief and roster | W2 done |
 | Per-team working folder (`bot.cwd`) | ✅ | 🟡 sandbox `/workspace` per bot; host computer has the real cwd | W2 |
 | Browser per bot, persistent login profiles | ✅ | ✅ per-bot and shared profiles, persistent logins, egress-gated | W1 done |
-| Live browser view and take-over | ✅ | ✅ JPEG frames, per-profile takeover and remote input for host browsers; web panel next | W7 |
+| Live browser view and take-over | ✅ | ✅ JPEG live panel with click/scroll/type input and takeover for host browsers | W7 done |
 | Host browser (My Chrome) attach | ✅ | ❌ | W5 |
 | Saved logins vault + `fill_login` | ✅ | ❌ (shared profiles cover the everyday case) | W7 |
 | Connected apps (Composio marketplace) + per-bot tool grants | ✅ | ❌ | W3 |
@@ -83,7 +83,7 @@ Legend: ✅ parity or better · 🟡 partial · ❌ absent · 🎯 current wave.
 | Voice: TTS providers, spoken replies, voice notes, calls, dictation | ✅ | ❌ | W8 |
 | Attachments: images/screenshots/files in transcript, quota | ✅ | ✅ composer, transcript gallery, storage, text-in-prompt and orphan sweep | W6 done |
 | Notifications: in-app/desktop, per-bot, exact-thread routing | ✅ | ✅ inbox, unread badge, native banners, per-bot toggle | W6 done |
-| Analytics: usage ledger, decision log, admin activity, Today page | ✅ | 🟡 usage summary + CSV export live; dashboard page, decision log and Today page next | W8 |
+| Analytics: usage ledger, decision log, admin activity, Today page | ✅ | 🟡 usage summary/CSV and /api/today are live; dashboard/Today pages, decision log next | W8 |
 | Team sharing: `.md`/package import-export, presets, org library | ✅ | ✅ Markdown package export/import with preview in Settings; presets and org library next | W9 |
 | Remote access: pairing, browser client, phone PWA, companions | ✅ | 🟡 mobile app + relay, loopback trust only | W10 |
 | Self-hosting: Docker, VPS, tunnel, backups | ✅ | 🟡 Docker + compose; no tunnel/backups | W10 |
