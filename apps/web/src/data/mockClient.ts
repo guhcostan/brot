@@ -2,6 +2,7 @@ import type {
   Approval,
   ApprovalDecision,
   ApprovalKind,
+  Attachment,
   Bot,
   CanonicalEvent,
   ComputerState,
@@ -37,7 +38,9 @@ import {
   UpdateSkill,
   UpdateTeam,
   UpdateThread,
+  attachmentKindFor,
   defaultEgressPolicy,
+  sanitizeAttachmentName,
 } from '@brot/protocol';
 import {
   ScreenUnavailable,
@@ -245,6 +248,8 @@ export function createMockClient(): BrotClient {
   const tasks = new Map<string, Task>(DEMO_TASKS.map((task) => [task.id, { ...task }]));
   const taskTimers = new Map<string, Array<ReturnType<typeof setTimeout>>>();
   const batons = new Map<string, string>();
+  /** Uploaded attachment metadata and the conversation it was uploaded to, keyed by attachment id. */
+  const attachments = new Map<string, { attachment: Attachment; threadId: string }>();
   const memories = new Map<string, Memory>(DEMO_MEMORIES.map((memory) => [memory.id, structuredClone(memory)]));
   const skills = new Map<string, Skill>(DEMO_SKILLS.map((skill) => [skill.id, structuredClone(skill)]));
   const routines = new Map<string, Routine>(DEMO_ROUTINES.map((routine) => [routine.id, structuredClone(routine)]));
@@ -321,6 +326,23 @@ export function createMockClient(): BrotClient {
 
   const scheduledRuns = (): RoutineRun[] =>
     [...routineRuns.values()].flat().sort((a, b) => Date.parse(b.startedAt) - Date.parse(a.startedAt) || b.id.localeCompare(a.id));
+
+  /** Links uploaded attachment ids to a message the way the server does, or throws like its 400. */
+  function linkAttachments(threadId: string, ids: readonly string[] | undefined, messageId: string): Attachment[] {
+    const linked: Attachment[] = [];
+    for (const id of ids ?? []) {
+      const entry = attachments.get(id);
+      if (!entry) throw new Error(`Unknown attachment: ${id}`);
+      if (entry.threadId !== threadId) throw new Error('This attachment belongs to another thread');
+      if (entry.attachment.messageId !== undefined) throw new Error('This attachment is already linked to a message');
+      linked.push({ ...entry.attachment, messageId });
+    }
+    for (const attachment of linked) {
+      const entry = attachments.get(attachment.id);
+      if (entry) attachments.set(attachment.id, { ...entry, attachment });
+    }
+    return linked;
+  }
 
   function seededThread(botId: string): Thread {
     const at = SEEDED_AT;
@@ -732,6 +754,10 @@ export function createMockClient(): BrotClient {
       threadsOfBot.delete(botId);
       screens.delete(botId);
       browserStates.delete(botId);
+      for (const [attachmentId, entry] of attachments) {
+        if (threads.has(entry.threadId)) continue;
+        attachments.delete(attachmentId);
+      }
       for (const [memoryId, memory] of memories) if (memory.botId === botId) memories.delete(memoryId);
       for (const [skillId, skill] of skills) if (skill.botId === botId) skills.delete(skillId);
       for (const room of rooms.values()) room.memberIds = room.memberIds.filter((id) => id !== botId);
@@ -868,6 +894,28 @@ export function createMockClient(): BrotClient {
       if (!skills.delete(skillId)) throw new Error(`Unknown skill: ${skillId}`);
     },
 
+    async uploadAttachment(threadId, file) {
+      if (!threads.has(threadId)) throw new Error(`Unknown thread: ${threadId}`);
+      const mimeType = file.type === '' ? 'application/octet-stream' : file.type;
+      const attachment: Attachment = {
+        id: nextId('att'),
+        name: sanitizeAttachmentName(file.name),
+        mimeType,
+        size: Math.max(file.size, 1),
+        kind: attachmentKindFor(mimeType),
+        createdAt: now(),
+      };
+      attachments.set(attachment.id, { attachment, threadId });
+      return structuredClone(attachment);
+    },
+
+    async deleteAttachment(attachmentId) {
+      const entry = attachments.get(attachmentId);
+      if (!entry) throw new Error(`Unknown attachment: ${attachmentId}`);
+      if (entry.attachment.messageId !== undefined) throw new Error('409 This attachment belongs to a message and cannot be deleted');
+      attachments.delete(attachmentId);
+    },
+
     async listThreads(botId) {
       if (!bots.has(botId)) throw new Error(`Unknown bot: ${botId}`);
       return byRecent(dmThreadsOf(botId)).map((thread) => structuredClone(thread));
@@ -908,10 +956,19 @@ export function createMockClient(): BrotClient {
     async postMessage(threadId, input: PostMessage) {
       const thread = threads.get(threadId);
       if (!thread || thread.kind === 'room') throw new Error(`Unknown thread: ${threadId}`);
+      const messageId = nextId('msg');
+      const linked = linkAttachments(threadId, input.attachmentIds, messageId);
       record(threadId, {
         ...base(threadId),
         type: 'message.completed',
-        message: { id: nextId('msg'), threadId, role: 'user', content: input.content, createdAt: now() },
+        message: {
+          id: messageId,
+          threadId,
+          role: 'user',
+          content: input.content,
+          createdAt: now(),
+          ...(linked.length > 0 ? { attachments: linked } : {}),
+        },
       });
       touch(threadId);
       void runAgent(thread.botId, threadId, input.content);
@@ -995,16 +1052,19 @@ export function createMockClient(): BrotClient {
         input.content,
         [...bots.values()].filter((bot) => room.memberIds.includes(bot.id)),
       );
+      const messageId = nextId('msg');
+      const linked = linkAttachments(roomId, input.attachmentIds, messageId);
       record(roomId, {
         ...base(roomId),
         type: 'message.completed',
         message: {
-          id: nextId('msg'),
+          id: messageId,
           threadId: roomId,
           role: 'user',
           content: input.content,
           createdAt: now(),
           ...(mentions.length > 0 ? { mentions } : {}),
+          ...(linked.length > 0 ? { attachments: linked } : {}),
         },
       });
       const responders = respondersFor(room, mentions);

@@ -1,6 +1,6 @@
 import type { ReactElement, ReactNode } from 'react';
-import type { ApprovalDecision } from '@brot/protocol';
-import { ApprovalCard, MessageBubble, StatusDot, TaskStatusLabel, ToolTimeline, TypingIndicator } from '@brot/ui';
+import type { ApprovalDecision, Attachment } from '@brot/protocol';
+import { ApprovalCard, MessageBubble, StatusDot, TaskStatusLabel, ToolTimeline, TypingIndicator, cx, type MessageBubbleProps } from '@brot/ui';
 import { formatTime } from '../format';
 import { t } from '../i18n';
 import { splitMentions, type Mentionable } from '../mentions';
@@ -19,6 +19,7 @@ import { approvalLabels } from './approvalLabels';
 import { timelineLabels, toStep } from './toolLabels';
 import { taskStatusLabel } from './taskLabels';
 import { ArrowRight, Baton } from './icons';
+import { MessageAttachments } from './MessageAttachments';
 import { TeamAvatar, moodOf, useBotName, useTeam } from './team';
 
 export interface TimelineProps {
@@ -88,6 +89,17 @@ function blockKey(block: Block): string {
   }
 }
 
+/** A message bubble with its attachments underneath; the bubble keeps its own alignment inside the row. */
+function AttachedMessage({ attachments, ...bubble }: { attachments?: Attachment[] } & MessageBubbleProps): ReactElement {
+  if (attachments === undefined || attachments.length === 0) return <MessageBubble {...bubble} />;
+  return (
+    <div className={cx('flex min-w-0 flex-col gap-2', bubble.role === 'user' && 'max-w-[min(85%,560px)] items-end self-end')}>
+      <MessageBubble {...bubble} />
+      <MessageAttachments attachments={attachments} />
+    </div>
+  );
+}
+
 export function Timeline({ thread, mode, defaultBotId, members, onDecide }: TimelineProps): ReactElement {
   const renderText = (text: string): ReactNode => <MentionText text={text} members={members} />;
   const gazes = gazeTargets(thread);
@@ -106,8 +118,9 @@ export function Timeline({ thread, mode, defaultBotId, members, onDecide }: Time
           case 'message':
             if (item.viaBotId !== undefined) return <ViaRow key={key} item={item} renderText={renderText} />;
             return (
-              <MessageBubble
+              <AttachedMessage
                 key={key}
+                attachments={item.attachments}
                 role={item.role}
                 content={item.content}
                 streaming={item.streaming}
@@ -172,8 +185,9 @@ function BotTurn({ botId, messages, mode, thread, renderText }: BotTurnProps): R
     return (
       <div className="flex flex-col gap-2">
         {messages.map((message, index) => (
-          <MessageBubble
+          <AttachedMessage
             key={message.id}
+            attachments={message.attachments}
             role="assistant"
             content={message.content}
             author={index === 0 ? name : undefined}
@@ -192,8 +206,9 @@ function BotTurn({ botId, messages, mode, thread, renderText }: BotTurnProps): R
       </div>
       <div className="flex min-w-0 flex-1 flex-col gap-2">
         {messages.map((message, index) => (
-          <MessageBubble
+          <AttachedMessage
             key={message.id}
+            attachments={message.attachments}
             role="assistant"
             content={message.content}
             author={index === 0 ? name : undefined}

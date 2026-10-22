@@ -172,8 +172,8 @@ export function useChat(client: BrotClient) {
 
   /** Posts into a thread, then refreshes that bot's thread list so the server's auto-title shows. */
   const send = useCallback(
-    async (threadId: string, botId: string, content: string) => {
-      await client.postMessage(threadId, { content });
+    async (threadId: string, botId: string, content: string, attachmentIds: string[] = []) => {
+      await client.postMessage(threadId, { content, ...(attachmentIds.length > 0 ? { attachmentIds } : {}) });
       try {
         const threads = await client.listThreads(botId);
         dispatch({ type: 'threads-loaded', botId, threads });

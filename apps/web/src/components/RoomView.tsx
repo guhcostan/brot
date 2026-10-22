@@ -1,5 +1,5 @@
 import type { ReactElement } from 'react';
-import type { ApprovalDecision, Bot } from '@brot/protocol';
+import type { ApprovalDecision, Attachment, Bot } from '@brot/protocol';
 import { AvatarStack, EmptyState, StatusDot, type BotStatus } from '@brot/ui';
 import type { Room, RoomMessage } from '../data/client';
 import { avatarOf } from '../format';
@@ -17,6 +17,10 @@ export interface RoomViewProps {
   thread: ThreadState;
   status: BotStatus;
   onSend: (input: RoomMessage) => Promise<void>;
+  /** Uploads one file into this room; enables the attach affordance. */
+  uploadAttachment?: (file: File) => Promise<Attachment>;
+  /** Deletes an upload that never made it into a message. */
+  discardAttachment?: (attachment: Attachment) => Promise<void>;
   onDecide: (approvalId: string, decision: ApprovalDecision, reply?: string) => Promise<void>;
   onOpenBots: () => void;
   onOpenContext: () => void;
@@ -28,7 +32,7 @@ export function memberSummary(names: string[], max = 3): string {
   return t('room.andMore', { names: names.slice(0, max).join(', '), count: String(names.length - max) });
 }
 
-export function RoomView({ room, members, thread, status, onSend, onDecide, onOpenBots, onOpenContext }: RoomViewProps): ReactElement {
+export function RoomView({ room, members, thread, status, onSend, uploadAttachment, discardAttachment, onDecide, onOpenBots, onOpenContext }: RoomViewProps): ReactElement {
   const lastItem = thread.items.at(-1);
   const logRef = useStickToBottom([thread.items.length, lastItem, Object.keys(thread.activeRuns).length]);
   const lead = members.find((bot) => bot.id === room.thread.leadBotId);
@@ -75,7 +79,11 @@ export function RoomView({ room, members, thread, status, onSend, onDecide, onOp
         placeholder={t('room.placeholder')}
         note={note}
         members={members}
-        onSend={(content, mentions) => onSend({ content, mentions })}
+        uploadAttachment={uploadAttachment}
+        discardAttachment={discardAttachment}
+        onSend={(content, mentions, attachmentIds) =>
+          onSend({ content, mentions, ...(attachmentIds.length > 0 ? { attachmentIds } : {}) })
+        }
       />
     </section>
   );

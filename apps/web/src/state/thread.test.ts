@@ -1,9 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import type { CanonicalEvent } from '@brot/protocol';
+import type { Attachment, CanonicalEvent } from '@brot/protocol';
 import { botStatus, foldEvents, sumCost, type ApprovalItem, type MessageItem, type ToolItem } from './thread';
 
 const at = '2026-10-19T12:00:00.000Z';
 const base = { at, threadId: 't1', runId: 'r1' };
+
+const attachment = (extra: Partial<Attachment> & Pick<Attachment, 'id'>): Attachment => ({
+  name: 'receipt.png',
+  mimeType: 'image/png',
+  size: 2048,
+  kind: 'image',
+  createdAt: at,
+  ...extra,
+});
 
 const approval = {
   id: 'a1',
@@ -91,6 +100,34 @@ describe('foldEvents', () => {
       { ...base, runId: 'r2', id: 'e3', type: 'cost.updated', tokensIn: 1, tokensOut: 1, costUsd: 0.005 },
     ]);
     expect(sumCost(state)).toEqual({ tokensIn: 21, tokensOut: 9, costUsd: 0.025 });
+  });
+
+  it('keeps the attachments of a completed message', () => {
+    const receipt = attachment({ id: 'att_1' });
+    const state = foldEvents([
+      {
+        ...base,
+        id: 'e1',
+        type: 'message.completed',
+        message: { id: 'm1', threadId: 't1', role: 'user', content: 'Receipt attached', createdAt: at, attachments: [receipt] },
+      },
+    ]);
+    expect(state.items[0]).toMatchObject({ kind: 'message', id: 'm1', attachments: [receipt] });
+  });
+
+  it('drops an attachment-less streaming draft when the completed message carries one', () => {
+    const receipt = attachment({ id: 'att_1', kind: 'file', mimeType: 'application/pdf', name: 'plan.pdf' });
+    const state = foldEvents([
+      { ...base, id: 'e1', type: 'message.delta', messageId: 'm1', delta: 'draft' },
+      {
+        ...base,
+        id: 'e2',
+        type: 'message.completed',
+        message: { id: 'm1', threadId: 't1', role: 'user', content: 'Plan attached', createdAt: at, attachments: [receipt] },
+      },
+    ]);
+    expect(state.items).toHaveLength(1);
+    expect(state.items[0]).toMatchObject({ content: 'Plan attached', streaming: false, attachments: [receipt] });
   });
 
   it('does not duplicate items when an event is replayed', () => {

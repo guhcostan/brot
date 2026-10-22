@@ -1,4 +1,5 @@
 import type {
+  Attachment,
   Bot,
   CanonicalEvent,
   ComputerInput,
@@ -33,6 +34,7 @@ import type {
 } from '@brot/protocol';
 
 export type {
+  Attachment,
   CreateMemory,
   CreateRoutineInput,
   CreateSkill,
@@ -152,6 +154,14 @@ export interface ListBotsOptions {
   includeArchived?: boolean;
 }
 
+/**
+ * The same-origin URL of an attachment's bytes. The id is the only key: the server serves the stored
+ * content type and a safe file name, so the app can link to it directly (`<img>`, `<a href>`).
+ */
+export function attachmentUrl(attachmentId: string): string {
+  return `/api/attachments/${encodeURIComponent(attachmentId)}`;
+}
+
 /** A team's shared brief, from the team dialog: name, instructions and an optional chief. */
 export type NewTeam = CreateTeamInput;
 
@@ -188,6 +198,11 @@ export interface BrotClient {
   createSkill(input: CreateSkill): Promise<Skill>;
   updateSkill(skillId: string, patch: UpdateSkill): Promise<Skill>;
   deleteSkill(skillId: string): Promise<void>;
+
+  /** Uploads one file into a conversation. The bytes stay on the server; only metadata comes back. */
+  uploadAttachment(threadId: string, file: File): Promise<Attachment>;
+  /** Deletes an upload that never reached a message. Rejects while a message still links it. */
+  deleteAttachment(attachmentId: string): Promise<void>;
 
   /** A bot's DM threads, most recently active first. */
   listThreads(botId: string): Promise<Thread[]>;

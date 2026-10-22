@@ -22,6 +22,15 @@ export function avatarOf(bot: Pick<Bot, 'avatar' | 'id'>): AvatarSpec {
   return parseAvatar(bot.avatar, bot.id);
 }
 
+/** A human file size: bytes under 1 KB, then KB, MB with one decimal. */
+export function formatBytes(size: number): string {
+  if (size < 1024) return `${size} B`;
+  const kb = size / 1024;
+  if (kb < 1024) return `${kb < 10 ? kb.toFixed(1) : Math.round(kb)} KB`;
+  const mb = kb / 1024;
+  return `${mb < 10 ? mb.toFixed(1) : Math.round(mb)} MB`;
+}
+
 /** A one-line gloss for a tool call: the first string argument, if any. */
 export function summarizeArgs(args: Record<string, unknown>): string {
   for (const value of Object.values(args)) {

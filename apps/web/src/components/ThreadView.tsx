@@ -1,5 +1,5 @@
 import { useEffect, useRef, type ReactElement, type ReactNode } from 'react';
-import type { ApprovalDecision, Bot } from '@brot/protocol';
+import type { ApprovalDecision, Attachment, Bot } from '@brot/protocol';
 import { BotAvatar, Button, EmptyState, Skeleton, StatusDot, TypingIndicator, type BotStatus } from '@brot/ui';
 import { avatarOf } from '../format';
 import { t } from '../i18n';
@@ -18,7 +18,11 @@ export interface ThreadViewProps {
   /** False until the bot's history has loaded. */
   loaded: boolean;
   status: BotStatus;
-  onSend: (content: string) => Promise<void>;
+  onSend: (content: string, attachmentIds: string[]) => Promise<void>;
+  /** Uploads one file into this thread; enables the attach affordance. */
+  uploadAttachment?: (file: File) => Promise<Attachment>;
+  /** Deletes an upload that never made it into a message. */
+  discardAttachment?: (attachment: Attachment) => Promise<void>;
   onEdit: () => void;
   onDecide: (approvalId: string, decision: ApprovalDecision, reply?: string) => Promise<void>;
   onOpenBots: () => void;
@@ -37,7 +41,7 @@ export function useStickToBottom(deps: readonly unknown[]) {
   return ref;
 }
 
-export function ThreadView({ bot, title, thread, loaded, status, onSend, onEdit, onDecide, onOpenBots, onOpenContext }: ThreadViewProps): ReactElement {
+export function ThreadView({ bot, title, thread, loaded, status, onSend, uploadAttachment, discardAttachment, onEdit, onDecide, onOpenBots, onOpenContext }: ThreadViewProps): ReactElement {
   const lastItem = thread.items.at(-1);
   const streaming = lastItem?.kind === 'message' && lastItem.streaming;
   const typing = thread.run === 'running' && !streaming;
@@ -87,7 +91,12 @@ export function ThreadView({ bot, title, thread, loaded, status, onSend, onEdit,
         </div>
       </div>
 
-      <Composer targetName={bot.name} onSend={(content) => onSend(content)} />
+      <Composer
+        targetName={bot.name}
+        uploadAttachment={uploadAttachment}
+        discardAttachment={discardAttachment}
+        onSend={(content, _mentions, attachmentIds) => onSend(content, attachmentIds)}
+      />
     </section>
   );
 }

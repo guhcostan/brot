@@ -1,4 +1,4 @@
-import type { Approval, CanonicalEvent, ComputerState, Memory, Takeover } from '@brot/protocol';
+import type { Approval, Attachment, CanonicalEvent, ComputerState, Memory, Takeover } from '@brot/protocol';
 
 /**
  * The thread view is a pure fold over canonical events (docs/ARCHITECTURE.md). Replaying the same
@@ -20,6 +20,8 @@ export type MessageItem = {
   mentions?: string[];
   /** Set when one bot addressed this message to another bot. */
   viaBotId?: string;
+  /** Files attached to the message, in upload order. */
+  attachments?: Attachment[];
 };
 
 export type ToolItem = {
@@ -175,6 +177,7 @@ export function applyEvent(state: ThreadState, event: CanonicalEvent): ThreadSta
         ...(authorBotId === undefined ? {} : { authorBotId }),
         ...(message.mentions === undefined ? {} : { mentions: message.mentions }),
         ...(message.viaBotId === undefined ? {} : { viaBotId: message.viaBotId }),
+        ...(message.attachments === undefined ? {} : { attachments: message.attachments }),
       };
       const exists = state.items.some((item) => item.kind === 'message' && item.id === message.id);
       return {

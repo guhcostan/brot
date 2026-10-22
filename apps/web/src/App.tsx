@@ -225,6 +225,8 @@ export function App(): ReactElement {
         thread={state.threads[room.thread.id] ?? emptyThread}
         status={statusOfRoom(state, room.thread.id)}
         onSend={(input) => sendToRoom(room.thread.id, input)}
+        uploadAttachment={(file) => client.uploadAttachment(room.thread.id, file)}
+        discardAttachment={(attachment) => client.deleteAttachment(attachment.id)}
         onDecide={decide}
         onOpenBots={openBots}
         onOpenContext={openContext}
@@ -239,7 +241,9 @@ export function App(): ReactElement {
         thread={state.threads[selectedThreadId] ?? emptyThread}
         loaded={state.threads[selectedThreadId] !== undefined}
         status={statusOfBot(state, bot.id)}
-        onSend={(content) => send(selectedThreadId, bot.id, content)}
+        onSend={(content, attachmentIds) => send(selectedThreadId, bot.id, content, attachmentIds)}
+        uploadAttachment={(file) => client.uploadAttachment(selectedThreadId, file)}
+        discardAttachment={(attachment) => client.deleteAttachment(attachment.id)}
         onEdit={() => setBotDialog({ botId: bot.id })}
         onDecide={decide}
         onOpenBots={openBots}

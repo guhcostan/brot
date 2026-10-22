@@ -69,6 +69,21 @@ export const ArrowRight = ({ size = 12 }: { size?: number }) => (
   </Icon>
 );
 
+/** A paperclip: attach files to a message. */
+export const Paperclip = ({ size }: { size?: number }) => (
+  <Icon size={size}>
+    <path d="M13.9 8.6 9 13.5a2.5 2.5 0 0 1-3.5-3.5l5.6-5.6a1.75 1.75 0 0 1 2.5 2.5l-5.6 5.6a1 1 0 0 1-1.4-1.4l4.9-4.9" />
+  </Icon>
+);
+
+/** A sheet of paper with a folded corner: a non-image attachment. */
+export const FileDoc = ({ size }: { size?: number }) => (
+  <Icon size={size}>
+    <path d="M5.5 3.25h5.75L15 7.5v9.25H5.5z" />
+    <path d="M11.25 3.25V7.5H15" />
+  </Icon>
+);
+
 /** A clock: routines and scheduled runs. */
 export const Clock = ({ size }: { size?: number }) => (
   <Icon size={size}>

@@ -1,5 +1,6 @@
 import {
   Approval,
+  Attachment,
   Bot,
   CanonicalEvent,
   ComputerInput,
@@ -380,6 +381,24 @@ export function createHttpClient({
       await request(`/api/skills/${encodeURIComponent(skillId)}`, { method: 'DELETE' });
     },
 
+    async uploadAttachment(threadId, file) {
+      // The browser sets the multipart boundary itself, so no Content-Type header here.
+      const form = new FormData();
+      form.set('threadId', threadId);
+      form.set('file', file, file.name);
+      const response = await fetch(`${root}/api/attachments`, {
+        method: 'POST',
+        body: form,
+        headers: { Accept: 'application/json' },
+      });
+      if (!response.ok) throw new Error(`POST /api/attachments failed: ${await describeFailure(response)}`);
+      return Attachment.parse(await response.json());
+    },
+
+    async deleteAttachment(attachmentId) {
+      await request(`/api/attachments/${encodeURIComponent(attachmentId)}`, { method: 'DELETE' });
+    },
+
     listThreads(botId) {
       return fetchThreads(botId);
     },
@@ -453,6 +472,7 @@ export function createHttpClient({
       await write('POST', `/api/threads/${encodeURIComponent(roomId)}/messages`, {
         content: body.content,
         ...(body.mentions?.length ? { mentions: body.mentions } : {}),
+        ...(body.attachmentIds?.length ? { attachmentIds: body.attachmentIds } : {}),
       });
     },
 
