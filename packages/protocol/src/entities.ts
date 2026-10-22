@@ -55,6 +55,11 @@ export const Bot = z.object({
    * the bot's `egress` policy.
    */
   browser: z.boolean().optional(),
+  /**
+   * Whether finished runs post an inbox notification. Absent means true. Approvals and failed runs always
+   * notify, because those need a person.
+   */
+  notifications: z.boolean().optional(),
   /** Absent means deny-all. Stored bots always carry a policy; the default is `{ mode: 'deny', allow: [] }`. */
   egress: EgressPolicy.optional(),
   /**

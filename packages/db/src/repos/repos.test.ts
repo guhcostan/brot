@@ -54,6 +54,15 @@ describe('bots', () => {
     expect(updated?.egress).toEqual({ mode: 'deny', allow: [] });
   });
 
+  it('stores the notification toggle and leaves it unset when true', async () => {
+    const on = await repos.bots.create({ name: 'Ada', job: 'x' });
+    expect(on.notifications).toBeUndefined();
+    const off = await repos.bots.create({ name: 'Bo', job: 'x', notifications: false });
+    expect(off.notifications).toBe(false);
+    expect((await repos.bots.get(off.id))?.notifications).toBe(false);
+    expect((await repos.bots.update(off.id, { notifications: true }))?.notifications).toBeUndefined();
+  });
+
   it('stores a host browser flag and leaves it unset when false', async () => {
     const plain = await repos.bots.create({ name: 'Ada', job: 'x' });
     expect(plain.browser).toBeUndefined();
@@ -1324,5 +1333,90 @@ describe('attachments', () => {
     await repos.attachments.linkToMessage([attachment.id], message.id);
     await handle.client.execute({ sql: 'DELETE FROM messages WHERE id = ?', args: [message.id] });
     expect((await repos.attachments.get(attachment.id))?.messageId).toBeUndefined();
+  });
+});
+
+describe('notifications', () => {
+  async function notification(
+    botId: string,
+    threadId: string,
+    overrides: { kind?: 'approval' | 'finished' | 'failed'; createdAt?: string; title?: string } = {},
+  ) {
+    return repos.notifications.create({
+      botId,
+      threadId,
+      kind: overrides.kind ?? 'finished',
+      title: overrides.title ?? '"Ada" finished',
+      body: 'Done.',
+      ...(overrides.createdAt === undefined ? {} : { createdAt: overrides.createdAt }),
+    });
+  }
+
+  it('creates unread records and lists them newest first', async () => {
+    const { bot, thread } = await seed();
+    const first = await notification(bot.id, thread.id, { createdAt: '2026-10-20T10:00:00.000Z' });
+    const second = await notification(bot.id, thread.id, {
+      kind: 'approval',
+      createdAt: '2026-10-20T11:00:00.000Z',
+      title: '"Ada" needs your approval',
+    });
+    expect(first.readAt).toBeUndefined();
+
+    const listed = await repos.notifications.list();
+    expect(listed.map((item) => item.id)).toEqual([second.id, first.id]);
+    expect((await repos.notifications.countUnread())).toBe(2);
+  });
+
+  it('filters by unread and bot, and clamps the limit', async () => {
+    const { bot, thread } = await seed();
+    const other = await repos.bots.create({ name: 'Bo', job: 'x' });
+    const otherThread = await repos.threads.create(other.id);
+    const first = await notification(bot.id, thread.id, { createdAt: '2026-10-20T10:00:00.000Z' });
+    const readOne = await notification(bot.id, thread.id, { createdAt: '2026-10-20T11:00:00.000Z' });
+    const otherOne = await notification(other.id, otherThread.id, { createdAt: '2026-10-20T12:00:00.000Z' });
+    await repos.notifications.markRead([readOne.id]);
+
+    expect((await repos.notifications.list()).map((item) => item.id)).toHaveLength(3);
+    expect((await repos.notifications.list({ unread: true })).map((item) => item.id)).toEqual([otherOne.id, first.id]);
+    expect((await repos.notifications.list({ unread: true })).every((item) => item.readAt === undefined)).toBe(true);
+    expect((await repos.notifications.list({ botId: other.id })).map((item) => item.botId)).toEqual([other.id]);
+    expect(await repos.notifications.list({ limit: 2 })).toHaveLength(2);
+    expect(await repos.notifications.list({ limit: 500 })).toHaveLength(3);
+    expect(await repos.notifications.list({ limit: 0 })).toHaveLength(1);
+  });
+
+  it('marks all unread or only the given ids read, counting what changed', async () => {
+    const { bot, thread } = await seed();
+    const first = await notification(bot.id, thread.id, { createdAt: '2026-10-20T10:00:00.000Z' });
+    const second = await notification(bot.id, thread.id, { createdAt: '2026-10-20T11:00:00.000Z' });
+
+    expect(await repos.notifications.markRead([first.id])).toBe(1);
+    expect((await repos.notifications.list({ unread: true })).map((item) => item.id)).toEqual([second.id]);
+    expect(await repos.notifications.markRead([first.id])).toBe(0);
+    expect(await repos.notifications.markRead()).toBe(1);
+    expect(await repos.notifications.countUnread()).toBe(0);
+    expect(await repos.notifications.markRead()).toBe(0);
+    expect(await repos.notifications.markRead([])).toBe(0);
+  });
+
+  it('removes one record or everything older than a date', async () => {
+    const { bot, thread } = await seed();
+    const old = await notification(bot.id, thread.id, { createdAt: '2026-09-01T10:00:00.000Z' });
+    const recent = await notification(bot.id, thread.id, { createdAt: '2026-10-20T10:00:00.000Z' });
+
+    expect(await repos.notifications.remove(old.id)).toBe(true);
+    expect(await repos.notifications.remove(old.id)).toBe(false);
+    expect(await repos.notifications.pruneBefore('2026-10-01T00:00:00.000Z')).toBe(0);
+    const stillThere = await notification(bot.id, thread.id, { createdAt: '2026-09-15T10:00:00.000Z' });
+    expect(await repos.notifications.pruneBefore('2026-10-01T00:00:00.000Z')).toBe(1);
+    expect((await repos.notifications.list()).map((item) => item.id)).toEqual([recent.id]);
+    expect(stillThere.createdAt).toBe('2026-09-15T10:00:00.000Z');
+  });
+
+  it('cascades notifications away with their bot and thread', async () => {
+    const { bot, thread } = await seed();
+    await notification(bot.id, thread.id);
+    expect(await repos.bots.remove(bot.id)).toBe(true);
+    expect(await repos.notifications.list()).toEqual([]);
   });
 });

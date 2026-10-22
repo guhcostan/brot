@@ -71,6 +71,13 @@
       "when": 1792680082630,
       "tag": "0009_confused_anthem",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1792683601282,
+      "tag": "0010_supreme_nomad",
+      "breakpoints": true
     }
   ]
 }

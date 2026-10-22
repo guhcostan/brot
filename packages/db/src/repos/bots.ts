@@ -19,6 +19,7 @@ export function toBot(row: BotRow): Bot {
     computer: row.computer,
     ...(row.desktop ? { desktop: true } : {}),
     ...(row.browser ? { browser: true } : {}),
+    ...(row.notifications ? {} : { notifications: false }),
     egress: row.egress,
     teamBudgetUsd: row.teamBudgetUsd ?? undefined,
     pinned: row.pinned,

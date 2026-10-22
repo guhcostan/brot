@@ -7,6 +7,7 @@ import { createDeviceRepo } from './devices';
 import { createEventRepo } from './events';
 import { createMcpServerRepo } from './mcp-servers';
 import { createMemoryRepo } from './memories';
+import { createNotificationRepo } from './notifications';
 import { createMessageRepo } from './messages';
 import { createPolicyRepo } from './policies';
 import { createRoomRepo } from './rooms';
@@ -30,6 +31,7 @@ export function createRepos(db: Db) {
     policies: createPolicyRepo(db),
     memories: createMemoryRepo(db),
     mcpServers: createMcpServerRepo(db),
+    notifications: createNotificationRepo(db),
     skills: createSkillRepo(db),
     computers: createComputerRepo(db),
     routines: createRoutineRepo(db),
@@ -52,4 +54,5 @@ export type { RoutineScheduleUpdate } from './routines';
 export type { CreateRoutineRunInput, RoutineRunFilter, RoutineRunPatch } from './routine-runs';
 export type { RunPatch } from './runs';
 export type { CreateAttachmentRecord, StoredAttachment } from './attachments';
+export type { CreateNotificationInput, NotificationFilter } from './notifications';
 export type { TaskFilter } from './tasks';

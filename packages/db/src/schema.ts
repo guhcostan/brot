@@ -20,6 +20,7 @@ import type {
   EgressPolicy,
   MemoryKind,
   McpServerTransport,
+  NotificationKind,
   MessageRole,
   PolicyEffect,
   ResponderMode,
@@ -44,6 +45,7 @@ export const bots = sqliteTable('bots', {
   computer: text('computer').$type<ComputerKind>().notNull(),
   desktop: integer('desktop', { mode: 'boolean' }).notNull().default(false),
   browser: integer('browser', { mode: 'boolean' }).notNull().default(false),
+  notifications: integer('notifications', { mode: 'boolean' }).notNull().default(true),
   /** The bot's team. Plain text, not a foreign key: deleting a team ungroups its bots instead of touching them. */
   teamId: text('team_id'),
   egress: text('egress', { mode: 'json' })
@@ -142,6 +144,29 @@ export const attachments = sqliteTable(
     createdAt: text('created_at').notNull(),
   },
   (t) => [index('attachments_thread_idx').on(t.threadId), index('attachments_message_idx').on(t.messageId)],
+);
+
+/**
+ * One inbox entry. Approvals and failed runs always create one; a finished run only when the bot allows
+ * notifications. Deleting the bot or its thread cascades the entries away.
+ */
+export const notifications = sqliteTable(
+  'notifications',
+  {
+    id: text('id').primaryKey(),
+    botId: text('bot_id')
+      .notNull()
+      .references(() => bots.id, { onDelete: 'cascade' }),
+    threadId: text('thread_id')
+      .notNull()
+      .references(() => threads.id, { onDelete: 'cascade' }),
+    kind: text('kind').$type<NotificationKind>().notNull(),
+    title: text('title').notNull(),
+    body: text('body').notNull(),
+    createdAt: text('created_at').notNull(),
+    readAt: text('read_at'),
+  },
+  (t) => [index('notifications_read_idx').on(t.readAt, t.createdAt), index('notifications_bot_idx').on(t.botId)],
 );
 
 export const runs = sqliteTable(

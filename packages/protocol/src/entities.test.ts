@@ -167,10 +167,11 @@ describe('entity schemas', () => {
     expect(RoutineRun.parse({ ...run, runId: undefined, result: undefined, endedAt: undefined }).runId).toBeUndefined();
   });
 
-  it('round-trips a bot with a host browser flag', () => {
-    const withBrowser = { ...bot, browser: true };
+  it('round-trips a bot with a host browser flag and a notification toggle', () => {
+    const withBrowser = { ...bot, browser: true, notifications: false };
     expect(roundTrip(Bot, withBrowser)).toEqual(withBrowser);
     expect(Bot.parse(bot).browser).toBeUndefined();
+    expect(Bot.parse(bot).notifications).toBeUndefined();
   });
 
   it('round-trips a bot grouped in a team', () => {

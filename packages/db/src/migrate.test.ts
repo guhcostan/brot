@@ -54,6 +54,7 @@ describe('migrate', () => {
       'mcp_servers',
       'memories',
       'messages',
+      'notifications',
       'policies',
       'room_members',
       'routine_runs',
@@ -67,7 +68,7 @@ describe('migrate', () => {
     ]);
 
     const applied = await handle.client.execute('SELECT COUNT(*) AS count FROM __drizzle_migrations');
-    expect(Number(applied.rows[0]?.count)).toBe(10);
+    expect(Number(applied.rows[0]?.count)).toBe(11);
   });
 
   it('adds the rooms, team task, and per-bot session schema on a fresh database', async () => {
@@ -518,6 +519,68 @@ describe('migrate', () => {
     const message = await repos.messages.create({ threadId: thread.id, role: 'user', content: 'See notes' });
     await repos.attachments.linkToMessage([attachment.id], message.id);
     expect((await repos.messages.get(message.id))?.attachments).toEqual([{ ...attachment, messageId: message.id }]);
+  });
+
+  it('adds notifications and the bot notification toggle in place', async () => {
+    const { handle } = await tempDb();
+    const journal = JSON.parse(await readFile(join(migrationsFolder, 'meta', '_journal.json'), 'utf8')) as {
+      entries: Array<{ tag: string; when: number }>;
+    };
+    const applied = journal.entries.slice(0, 10);
+    if (applied.length !== 10 || applied[9]?.tag !== '0009_confused_anthem') {
+      throw new Error('journal must start with the 0000 to 0009 migrations');
+    }
+
+    for (const entry of applied) {
+      await handle.client.executeMultiple(await readFile(join(migrationsFolder, `${entry.tag}.sql`), 'utf8'));
+    }
+    await handle.client.execute(
+      'CREATE TABLE "__drizzle_migrations" ("id" INTEGER PRIMARY KEY AUTOINCREMENT, "hash" text NOT NULL, "created_at" numeric)',
+    );
+    for (const entry of applied) {
+      await handle.client.execute({
+        sql: 'INSERT INTO "__drizzle_migrations" ("hash", "created_at") VALUES (?, ?)',
+        args: [entry.tag, entry.when],
+      });
+    }
+    const stamp = '2026-10-19T10:00:00.000Z';
+    await handle.client.execute({
+      sql: `INSERT INTO bots (id, name, job, instructions, engine, computer, pinned, archived, created_at, updated_at)
+            VALUES ('bot_old', 'Ada', 'Researcher', '', 'mock', 'none', 0, 0, ?, ?)`,
+      args: [stamp, stamp],
+    });
+    await handle.client.execute({
+      sql: `INSERT INTO threads (id, bot_id, title, kind, created_at, updated_at)
+            VALUES ('thread_old', 'bot_old', 'Chat', 'dm', ?, ?)`,
+      args: [stamp, stamp],
+    });
+
+    await migrate(handle.db);
+
+    expect(await tableNames(handle)).toContain('notifications');
+    expect(await columnNames(handle, 'notifications')).toEqual([
+      'id',
+      'bot_id',
+      'thread_id',
+      'kind',
+      'title',
+      'body',
+      'created_at',
+      'read_at',
+    ]);
+    const indexes = await handle.client.execute("PRAGMA index_list('notifications')");
+    expect(indexes.rows.some((row) => row.name === 'notifications_read_idx')).toBe(true);
+    expect(indexes.rows.some((row) => row.name === 'notifications_bot_idx')).toBe(true);
+
+    const repos = createRepos(handle.db);
+    expect((await repos.bots.get('bot_old'))?.notifications).toBeUndefined();
+    expect(await repos.notifications.create({
+      botId: 'bot_old',
+      threadId: 'thread_old',
+      kind: 'finished',
+      title: '"Ada" finished',
+      body: 'Done.',
+    })).toMatchObject({ kind: 'finished', title: '"Ada" finished' });
   });
 
   it('enables foreign keys on the connection', async () => {

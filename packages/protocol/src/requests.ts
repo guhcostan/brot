@@ -40,6 +40,7 @@ export const CreateBot = z
     computer: ComputerKind.default('sandbox'),
     desktop: z.boolean().optional(),
     browser: z.boolean().default(false),
+    notifications: z.boolean().default(true),
     avatar: z.string().optional(),
     teamId: z.string().min(1).optional(),
     egress: EgressPolicy.default(defaultEgressPolicy),
@@ -61,6 +62,7 @@ export const UpdateBot = z
     computer: ComputerKind.optional(),
     desktop: z.boolean().optional(),
     browser: z.boolean().optional(),
+    notifications: z.boolean().optional(),
     /** `null` removes the bot from its team. */
     teamId: z.string().min(1).nullable().optional(),
     egress: EgressPolicy.optional(),

@@ -28,6 +28,7 @@ describe('request schemas', () => {
       engine: 'mock',
       computer: 'sandbox',
       browser: false,
+      notifications: true,
       egress: { mode: 'deny', allow: [] },
     });
   });
@@ -42,6 +43,13 @@ describe('request schemas', () => {
     expect(CreateBot.parse({ name: 'Ada', job: 'Researcher', browser: true }).browser).toBe(true);
     expect(UpdateBot.parse({ browser: true })).toEqual({ browser: true });
     expect(UpdateBot.parse({ browser: false })).toEqual({ browser: false });
+  });
+
+  it('defaults the notification toggle on and lets UpdateBot turn it off', () => {
+    expect(CreateBot.parse({ name: 'Ada', job: 'Researcher' }).notifications).toBe(true);
+    expect(CreateBot.parse({ name: 'Ada', job: 'Researcher', notifications: false }).notifications).toBe(false);
+    expect(UpdateBot.parse({ notifications: false })).toEqual({ notifications: false });
+    expect(UpdateBot.parse({ notifications: true })).toEqual({ notifications: true });
   });
 
   it('gives each parsed CreateBot its own egress object', () => {

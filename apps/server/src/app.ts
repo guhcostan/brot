@@ -14,6 +14,7 @@ import {
   CreateTeam,
   CreateThread,
   IsoDateTime,
+  MarkNotificationsRead,
   PairingComplete,
   PostMessage,
   PROTOCOL_VERSION,
@@ -65,6 +66,8 @@ const DEFAULT_THREAD_TITLE = 'New thread';
 const MAX_AUTO_TITLE_LENGTH = 80;
 const ROUTINE_RUN_LIMIT_DEFAULT = 50;
 const ROUTINE_RUN_LIMIT_MAX = 200;
+const NOTIFICATION_LIMIT_DEFAULT = 50;
+const NOTIFICATION_LIMIT_MAX = 200;
 
 export interface AppDeps {
   repos: Repos;
@@ -540,6 +543,38 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     const approval = await broker.resolve(c.req.param('id'), body.data.decision, body.data.reply);
     return approval ? c.json(approval) : notFound(c, 'Approval');
   });
+
+  // Notification inbox: approvals, finished runs and failures recorded by the notifications service.
+
+  app.get('/api/notifications', async (c) => {
+    const unread = c.req.query('unread');
+    if (unread !== undefined && unread !== 'true' && unread !== 'false') {
+      return c.json({ error: 'unread must be true or false' }, 400);
+    }
+    const limit = listLimit(c.req.query('limit'), NOTIFICATION_LIMIT_DEFAULT, NOTIFICATION_LIMIT_MAX);
+    if (limit === undefined) return c.json({ error: 'limit must be a positive integer' }, 400);
+    const botId = c.req.query('botId');
+    return c.json(
+      await repos.notifications.list({
+        ...(unread === 'true' ? { unread: true } : {}),
+        ...(botId === undefined || botId === '' ? {} : { botId }),
+        limit,
+      }),
+    );
+  });
+
+  app.get('/api/notifications/unread-count', async (c) => c.json({ count: await repos.notifications.countUnread() }));
+
+  /** Marks notifications read. An empty body marks every unread notification. */
+  app.post('/api/notifications/read', async (c) => {
+    const body = await parseBody(c, MarkNotificationsRead);
+    if (!body.ok) return body.response;
+    return c.json({ updated: await repos.notifications.markRead(body.data.ids) });
+  });
+
+  app.delete('/api/notifications/:id', async (c) =>
+    (await repos.notifications.remove(c.req.param('id'))) ? c.body(null, 204) : notFound(c, 'Notification'),
+  );
 
   app.get('/api/bots/:id/policies', async (c) => {
     const id = c.req.param('id');

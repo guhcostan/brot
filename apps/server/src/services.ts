@@ -21,6 +21,7 @@ import {
   type ProviderSpec,
 } from './llm';
 import type { BrotMcpService, BrotTool } from './mcp/types';
+import { createNotificationsService, type NotificationsService } from './notifications';
 import { createPairing, type Pairing } from './pairing';
 import { createChainLedger, readRoomChainBudgetUsd, type ChainLedger } from './rooms/chains';
 import { createRoomService, type RoomService } from './rooms/service';
@@ -81,6 +82,8 @@ export interface Services {
   browser: HostBrowserService;
   /** Attachment bytes under `<home>/attachments`, reached by id only. */
   attachments: AttachmentStorage;
+  /** The notification inbox: records approvals/finished runs/failures as the bus reports them. */
+  notifications: NotificationsService;
   /** The providers the model relay knows, listed by GET /api/providers. */
   providers: ProviderSpec[];
   /** Relays contained runs' model requests to their providers, adding the key from the vault. */
@@ -104,6 +107,8 @@ export async function createServices(
   const repos = createRepos(db.db);
   const bus = createEventBus(repos.events);
   const broker = createBroker({ repos, bus });
+  const notifications = createNotificationsService({ repos, bus });
+  await notifications.prune();
   const vault = createVault({ dir: config.home });
   const attachments = createAttachmentStorage({ home: config.home });
   const computers = extras.computers ?? {};
@@ -177,6 +182,7 @@ export async function createServices(
 
   let closing: Promise<void> | undefined;
   const shutdown = async (): Promise<void> => {
+    notifications.stop();
     harness.shutdown();
     scheduler.stop();
     const closers: Array<Promise<void>> = [
@@ -207,6 +213,7 @@ export async function createServices(
     desktop,
     browser,
     attachments,
+    notifications,
     providers,
     llm,
     rooms,
