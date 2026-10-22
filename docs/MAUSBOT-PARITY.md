@@ -73,7 +73,7 @@ Legend: ✅ parity or better · 🟡 partial · ❌ absent · 🎯 current wave.
 | Host browser (My Chrome) attach | ✅ | ❌ | W5 |
 | Saved logins vault + `fill_login` | ✅ | ❌ (shared profiles cover the everyday case) | W7 |
 | Connected apps (Composio marketplace) + per-bot tool grants | ✅ | ❌ | W3 |
-| Custom MCP servers (stdio/HTTP, per-bot) | ✅ | 🟡 stdio/HTTP servers attach to runs with vault secrets and a real test handshake; per-bot grants and settings UI next | W5 |
+| Custom MCP servers (stdio/HTTP, per-bot) | ✅ | ✅ stdio/HTTP servers with vault secrets, handshake test and Settings panel; per-bot grants pending | W5 done |
 | Approval levels per bot/thread + decision log | ✅ | 🟡 per-tool broker + policies, no levels/log export | W4 |
 | Routines: cron/weekday with timezone, receipts, recovery, calendar | ✅ | ✅ runs, receipts, catch-up, timezone, routines page; calendar next | W3 done |
 | Webhook triggers | ✅ | 🟡 receiver exists, no signed secret UX | W6 |
@@ -84,7 +84,7 @@ Legend: ✅ parity or better · 🟡 partial · ❌ absent · 🎯 current wave.
 | Attachments: images/screenshots/files in transcript, quota | ✅ | ✅ composer, transcript gallery, storage, text-in-prompt and orphan sweep | W6 done |
 | Notifications: in-app/desktop, per-bot, exact-thread routing | ✅ | ✅ inbox, unread badge, native banners, per-bot toggle | W6 done |
 | Analytics: usage ledger, decision log, admin activity, Today page | ✅ | 🟡 usage summary + CSV export live; dashboard page, decision log and Today page next | W8 |
-| Team sharing: `.md`/package import-export, presets, org library | ✅ | ❌ | W9 |
+| Team sharing: `.md`/package import-export, presets, org library | ✅ | 🟡 Markdown package export/import of teams, bots, rooms, routines and skills; settings UI and presets next | W9 |
 | Remote access: pairing, browser client, phone PWA, companions | ✅ | 🟡 mobile app + relay, loopback trust only | W10 |
 | Self-hosting: Docker, VPS, tunnel, backups | ✅ | 🟡 Docker + compose; no tunnel/backups | W10 |
 | Cloud (Boat), Team Cloud, enterprise/SSO | ✅ | ❌ out of scope for now (backlog: Brot Cloud) | later |

@@ -206,6 +206,23 @@ mapped in `docs/MAUSBOT-PARITY.md` (34 bots / 7 teams, 33 bots with a browser an
   deleting the profile ungrouped the bots and removed its directory.
 - Suite: 1753 tests (161 files), typecheck 12/12, lint clean.
 
+## Wave 15: team packages, MCP servers panel (2026-10-22)
+
+- **Portable team packages.** A team (or the whole workspace) exports as one Markdown file with a JSON
+  block: teams (brief + chief), bots (name, job, instructions, avatar, team), rooms (lead + members),
+  cron routines and bot-scoped skills, keyed by local slugs so no ids or secrets leak; engine, model,
+  computer, browser, egress, budgets, threads, runs and memories are never included, webhook routines
+  are skipped and routines always arrive paused. Import validates the whole package first, creates fresh
+  entities with defaults, remaps every reference and rolls back best-effort on failure. Routes:
+  `GET /api/team-packages/export[?teamId=]` and `POST /api/team-packages/import`. Verified live with a
+  full export → import round trip (1 team, 2 bots, 1 room, 1 paused routine, 1 bound skill).
+- **MCP servers panel.** Settings lists saved stdio/HTTP MCP servers with transport badge, command/URL,
+  enabled switch, a real handshake test (tool count + latency or error) and edit/delete; the dialog edits
+  command + one-arg-per-line + env rows whose values may be `secret://` references, or a URL, with
+  protocol validation inline. en/pt-BR/es. The sharing UI lands next wave.
+- Suite: 1792 tests (167 files), typecheck 12/12, lint clean. Known flake: the desktop takeover timing
+  test can fail under full-suite parallelism and passes in isolation (seen twice); worth a later fix.
+
 ## Next
 
 1. Re-run the eval suite on a live model once OpenCode Go has quota (`apps/evals`, `--base` to the server), including B8 and C; the 2026-10-20 results predate the read auto-allow and the fixes above.
