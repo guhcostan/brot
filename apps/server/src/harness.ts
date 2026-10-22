@@ -62,6 +62,9 @@ export interface HarnessDeps {
  */
 const RELAYED_ENGINES: ReadonlySet<string> = new Set(['dsh']);
 
+/** The most engine attempts one run makes: the primary model, then at most two fallbacks. */
+const MODEL_ATTEMPTS = 3;
+
 /** Caps for the workspace facts a run carries. Bot memories have their own recall caps in memory/recall.ts. */
 const WORKSPACE_MEMORY_ITEMS = 20;
 const WORKSPACE_MEMORY_CHARS = 3000;
@@ -131,6 +134,8 @@ interface ActiveRun {
   /** The (thread, bot) lane this run waits in. Runs of one lane take their engine turns one at a time. */
   laneKey: string;
   messageId: string;
+  /** The model the run is currently using. It changes when a fallback takes over. */
+  model?: string;
   controller: AbortController;
   text: string;
   usage: { tokensIn: number; tokensOut: number; costUsd: number };
@@ -148,6 +153,13 @@ interface ActiveRun {
 }
 
 type TerminalStatus = 'completed' | 'failed' | 'cancelled';
+
+/** A resolved model route for one attempt. `index` is the model's place in the run's candidate chain. */
+interface AttemptRoute {
+  model: string;
+  index: number;
+  route: ResolvedRoute & { token: string };
+}
 
 export function createHarness(deps: HarnessDeps): Harness {
   const {
@@ -262,6 +274,7 @@ export function createHarness(deps: HarnessDeps): Harness {
       botId: bot.id,
       laneKey: key,
       messageId: crypto.randomUUID(),
+      ...(model === undefined ? {} : { model }),
       controller: new AbortController(),
       text: '',
       usage: { tokensIn: 0, tokensOut: 0, costUsd: 0 },
@@ -317,6 +330,11 @@ export function createHarness(deps: HarnessDeps): Harness {
    * Runs one run's engine turn. The turn's context is read here, not when the run was queued, so a queued run sees
    * what the run before it wrote. Its lane is released only after the engine has returned, so the engine never
    * sees two turns of one bot in one thread.
+   *
+   * A relayed run may try a short chain of models: first the route that resolves (fallbacks included), then, when
+   * the engine fails before producing any assistant text and the run was not cancelled, the next model. Every
+   * attempt updates the same run record and re-publishes `run.started` with its model. A tool or approval denial
+   * arrives as a tool result, not an engine error, so it never triggers a retry.
    */
   async function execute(state: ActiveRun, trigger: Message, previousTriggerId: string | undefined): Promise<void> {
     try {
@@ -324,31 +342,20 @@ export function createHarness(deps: HarnessDeps): Harness {
       const thread = await repos.threads.get(state.threadId);
       const bot = await repos.bots.get(state.botId);
       if (!thread || !bot) throw new Error(`Run ${state.runId} lost its thread or bot before it started`);
-      const engineSessionId = state.ownSession
+      const driver = await readyDriver(bot);
+      const relayed = RELAYED_ENGINES.has(bot.engine);
+      const models = relayed ? modelCandidatesFor(thread, bot) : [];
+      if (relayed && models.length === 0) {
+        throw new Error(`Bot "${bot.name}" has no model. Set it to <provider>/<model>, for example opencode-go/deepseek-v4.1-flash.`);
+      }
+      const storedSessionId = state.ownSession
         ? await repos.threadSessions.get(thread.id, bot.id)
         : thread.engineSessionId;
-      const turn = await buildTurn(repos, {
-        thread,
-        bot,
-        trigger,
-        resumed: engineSessionId !== undefined,
-        ...(previousTriggerId === undefined ? {} : { previousTriggerId }),
-      });
-      const input = await appendAttachmentContext(attachmentStorage, turn.input, trigger.attachments);
-      const driver = await readyDriver(bot);
-      const relay = RELAYED_ENGINES.has(bot.engine) ? await relayRoute(state, bot, thread) : undefined;
-      const place = await placeRun(state, bot, relay === undefined ? modelHostsFor(bot.engine) : []);
+      let route = relayed ? await resolveRouteFrom(state, bot, models, 0) : undefined;
+      if (route !== undefined) await adoptModel(state, bot, route.model);
       if (state.controller.signal.aborted) return;
-      const llmRoute: LlmRoute | undefined =
-        relay === undefined
-          ? undefined
-          : {
-              provider: relay.provider.id,
-              model: relay.model,
-              api: relay.provider.api,
-              baseUrl: `${place.brotBaseUrl}/llm/runs/${encodeURIComponent(state.runId)}/v1`,
-              token: relay.token,
-            };
+      const place = await placeRun(state, bot, route === undefined ? modelHostsFor(bot.engine) : []);
+      if (state.controller.signal.aborted) return;
       // The run's engine gets the Brot MCP server and every enabled user server. Secret env values are resolved
       // here, for the child process only: they are part of the spec, never of the prompt or an event.
       const userMcpServers = await enabledMcpServerSpecs(repos, vault, bot);
@@ -356,40 +363,79 @@ export function createHarness(deps: HarnessDeps): Harness {
         ? [mcp.specForRun({ botId: bot.id, threadId: state.threadId, runId: state.runId }, place.brotBaseUrl)]
         : [];
       const mcpServers = [...brotMcpServers, ...userMcpServers];
-      const [room, team, workspaceMemoryRows, ownMemoryRows] = await Promise.all([
+      const [room, team, skills] = await Promise.all([
         roomFor(repos, thread),
         teamFor(bot),
-        repos.memories.listWorkspace(),
-        repos.memories.listByBot(bot.id),
+        repos.skills.listForBot(bot.id),
       ]);
-      const memories = [
-        ...workspaceMemoriesForPrompt(workspaceMemoryRows),
-        ...selectForPrompt(ownMemoryRows, turn.input),
-      ];
-      const ctx: BrotRunContext = {
-        runId: state.runId,
-        threadId: state.threadId,
-        bot,
-        history: turn.history,
-        input,
-        memories,
-        skills: await repos.skills.listForBot(bot.id),
-        signal: state.controller.signal,
-        requestTool: (req) => requestTool(state, req),
-        ...(engineSessionId === undefined ? {} : { engineSessionId }),
-        ...(place.computer === undefined ? {} : { computer: place.computer }),
-        ...(mcpServers.length === 0 ? {} : { mcpServers }),
-        ...(llmRoute === undefined ? {} : { llm: llmRoute }),
-        ...(room === undefined ? {} : { room }),
-        ...(team === undefined ? {} : { team }),
-        ...(teamTools && mcp !== undefined ? { teamTools: true } : {}),
-      };
-      for await (const event of driver.run(ctx)) {
-        if (state.controller.signal.aborted) break;
-        await handleEvent(state, bot, event);
+      let attempts = 0;
+      for (;;) {
+        if (state.controller.signal.aborted) return;
+        attempts += 1;
+        // A retry starts a fresh engine session: the prompt is sent in full again on this model (and the DSH launch
+        // key includes the model, so the engine gets a process for it).
+        const retry = attempts > 1;
+        const engineSessionId = retry ? undefined : storedSessionId;
+        const turn = await buildTurn(repos, {
+          thread,
+          bot,
+          trigger,
+          resumed: engineSessionId !== undefined,
+          ...(previousTriggerId === undefined ? {} : { previousTriggerId }),
+        });
+        const input = await appendAttachmentContext(attachmentStorage, turn.input, trigger.attachments);
+        const [workspaceMemoryRows, ownMemoryRows] = await Promise.all([
+          repos.memories.listWorkspace(),
+          repos.memories.listByBot(bot.id),
+        ]);
+        const memories = [
+          ...workspaceMemoriesForPrompt(workspaceMemoryRows),
+          ...selectForPrompt(ownMemoryRows, turn.input),
+        ];
+        const llmRoute: LlmRoute | undefined =
+          route === undefined
+            ? undefined
+            : {
+                provider: route.route.provider.id,
+                model: route.route.model,
+                api: route.route.provider.api,
+                baseUrl: `${place.brotBaseUrl}/llm/runs/${encodeURIComponent(state.runId)}/v1`,
+                token: route.route.token,
+              };
+        const ctx: BrotRunContext = {
+          runId: state.runId,
+          threadId: state.threadId,
+          bot,
+          history: turn.history,
+          input,
+          memories,
+          skills,
+          signal: state.controller.signal,
+          requestTool: (req) => requestTool(state, req),
+          ...(engineSessionId === undefined ? {} : { engineSessionId }),
+          ...(place.computer === undefined ? {} : { computer: place.computer }),
+          ...(mcpServers.length === 0 ? {} : { mcpServers }),
+          ...(llmRoute === undefined ? {} : { llm: llmRoute }),
+          ...(room === undefined ? {} : { room }),
+          ...(team === undefined ? {} : { team }),
+          ...(teamTools && mcp !== undefined ? { teamTools: true } : {}),
+        };
+        try {
+          for await (const event of driver.run(ctx)) {
+            if (state.controller.signal.aborted) break;
+            await handleEvent(state, bot, event);
+          }
+        } catch (error) {
+          if (state.controller.signal.aborted) return;
+          const next = await nextRouteAfterFailure(state, bot, models, route, attempts);
+          if (next === undefined) throw error;
+          route = next;
+          continue;
+        }
+        if (state.controller.signal.aborted) return;
+        await complete(state);
+        return;
       }
-      if (state.controller.signal.aborted) return;
-      await complete(state);
     } catch (error) {
       if (state.controller.signal.aborted) return;
       await settle(state, 'failed', errorMessage(error));
@@ -398,6 +444,78 @@ export function createHarness(deps: HarnessDeps): Harness {
       release(state);
       state.finish(outcomeOf(state));
     }
+  }
+
+  /** The models a relayed run may try, in order: the thread's model (or the bot's) and then the bot's fallbacks. */
+  function modelCandidatesFor(thread: Thread, bot: Bot): string[] {
+    const models = [modelFor(thread, bot), ...(bot.fallbackModels ?? [])].filter(
+      (model): model is string => model !== undefined,
+    );
+    return [...new Set(models)];
+  }
+
+  /**
+   * Updates the run's model and re-publishes `run.started` with it. The same runId may receive several
+   * `run.started` events when a fallback takes over; a fold must update the run's model, not start another run.
+   */
+  async function adoptModel(state: ActiveRun, bot: Bot, model: string): Promise<void> {
+    if (state.model === model) return;
+    state.model = model;
+    await repos.runs.update(state.runId, { model });
+    await bus.publish({
+      type: 'run.started',
+      threadId: state.threadId,
+      runId: state.runId,
+      botId: state.botId,
+      engine: bot.engine,
+      model,
+    });
+  }
+
+  /**
+   * Resolves the first usable model at or after `from`, trying the chain's later refs when one fails to resolve
+   * (unknown provider, missing key, unusable route). When none resolves, fails with the first error and the refs
+   * that were tried. The error only names models and reasons, never a secret value.
+   */
+  async function resolveRouteFrom(
+    state: ActiveRun,
+    bot: Bot,
+    models: readonly string[],
+    from: number,
+  ): Promise<AttemptRoute> {
+    const failures: string[] = [];
+    for (let index = from; index < models.length; index += 1) {
+      const model = models[index];
+      if (model === undefined) continue;
+      try {
+        const resolved = { ...(await llm.resolve(model)), session: conversationId(state.threadId, bot.id) };
+        state.relayed = true;
+        return { model, index, route: { ...resolved, token: llm.issue(state.runId, resolved) } };
+      } catch (error) {
+        failures.push(`${model}: ${errorMessage(error)}`);
+      }
+    }
+    const tried = models.slice(from).join(', ');
+    throw new Error(`${failures[0] ?? 'no model route could be resolved'} Tried models: ${tried}.`);
+  }
+
+  /**
+   * The next route to try after an engine failure, or undefined when the run must fail. Only a relayed run that
+   * produced no assistant text, was not cancelled, and still has an untried model within the attempt cap retries.
+   */
+  async function nextRouteAfterFailure(
+    state: ActiveRun,
+    bot: Bot,
+    models: readonly string[],
+    current: AttemptRoute | undefined,
+    attempts: number,
+  ): Promise<AttemptRoute | undefined> {
+    if (state.text !== '' || current === undefined || attempts >= MODEL_ATTEMPTS) return undefined;
+    const from = current.index + 1;
+    if (from >= models.length) return undefined;
+    const next = await resolveRouteFrom(state, bot, models, from);
+    await adoptModel(state, bot, next.model);
+    return next;
   }
 
   /** Hands the lane to the run queued behind `state`, if any. Only the head of a lane ever calls this. */
@@ -418,25 +536,6 @@ export function createHarness(deps: HarnessDeps): Harness {
     lane.splice(index, 1);
     active.delete(state.runId);
     return true;
-  }
-
-  /**
-   * Resolves the run's model to its provider and mints the run's token. A thread model overrides the bot's model,
-   * and either one may be missing. Runs before the computer starts, so a missing provider or key fails the run
-   * without starting anything. The token is revoked when the run settles.
-   *
-   * A model change never reuses the previous model's DSH process: the engine's server key includes `llmLaunchKey`
-   * (provider and model, dsh-llm.ts), so `ensureServer` in dsh.ts stops it and the session is established anew
-   * on the process that carries the new model.
-   */
-  async function relayRoute(state: ActiveRun, bot: Bot, thread: Thread): Promise<ResolvedRoute & { token: string }> {
-    const model = modelFor(thread, bot);
-    if (model === undefined) {
-      throw new Error(`Bot "${bot.name}" has no model. Set it to <provider>/<model>, for example opencode-go/deepseek-v4.1-flash.`);
-    }
-    const resolved = { ...(await llm.resolve(model)), session: conversationId(state.threadId, bot.id) };
-    state.relayed = true;
-    return { ...resolved, token: llm.issue(state.runId, resolved) };
   }
 
   async function readyDriver(bot: Bot): Promise<EngineDriver> {

@@ -32,6 +32,21 @@ function requireHostAcknowledgement(
   }
 }
 
+/**
+ * A model reference `<provider>/<model>`, split at the first slash the way the relay's `parseModelRef` does.
+ * Whether the provider exists is a server question; the request boundary only checks the shape.
+ */
+const ModelRef = z.string().refine((ref) => {
+  const slash = ref.indexOf('/');
+  return slash > 0 && slash < ref.length - 1;
+}, 'model must be <provider>/<model>, for example opencode-go/deepseek-v4.1-flash');
+
+/** An ordered fallback chain: at most 3 refs, none repeated. */
+const FallbackModels = z
+  .array(ModelRef)
+  .max(3, 'at most 3 fallback models')
+  .refine((models) => new Set(models).size === models.length, 'fallback models must be unique');
+
 export const CreateBot = z
   .object({
     name: z.string().min(1),
@@ -39,6 +54,8 @@ export const CreateBot = z
     instructions: z.string().default(''),
     engine: z.string().min(1).default('mock'),
     model: z.string().min(1).optional(),
+    /** Models to try when the model or a run fails before any reply. */
+    fallbackModels: FallbackModels.optional(),
     computer: ComputerKind.default('sandbox'),
     desktop: z.boolean().optional(),
     browser: z.boolean().default(false),
@@ -66,6 +83,8 @@ export const UpdateBot = z
     avatar: z.string().optional(),
     engine: z.string().min(1).optional(),
     model: z.string().min(1).optional(),
+    /** The ordered fallback chain; `null` or `[]` clears it. */
+    fallbackModels: FallbackModels.nullable().optional(),
     computer: ComputerKind.optional(),
     desktop: z.boolean().optional(),
     browser: z.boolean().optional(),
@@ -105,15 +124,6 @@ export const UpdateTeam = z.object({
   chiefBotId: z.string().min(1).nullable().optional(),
 });
 export type UpdateTeam = z.infer<typeof UpdateTeam>;
-
-/**
- * A model reference `<provider>/<model>`, split at the first slash the way the relay's `parseModelRef` does.
- * Whether the provider exists is a server question; the request boundary only checks the shape.
- */
-const ModelRef = z.string().refine((ref) => {
-  const slash = ref.indexOf('/');
-  return slash > 0 && slash < ref.length - 1;
-}, 'model must be <provider>/<model>, for example opencode-go/deepseek-v4.1-flash');
 
 export const CreateThread = z.object({
   title: z.string().min(1).optional(),

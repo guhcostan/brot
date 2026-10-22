@@ -63,6 +63,29 @@ describe('bots', () => {
     expect((await repos.bots.update(off.id, { notifications: true }))?.notifications).toBeUndefined();
   });
 
+  it('stores the fallback chain, keeps its order, and clears it', async () => {
+    const plain = await repos.bots.create({ name: 'Ada', job: 'x' });
+    expect(plain).not.toHaveProperty('fallbackModels');
+
+    const fallback = await repos.bots.create({
+      name: 'Bo',
+      job: 'x',
+      fallbackModels: ['fake/model-2', 'fake/model-3'],
+    });
+    expect(fallback.fallbackModels).toEqual(['fake/model-2', 'fake/model-3']);
+    expect((await repos.bots.get(fallback.id))?.fallbackModels).toEqual(['fake/model-2', 'fake/model-3']);
+    expect((await repos.bots.list()).find((bot) => bot.id === fallback.id)?.fallbackModels).toEqual([
+      'fake/model-2',
+      'fake/model-3',
+    ]);
+
+    expect((await repos.bots.update(fallback.id, { fallbackModels: ['fake/model-4'] }))?.fallbackModels).toEqual([
+      'fake/model-4',
+    ]);
+    expect((await repos.bots.update(fallback.id, { fallbackModels: null }))?.fallbackModels).toBeUndefined();
+    expect((await repos.bots.update(fallback.id, { fallbackModels: [] }))?.fallbackModels).toBeUndefined();
+  });
+
   it('stores the approval mode and leaves it unset for ask', async () => {
     const asking = await repos.bots.create({ name: 'Ada', job: 'x' });
     expect(asking.approvalMode).toBeUndefined();

@@ -44,6 +44,8 @@ export const bots = sqliteTable('bots', {
   avatar: text('avatar'),
   engine: text('engine').notNull(),
   model: text('model'),
+  /** Ordered fallback models, each `<provider>/<model>`. Null means no fallbacks. */
+  fallbackModels: text('fallback_models', { mode: 'json' }).$type<string[]>(),
   computer: text('computer').$type<ComputerKind>().notNull(),
   desktop: integer('desktop', { mode: 'boolean' }).notNull().default(false),
   browser: integer('browser', { mode: 'boolean' }).notNull().default(false),

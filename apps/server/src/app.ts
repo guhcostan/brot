@@ -265,6 +265,20 @@ function modelProviderIssues(
   return [{ path: ['model'], message: `unknown model provider "${providerId}"${known === '' ? '' : `. Known providers: ${known}`}` }];
 }
 
+/** The fallback refs that name a provider this server does not know, as one 400 issue on `fallbackModels`. */
+function fallbackModelIssues(
+  providers: readonly ProviderSpec[] | undefined,
+  models: readonly string[],
+): Array<{ path: string[]; message: string }> {
+  const unknown = models.filter((model) => {
+    const slash = model.indexOf('/');
+    const providerId = slash > 0 ? model.slice(0, slash) : model;
+    return !(providers ?? []).some((spec) => spec.id === providerId);
+  });
+  if (unknown.length === 0) return [];
+  return [{ path: ['fallbackModels'], message: `unknown model providers in: ${unknown.join(', ')}` }];
+}
+
 /** Deletes a saved login's three vault values. The names derive from the id, so no row is needed. */
 async function dropSavedLoginSecrets(vault: Vault, loginId: string): Promise<void> {
   const names = savedLoginSecretNames(loginId);
@@ -375,6 +389,8 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     const body = await parseBody(c, CreateBot);
     if (!body.ok) return body.response;
     if (body.data.computer === 'host' && config.mode !== 'desktop') return hostRefused(c);
+    const fallbackIssues = fallbackModelIssues(deps.providers, body.data.fallbackModels ?? []);
+    if (fallbackIssues.length > 0) return c.json({ error: 'Invalid request', issues: fallbackIssues }, 400);
     const missingProfile = await unknownBrowserProfile(repos, body.data.browserProfileId);
     if (missingProfile !== undefined) return invalidReference(c, 'browserProfileId', 'unknown browser profile');
     const missingMcpServers = await unknownMcpServerIds(repos, body.data.mcpServerIds);
@@ -393,6 +409,8 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     const body = await parseBody(c, UpdateBot);
     if (!body.ok) return body.response;
     if (body.data.computer === 'host' && config.mode !== 'desktop') return hostRefused(c);
+    const fallbackIssues = fallbackModelIssues(deps.providers, body.data.fallbackModels ?? []);
+    if (fallbackIssues.length > 0) return c.json({ error: 'Invalid request', issues: fallbackIssues }, 400);
     const missingProfile = await unknownBrowserProfile(repos, body.data.browserProfileId);
     if (missingProfile !== undefined) return invalidReference(c, 'browserProfileId', 'unknown browser profile');
     const missingMcpServers = await unknownMcpServerIds(repos, body.data.mcpServerIds);

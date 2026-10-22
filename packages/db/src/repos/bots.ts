@@ -16,6 +16,7 @@ export function toBot(row: BotRow): Bot {
     teamId: row.teamId ?? undefined,
     engine: row.engine,
     model: row.model ?? undefined,
+    ...(row.fallbackModels === null || row.fallbackModels.length === 0 ? {} : { fallbackModels: row.fallbackModels }),
     computer: row.computer,
     ...(row.desktop ? { desktop: true } : {}),
     ...(row.browser ? { browser: true } : {}),

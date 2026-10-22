@@ -127,6 +127,13 @@
       "when": 1792708767642,
       "tag": "0017_neat_blonde_phantom",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1792710676293,
+      "tag": "0018_gigantic_mongu",
+      "breakpoints": true
     }
   ]
 }

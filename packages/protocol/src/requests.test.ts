@@ -43,6 +43,30 @@ describe('request schemas', () => {
     });
   });
 
+  it('accepts an ordered fallback chain on a bot and rejects more than 3, duplicates or bad refs', () => {
+    expect(
+      CreateBot.parse({ name: 'Ada', job: 'Researcher', fallbackModels: ['deepseek/deepseek-flash'] }).fallbackModels,
+    ).toEqual(['deepseek/deepseek-flash']);
+    expect(
+      CreateBot.parse({
+        name: 'Ada',
+        job: 'Researcher',
+        fallbackModels: ['deepseek/deepseek-flash', 'opencode-go/deepseek-v4.1-flash'],
+      }).fallbackModels,
+    ).toHaveLength(2);
+    expect(CreateBot.parse({ name: 'Ada', job: 'Researcher' }).fallbackModels).toBeUndefined();
+    expect(UpdateBot.parse({ fallbackModels: null })).toEqual({ fallbackModels: null });
+    expect(UpdateBot.parse({ fallbackModels: [] })).toEqual({ fallbackModels: [] });
+
+    const three = ['a/b', 'c/d', 'e/f'];
+    expect(() =>
+      CreateBot.parse({ name: 'Ada', job: 'Researcher', fallbackModels: [...three, 'g/h'] }),
+    ).toThrow();
+    expect(() => CreateBot.parse({ name: 'Ada', job: 'Researcher', fallbackModels: ['a/b', 'a/b'] })).toThrow(/unique/);
+    expect(() => CreateBot.parse({ name: 'Ada', job: 'Researcher', fallbackModels: ['no-slash'] })).toThrow();
+    expect(() => UpdateBot.parse({ fallbackModels: ['provider/'] })).toThrow();
+  });
+
   it('defaults the bot approval mode to ask and accepts edits', () => {
     expect(CreateBot.parse({ name: 'Ada', job: 'Researcher' }).approvalMode).toBe('ask');
     expect(CreateBot.parse({ name: 'Ada', job: 'Researcher', approvalMode: 'edits' }).approvalMode).toBe('edits');

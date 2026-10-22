@@ -260,6 +260,12 @@ describe('entity schemas', () => {
     expect(() => Bot.parse({ ...bot, mcpServerIds: [1] })).toThrow();
   });
 
+  it('round-trips a bot fallback chain, and leaves it absent when there is none', () => {
+    const withFallbacks = { ...bot, fallbackModels: ['fake/model-2', 'fake/model-3'] };
+    expect(roundTrip(Bot, withFallbacks)).toEqual(withFallbacks);
+    expect(Bot.parse(bot).fallbackModels).toBeUndefined();
+  });
+
   it('round-trips a bot grouped in a team', () => {
     const grouped = { ...bot, teamId: 'team_1' };
     expect(roundTrip(Bot, grouped)).toEqual(grouped);

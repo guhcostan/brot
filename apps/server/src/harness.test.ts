@@ -903,6 +903,190 @@ describe('model override per thread', () => {
   });
 });
 
+describe('model fallback chains', () => {
+  it('uses the next model when the primary route cannot resolve, labeling the run with the model used', async () => {
+    const engine = fakeEngine(replies);
+    const ctx = await contextWith({ engines: createEngineRegistry([engine.driver]) });
+    const { bot, threadId } = await botAndThread(ctx, { computer: 'none' });
+    await ctx.services.repos.bots.update(bot.id, { model: 'ghost/model-1', fallbackModels: ['fake/model-2'] });
+
+    const { runId, terminal, events } = await runToEnd(ctx, threadId);
+
+    expect(terminal.type).toBe('run.completed');
+    expect(engine.contexts[0]?.llm).toMatchObject({ provider: 'fake', model: 'model-2' });
+    const started = events.filter((event) => event.type === 'run.started');
+    expect(started.map((event) => event.model)).toEqual(['ghost/model-1', 'fake/model-2']);
+    expect(started.every((event) => event.runId === runId)).toBe(true);
+    expect(await ctx.services.repos.runs.get(runId)).toMatchObject({ status: 'completed', model: 'fake/model-2' });
+  });
+
+  it('falls back when the primary provider has no vault key', async () => {
+    const engine = fakeEngine(replies);
+    const ctx = await contextWith({
+      engines: createEngineRegistry([engine.driver]),
+      llm: { providers: [FAKE_PROVIDER, FAKE_PROVIDER_TWO], fetch: refuseFetch },
+    });
+    await ctx.services.vault.set('fake-two', 'sk-two');
+    await ctx.services.vault.delete('fake');
+    const { bot, threadId } = await botAndThread(ctx, { computer: 'none' });
+    await ctx.services.repos.bots.update(bot.id, { fallbackModels: ['fake-two/other-1'] });
+
+    const { terminal } = await runToEnd(ctx, threadId);
+
+    expect(terminal.type).toBe('run.completed');
+    expect(engine.contexts[0]?.llm).toMatchObject({ provider: 'fake-two', model: 'other-1' });
+  });
+
+  it('tries a thread model override before the bot fallbacks', async () => {
+    const engine = fakeEngine(replies);
+    const ctx = await contextWith({ engines: createEngineRegistry([engine.driver]) });
+    const { bot, threadId } = await botAndThread(ctx, { computer: 'none' });
+    await ctx.services.repos.threads.update(threadId, { model: 'ghost/thread-model' });
+    await ctx.services.repos.bots.update(bot.id, { fallbackModels: ['fake/model-2'] });
+
+    const { terminal } = await runToEnd(ctx, threadId);
+
+    expect(terminal.type).toBe('run.completed');
+    expect(engine.contexts[0]?.llm).toMatchObject({ provider: 'fake', model: 'model-2' });
+  });
+
+  it('fails with the original error and the tried refs when no model resolves', async () => {
+    const engine = fakeEngine(replies);
+    const ctx = await contextWith({ engines: createEngineRegistry([engine.driver]) });
+    const { bot, threadId } = await botAndThread(ctx, { computer: 'none' });
+    await ctx.services.repos.bots.update(bot.id, { model: 'ghost/a', fallbackModels: ['ghost/b', 'ghost/c'] });
+
+    const { terminal } = await runToEnd(ctx, threadId);
+
+    expect(terminal.type).toBe('run.failed');
+    const error = terminal.type === 'run.failed' ? terminal.error : '';
+    expect(error).toContain('Unknown model provider "ghost"');
+    expect(error).toContain('Tried models: ghost/a, ghost/b, ghost/c.');
+    expect(engine.contexts).toEqual([]);
+  });
+
+  it('retries the same run on the next model when the engine fails before any text', async () => {
+    let calls = 0;
+    const engine = fakeEngine(async function* () {
+      calls += 1;
+      if (calls === 1) throw new Error('primary model exploded');
+      yield { type: 'text.delta', delta: 'recovered' };
+    });
+    const ctx = await contextWith({ engines: createEngineRegistry([engine.driver]) });
+    const { bot, threadId } = await botAndThread(ctx, { computer: 'none' });
+    await ctx.services.repos.threads.setEngineSessionId(threadId, 'previous-session');
+    await ctx.services.repos.bots.update(bot.id, { fallbackModels: ['fake/model-2'] });
+
+    const { runId, terminal, events } = await runToEnd(ctx, threadId);
+
+    expect(terminal.type).toBe('run.completed');
+    expect(engine.contexts.map((context) => context.llm?.model)).toEqual(['model-1', 'model-2']);
+    // The retry starts a fresh engine session: only the first attempt resumes the stored one.
+    expect(engine.contexts.map((context) => context.engineSessionId)).toEqual(['previous-session', undefined]);
+    const started = events.filter((event) => event.type === 'run.started');
+    expect(started.map((event) => event.model)).toEqual(['fake/model-1', 'fake/model-2']);
+    expect(started.map((event) => event.runId)).toEqual([runId, runId]);
+    const messages = await ctx.services.repos.messages.listByThread(threadId);
+    expect(messages.filter((message) => message.role === 'assistant').map((message) => message.content)).toEqual([
+      'recovered',
+    ]);
+    expect(await ctx.services.repos.runs.get(runId)).toMatchObject({ status: 'completed', model: 'fake/model-2' });
+  });
+
+  it('does not retry after partial assistant text', async () => {
+    let calls = 0;
+    const engine = fakeEngine(async function* () {
+      calls += 1;
+      yield { type: 'text.delta', delta: 'half an answer' };
+      throw new Error('stream broke');
+    });
+    const ctx = await contextWith({ engines: createEngineRegistry([engine.driver]) });
+    const { bot, threadId } = await botAndThread(ctx, { computer: 'none' });
+    await ctx.services.repos.bots.update(bot.id, { fallbackModels: ['fake/model-2'] });
+
+    const { terminal, events } = await runToEnd(ctx, threadId);
+
+    expect(terminal.type).toBe('run.failed');
+    expect(calls).toBe(1);
+    expect(engine.contexts).toHaveLength(1);
+    expect(events.filter((event) => event.type === 'run.started')).toHaveLength(1);
+    expect(events.filter((event) => event.type === 'run.failed')).toHaveLength(1);
+  });
+
+  it('does not retry a cancelled run', async () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const engine = fakeEngine(async function* () {
+      yield { type: 'usage', tokensIn: 0, tokensOut: 0, costUsd: 0 };
+      await gate;
+      throw new Error('engine stopped');
+    });
+    const ctx = await contextWith({ engines: createEngineRegistry([engine.driver]) });
+    const { bot, threadId } = await botAndThread(ctx, { computer: 'none' });
+    await ctx.services.repos.bots.update(bot.id, { fallbackModels: ['fake/model-2'] });
+    const recorded = recordEvents(ctx.services.bus, threadId);
+    try {
+      const { runId } = await ctx.services.harness.startRun(threadId, 'hello');
+      await waitUntil(() => (engine.contexts.length > 0 ? true : undefined));
+
+      expect(await ctx.services.harness.cancelRun(runId)).toMatchObject({ status: 'cancelled' });
+      release();
+      await waitUntil(() => recorded.list.find((event) => event.type === 'run.failed'));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+
+      expect(engine.contexts).toHaveLength(1);
+      expect(recorded.list.filter((event) => event.type === 'run.started')).toHaveLength(1);
+      expect((await ctx.services.repos.runs.get(runId))?.status).toBe('cancelled');
+    } finally {
+      recorded.stop();
+    }
+  });
+
+  it('stops after three attempts, the primary plus two fallbacks', async () => {
+    const engine = fakeEngine(async function* () {
+      yield { type: 'usage', tokensIn: 0, tokensOut: 0, costUsd: 0 };
+      throw new Error('provider down');
+    });
+    const ctx = await contextWith({ engines: createEngineRegistry([engine.driver]) });
+    const { bot, threadId } = await botAndThread(ctx, { computer: 'none' });
+    await ctx.services.repos.bots.update(bot.id, {
+      fallbackModels: ['fake/model-2', 'fake/model-3', 'fake/model-4'],
+    });
+
+    const { terminal, events } = await runToEnd(ctx, threadId);
+
+    expect(terminal.type).toBe('run.failed');
+    expect(terminal.type === 'run.failed' && terminal.error).toBe('provider down');
+    expect(engine.contexts.map((context) => context.llm?.model)).toEqual(['model-1', 'model-2', 'model-3']);
+    expect(events.filter((event) => event.type === 'run.started').map((event) => event.model)).toEqual([
+      'fake/model-1',
+      'fake/model-2',
+      'fake/model-3',
+    ]);
+    expect(events.filter((event) => event.type === 'run.failed')).toHaveLength(1);
+  });
+
+  it('fails a run once when the bot has no fallbacks', async () => {
+    let calls = 0;
+    const engine = fakeEngine(async function* () {
+      calls += 1;
+      yield { type: 'usage', tokensIn: 0, tokensOut: 0, costUsd: 0 };
+      throw new Error('provider down');
+    });
+    const ctx = await contextWith({ engines: createEngineRegistry([engine.driver]) });
+    const { threadId } = await botAndThread(ctx, { computer: 'none' });
+
+    const { terminal, events } = await runToEnd(ctx, threadId);
+
+    expect(terminal.type).toBe('run.failed');
+    expect(calls).toBe(1);
+    expect(events.filter((event) => event.type === 'run.started')).toHaveLength(1);
+    expect(events.filter((event) => event.type === 'run.failed')).toHaveLength(1);
+  });
+});
+
 /**
  * An engine whose runs wait at a gate until the test releases them by input. The gate ignores the run's abort
  * signal, as an engine that is still stopping does, so the test decides when each engine turn ends.

@@ -70,6 +70,11 @@ export const Bot = z.object({
   teamId: z.string().optional(),
   engine: z.string(),
   model: z.string().optional(),
+  /**
+   * Ordered models to try when the primary model cannot be used: a route that does not resolve, or a run that
+   * fails before producing any reply. Each is `<provider>/<model>`. Absent means no fallbacks.
+   */
+  fallbackModels: z.array(z.string()).optional(),
   computer: ComputerKind,
   /**
    * With `computer: 'sandbox'`, gives the computer a screen: a Linux desktop with a browser that the
