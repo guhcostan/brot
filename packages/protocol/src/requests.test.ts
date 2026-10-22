@@ -6,6 +6,7 @@ import {
   CreateRoom,
   CreateSavedLogin,
   CreateTeam,
+  CreateThread,
   CreateRoutine,
   CreateTask,
   PairingComplete,
@@ -329,6 +330,27 @@ describe('room, membership, and task requests', () => {
     expect(UpdateTeam.parse({ name: 'Ops', instructions: '' })).toEqual({ name: 'Ops', instructions: '' });
     expect(UpdateTeam.parse({})).toEqual({});
     expect(() => UpdateTeam.parse({ name: '' })).toThrow();
+  });
+
+  it('accepts a thread model reference and lets an update clear it', () => {
+    expect(CreateThread.parse({ model: 'opencode-go/deepseek-v4.1-flash' }).model).toBe(
+      'opencode-go/deepseek-v4.1-flash',
+    );
+    expect(CreateThread.parse({ model: 'openrouter/anthropic/claude-x' }).model).toBe(
+      'openrouter/anthropic/claude-x',
+    );
+    expect(() => CreateThread.parse({ model: 'no-slash' })).toThrow(/provider/);
+    expect(() => CreateThread.parse({ model: '/model' })).toThrow();
+    expect(() => CreateThread.parse({ model: 'provider/' })).toThrow();
+
+    expect(UpdateThread.parse({ model: null })).toEqual({ model: null });
+    expect(UpdateThread.parse({ model: 'deepseek/deepseek-flash' })).toEqual({ model: 'deepseek/deepseek-flash' });
+    expect(UpdateThread.parse({ title: 'Plan', model: 'fake/model-2' })).toEqual({
+      title: 'Plan',
+      model: 'fake/model-2',
+    });
+    expect(() => UpdateThread.parse({ model: 'broken' })).toThrow();
+    expect(() => UpdateThread.parse({})).toThrow(/at least one field/);
   });
 
   it('requires a thread title of 1 to 120 characters to rename one', () => {

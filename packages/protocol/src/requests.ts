@@ -100,14 +100,31 @@ export const UpdateTeam = z.object({
 });
 export type UpdateTeam = z.infer<typeof UpdateTeam>;
 
+/**
+ * A model reference `<provider>/<model>`, split at the first slash the way the relay's `parseModelRef` does.
+ * Whether the provider exists is a server question; the request boundary only checks the shape.
+ */
+const ModelRef = z.string().refine((ref) => {
+  const slash = ref.indexOf('/');
+  return slash > 0 && slash < ref.length - 1;
+}, 'model must be <provider>/<model>, for example opencode-go/deepseek-v4.1-flash');
+
 export const CreateThread = z.object({
   title: z.string().min(1).optional(),
+  /** A model override for this thread. DMs only. */
+  model: ModelRef.optional(),
 });
 export type CreateThread = z.infer<typeof CreateThread>;
 
-export const UpdateThread = z.object({
-  title: z.string().min(1).max(120),
-});
+/** Renames a thread and/or sets its model override. `model: null` goes back to the bot's model. */
+export const UpdateThread = z
+  .object({
+    title: z.string().min(1).max(120).optional(),
+    model: ModelRef.nullable().optional(),
+  })
+  .refine((value) => value.title !== undefined || value.model !== undefined, {
+    message: 'expected at least one field to update',
+  });
 export type UpdateThread = z.infer<typeof UpdateThread>;
 
 /** Rejects a bot list that names the same bot twice. */

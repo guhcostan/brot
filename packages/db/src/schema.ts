@@ -97,6 +97,8 @@ export const threads = sqliteTable(
       .notNull()
       .references(() => bots.id, { onDelete: 'cascade' }),
     title: text('title').notNull(),
+    /** A `<provider>/<model>` override for this thread. Null means the bot's model. DMs only. */
+    model: text('model'),
     engineSessionId: text('engine_session_id'),
     kind: text('kind').$type<ThreadKind>().notNull().default('dm'),
     leadBotId: text('lead_bot_id').references(() => bots.id, { onDelete: 'cascade' }),

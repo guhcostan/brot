@@ -331,6 +331,28 @@ describe('threads', () => {
     );
   });
 
+  it('stores a thread model override, updates it, and clears it with null', async () => {
+    const bot = await repos.bots.create({ name: 'Ada', job: 'x' });
+    const plain = await repos.threads.create(bot.id);
+    expect(plain).not.toHaveProperty('model');
+
+    const overridden = await repos.threads.create(bot.id, { title: 'Fast lane', model: 'fake/model-2' });
+    expect(overridden).toMatchObject({ title: 'Fast lane', model: 'fake/model-2' });
+    expect((await repos.threads.get(overridden.id))?.model).toBe('fake/model-2');
+    expect((await repos.threads.listByBot(bot.id)).find((thread) => thread.id === overridden.id)?.model).toBe(
+      'fake/model-2',
+    );
+
+    const renamed = await repos.threads.update(overridden.id, { title: 'Faster lane' });
+    expect(renamed).toMatchObject({ title: 'Faster lane', model: 'fake/model-2' });
+    expect((renamed?.updatedAt ?? '') >= overridden.updatedAt).toBe(true);
+
+    expect((await repos.threads.update(overridden.id, { model: 'fake/model-3' }))?.model).toBe('fake/model-3');
+    expect((await repos.threads.update(overridden.id, { model: null }))?.model).toBeUndefined();
+    expect((await repos.threads.get(overridden.id))?.model).toBeUndefined();
+    expect(await repos.threads.update('missing', { model: 'fake/model-2' })).toBeUndefined();
+  });
+
   it('renames a thread and bumps updatedAt', async () => {
     const { thread } = await seed();
     const renamed = await repos.threads.setTitle(thread.id, 'Launch plan');

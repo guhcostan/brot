@@ -11,6 +11,7 @@ import type {
   LlmRoute,
   Message,
   Run,
+  Thread,
   ToolDecision,
   ToolRequest,
 } from '@brot/protocol';
@@ -225,7 +226,8 @@ export function createHarness(deps: HarnessDeps): Harness {
     const previousTriggerId = lastTrigger.get(key);
     lastTrigger.set(key, trigger.id);
 
-    const run = await repos.runs.create({ threadId: thread.id, botId: bot.id, engine: bot.engine, model: bot.model });
+    const model = modelFor(thread, bot);
+    const run = await repos.runs.create({ threadId: thread.id, botId: bot.id, engine: bot.engine, model });
     if (req.chain) chains.enter(run.id, req.chain, bot, inRoom);
 
     let finish: (outcome: BotRunOutcome) => void = () => undefined;
@@ -257,7 +259,7 @@ export function createHarness(deps: HarnessDeps): Harness {
       runId: run.id,
       botId: bot.id,
       engine: bot.engine,
-      model: bot.model,
+      model,
     });
 
     if (req.queue === false && lanes.has(key)) {
@@ -275,6 +277,11 @@ export function createHarness(deps: HarnessDeps): Harness {
       state.start();
     }
     return { runId: run.id, settled };
+  }
+
+  /** The model a run uses: a DM thread may override its bot's model; rooms never carry one. */
+  function modelFor(thread: Thread, bot: Bot): string | undefined {
+    return thread.model ?? bot.model;
   }
 
   /** The bot's team and its shared brief, read once for this run. Absent for an ungrouped bot. */
@@ -307,7 +314,7 @@ export function createHarness(deps: HarnessDeps): Harness {
       });
       const input = await appendAttachmentContext(attachmentStorage, turn.input, trigger.attachments);
       const driver = await readyDriver(bot);
-      const relay = RELAYED_ENGINES.has(bot.engine) ? await relayRoute(state, bot) : undefined;
+      const relay = RELAYED_ENGINES.has(bot.engine) ? await relayRoute(state, bot, thread) : undefined;
       const place = await placeRun(state, bot, relay === undefined ? modelHostsFor(bot.engine) : []);
       if (state.controller.signal.aborted) return;
       const llmRoute: LlmRoute | undefined =
@@ -383,14 +390,20 @@ export function createHarness(deps: HarnessDeps): Harness {
   }
 
   /**
-   * Resolves a relayed bot's model to its provider and mints the run's token. Runs before the computer starts, so a
-   * missing provider or key fails the run without starting anything. The token is revoked when the run settles.
+   * Resolves the run's model to its provider and mints the run's token. A thread model overrides the bot's model,
+   * and either one may be missing. Runs before the computer starts, so a missing provider or key fails the run
+   * without starting anything. The token is revoked when the run settles.
+   *
+   * A model change never reuses the previous model's DSH process: the engine's server key includes `llmLaunchKey`
+   * (provider and model, dsh-llm.ts), so `ensureServer` in dsh.ts stops it and the session is established anew
+   * on the process that carries the new model.
    */
-  async function relayRoute(state: ActiveRun, bot: Bot): Promise<ResolvedRoute & { token: string }> {
-    if (bot.model === undefined) {
+  async function relayRoute(state: ActiveRun, bot: Bot, thread: Thread): Promise<ResolvedRoute & { token: string }> {
+    const model = modelFor(thread, bot);
+    if (model === undefined) {
       throw new Error(`Bot "${bot.name}" has no model. Set it to <provider>/<model>, for example opencode-go/deepseek-v4.1-flash.`);
     }
-    const resolved = { ...(await llm.resolve(bot.model)), session: conversationId(state.threadId, bot.id) };
+    const resolved = { ...(await llm.resolve(model)), session: conversationId(state.threadId, bot.id) };
     state.relayed = true;
     return { ...resolved, token: llm.issue(state.runId, resolved) };
   }

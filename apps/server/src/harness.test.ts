@@ -24,6 +24,14 @@ const FAKE_PROVIDER: ProviderSpec = {
   secretName: 'fake',
 };
 
+/** A second provider, so a thread override can change both provider and model. */
+const FAKE_PROVIDER_TWO: ProviderSpec = {
+  id: 'fake-two',
+  api: 'openai-completions',
+  baseUrl: 'https://fake-two.example/v1',
+  secretName: 'fake-two',
+};
+
 /** Tests that never reach a provider get this fetch, so an accidental call fails loudly. */
 async function refuseFetch(): Promise<Response> {
   throw new Error('the harness tests do not reach a provider');
@@ -749,6 +757,102 @@ describe('model relay for DSH runs', () => {
 
     expect(terminal.type === 'run.failed' && terminal.error).toContain('Unknown model provider "nope"');
     expect(engine.contexts).toEqual([]);
+  });
+});
+
+describe('model override per thread', () => {
+  it("uses a thread's model for the relay route, the run label and run.started", async () => {
+    const engine = fakeEngine(replies);
+    const ctx = await contextWith({
+      engines: createEngineRegistry([engine.driver]),
+      llm: { providers: [FAKE_PROVIDER, FAKE_PROVIDER_TWO], fetch: refuseFetch },
+    });
+    await ctx.services.vault.set('fake-two', 'sk-two');
+    const { threadId } = await botAndThread(ctx, { computer: 'none' });
+    await ctx.services.repos.threads.update(threadId, { model: 'fake-two/other-1' });
+
+    const { runId, terminal, events } = await runToEnd(ctx, threadId);
+
+    expect(terminal.type).toBe('run.completed');
+    expect(engine.contexts[0]?.llm).toEqual({
+      provider: 'fake-two',
+      model: 'other-1',
+      api: 'openai-completions',
+      baseUrl: expect.stringContaining(`/llm/runs/${runId}/v1`),
+      token: expect.any(String),
+    });
+    expect(events.find((event) => event.type === 'run.started')).toMatchObject({ runId, model: 'fake-two/other-1' });
+    expect(await ctx.services.repos.runs.get(runId)).toMatchObject({ model: 'fake-two/other-1' });
+  });
+
+  it("keeps the bot's model when the thread has no override", async () => {
+    const engine = fakeEngine(replies);
+    const ctx = await contextWith({ engines: createEngineRegistry([engine.driver]) });
+    const { threadId } = await botAndThread(ctx, { computer: 'none' });
+
+    const { events } = await runToEnd(ctx, threadId);
+
+    expect(engine.contexts[0]?.llm).toMatchObject({ provider: 'fake', model: 'model-1' });
+    expect(events.find((event) => event.type === 'run.started')).toMatchObject({ model: 'fake/model-1' });
+  });
+
+  it('clears the override with null and goes back to the bot model', async () => {
+    const engine = fakeEngine(replies);
+    const ctx = await contextWith({ engines: createEngineRegistry([engine.driver]) });
+    const { threadId } = await botAndThread(ctx, { computer: 'none' });
+    await ctx.services.repos.threads.update(threadId, { model: 'fake/model-2' });
+    expect((await ctx.services.repos.threads.get(threadId))?.model).toBe('fake/model-2');
+    await ctx.services.repos.threads.update(threadId, { model: null });
+
+    const { events } = await runToEnd(ctx, threadId);
+
+    expect(engine.contexts[0]?.llm).toMatchObject({ provider: 'fake', model: 'model-1' });
+    expect(events.find((event) => event.type === 'run.started')).toMatchObject({ model: 'fake/model-1' });
+  });
+
+  it('lets a thread model stand in when the bot has none', async () => {
+    const engine = fakeEngine(replies);
+    const ctx = await contextWith({ engines: createEngineRegistry([engine.driver]) });
+    const { threadId } = await botAndThread(ctx, { computer: 'none', model: null });
+    await ctx.services.repos.threads.update(threadId, { model: 'fake/model-1' });
+
+    const { terminal, events } = await runToEnd(ctx, threadId);
+
+    expect(terminal.type).toBe('run.completed');
+    expect(engine.contexts[0]?.llm).toMatchObject({ provider: 'fake', model: 'model-1' });
+    expect(events.find((event) => event.type === 'run.started')).toMatchObject({ model: 'fake/model-1' });
+  });
+
+  it("keeps each member bot's model in a room, where the thread carries no model", async () => {
+    const engine = fakeEngine(replies);
+    const ctx = await contextWith({
+      engines: createEngineRegistry([engine.driver]),
+      llm: { providers: [FAKE_PROVIDER, FAKE_PROVIDER_TWO], fetch: refuseFetch },
+    });
+    await ctx.services.vault.set('fake-two', 'sk-two');
+    const { bot: first } = await botAndThread(ctx, { computer: 'none' });
+    const second = await ctx.services.repos.bots.create({
+      name: 'Bea',
+      job: 'Testing',
+      engine: 'dsh',
+      computer: 'none',
+      model: 'fake-two/other-1',
+    });
+    const room = await ctx.services.repos.rooms.create({
+      title: 'Room',
+      botIds: [first.id, second.id],
+      leadBotId: first.id,
+      responder: 'lead',
+    });
+
+    const here = await ctx.services.harness.startBotRun({ botId: first.id, threadId: room.id, input: 'hello' });
+    await here.settled;
+    const there = await ctx.services.harness.startBotRun({ botId: second.id, threadId: room.id, input: 'hello' });
+    await there.settled;
+
+    expect((await ctx.services.repos.threads.get(room.id))?.model).toBeUndefined();
+    expect(engine.contexts[0]?.llm).toMatchObject({ provider: 'fake', model: 'model-1' });
+    expect(engine.contexts[1]?.llm).toMatchObject({ provider: 'fake-two', model: 'other-1' });
   });
 });
 

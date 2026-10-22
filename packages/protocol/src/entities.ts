@@ -131,6 +131,11 @@ export const Thread = z.object({
   /** Rooms only. Absent on DMs. */
   responder: ResponderMode.optional(),
   /**
+   * A model for this thread as `<provider>/<model>`, overriding the bot's model. Absent means the bot's model.
+   * DMs only: a room has one model per member bot, never a thread-wide one.
+   */
+  model: z.string().optional(),
+  /**
    * The engine session to resume for a DM, as last reported through the `engine.session` event.
    * Rooms keep one session per bot in `thread_sessions` instead, and leave this unset.
    */

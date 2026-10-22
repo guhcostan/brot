@@ -132,6 +132,13 @@ describe('entity schemas', () => {
     expect(roundTrip(SavedLogin, { ...login, hasTotp: false })).toMatchObject({ hasTotp: false });
   });
 
+  it('round-trips a thread model override, and leaves it absent when the thread uses the bot model', () => {
+    const thread = { id: 't1', botId: 'bot_1', title: 'Hello', model: 'fake/model-2', createdAt: at, updatedAt: at };
+    expect(roundTrip(Thread, thread)).toEqual(thread);
+    const plain = { id: 't2', botId: 'bot_1', title: 'Hello', createdAt: at, updatedAt: at };
+    expect(Thread.parse(plain).model).toBeUndefined();
+  });
+
   it('round-trips approval, policy, memory, and skill', () => {
     const approval = {
       id: 'a1',

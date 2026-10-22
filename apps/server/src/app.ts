@@ -223,6 +223,21 @@ async function unknownBrowserProfile(repos: Repos, id: string | null | undefined
   return (await repos.browserProfiles.get(id)) === undefined ? id : undefined;
 }
 
+/**
+ * Why a model ref names a provider this server does not know. The request validates the `<provider>/<model>`
+ * shape; only a real provider can exist in this list, which is why the check lives here.
+ */
+function modelProviderIssues(
+  providers: readonly ProviderSpec[] | undefined,
+  model: string,
+): Array<{ path: string[]; message: string }> {
+  const slash = model.indexOf('/');
+  const providerId = slash > 0 ? model.slice(0, slash) : model;
+  if ((providers ?? []).some((spec) => spec.id === providerId)) return [];
+  const known = (providers ?? []).map((spec) => spec.id).join(', ');
+  return [{ path: ['model'], message: `unknown model provider "${providerId}"${known === '' ? '' : `. Known providers: ${known}`}` }];
+}
+
 /** Deletes a saved login's three vault values. The names derive from the id, so no row is needed. */
 async function dropSavedLoginSecrets(vault: Vault, loginId: string): Promise<void> {
   const names = savedLoginSecretNames(loginId);
@@ -471,16 +486,35 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     if (!(await repos.bots.get(id))) return notFound(c, 'Bot');
     const body = await parseBody(c, CreateThread);
     if (!body.ok) return body.response;
+    if (body.data.model !== undefined) {
+      const issues = modelProviderIssues(deps.providers, body.data.model);
+      if (issues.length > 0) return c.json({ error: 'Invalid request', issues }, 400);
+    }
     return c.json(await repos.threads.create(id, body.data), 201);
   });
 
+  /** Renames a thread and/or sets its model override. `model: null` goes back to the bot's model. */
   app.patch('/api/threads/:id', async (c) => {
     const id = c.req.param('id');
-    if (!(await repos.threads.get(id))) return notFound(c, 'Thread');
+    const thread = await repos.threads.get(id);
+    if (!thread) return notFound(c, 'Thread');
     const body = await parseBody(c, UpdateThread);
     if (!body.ok) return body.response;
-    const thread = await repos.threads.setTitle(id, body.data.title);
-    return thread ? c.json(thread) : notFound(c, 'Thread');
+    const { model } = body.data;
+    const issues: Array<{ path: string[]; message: string }> = [];
+    if (model !== undefined && model !== null) {
+      issues.push(
+        ...(thread.kind === 'room'
+          ? [{ path: ['model'], message: 'a room thread has no single model; set a model on each member bot' }]
+          : modelProviderIssues(deps.providers, model)),
+      );
+    }
+    if (issues.length > 0) return c.json({ error: 'Invalid request', issues }, 400);
+    const updated = await repos.threads.update(id, {
+      ...(body.data.title === undefined ? {} : { title: body.data.title }),
+      ...(model === undefined ? {} : { model }),
+    });
+    return updated ? c.json(updated) : notFound(c, 'Thread');
   });
 
   app.get('/api/threads/:id/messages', async (c) => {

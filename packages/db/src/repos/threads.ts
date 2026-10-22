@@ -12,6 +12,7 @@ export function toThread(row: ThreadRow): Thread {
     botId: row.botId,
     title: row.title,
     kind: row.kind,
+    ...(row.model === null ? {} : { model: row.model }),
     leadBotId: row.leadBotId ?? undefined,
     responder: row.responder ?? undefined,
     engineSessionId: row.engineSessionId ?? undefined,
@@ -50,7 +51,7 @@ export function createThreadRepo(db: Db) {
       return row ? toThread(row) : undefined;
     },
 
-    async create(botId: string, input: { title?: string } = {}): Promise<Thread> {
+    async create(botId: string, input: { title?: string; model?: string } = {}): Promise<Thread> {
       const data = CreateThread.parse(input);
       const timestamp = nowIso();
       const [row] = await db
@@ -59,6 +60,7 @@ export function createThreadRepo(db: Db) {
           id: newId(),
           botId,
           title: data.title ?? 'New thread',
+          model: data.model ?? null,
           createdAt: timestamp,
           updatedAt: timestamp,
         })
@@ -76,6 +78,20 @@ export function createThreadRepo(db: Db) {
         .set({ engineSessionId })
         .where(eq(threads.id, id))
         .returning();
+      return rows[0] ? toThread(rows[0]) : undefined;
+    },
+
+    /**
+     * Applies a user's thread settings: a rename and/or a model override, where `null` clears the override. Both are
+     * user activity, so this moves the thread in a bot's list.
+     */
+    async update(id: string, input: { title?: string; model?: string | null }): Promise<Thread | undefined> {
+      const patch = {
+        ...(input.title === undefined ? {} : { title: input.title }),
+        ...(input.model === undefined ? {} : { model: input.model }),
+        updatedAt: nowIso(),
+      };
+      const rows = await db.update(threads).set(patch).where(eq(threads.id, id)).returning();
       return rows[0] ? toThread(rows[0]) : undefined;
     },
 
