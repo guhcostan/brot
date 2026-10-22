@@ -69,6 +69,14 @@ export const ArrowRight = ({ size = 12 }: { size?: number }) => (
   </Icon>
 );
 
+/** A down arrow into a tray: download a file. */
+export const Download = ({ size }: { size?: number }) => (
+  <Icon size={size}>
+    <path d="M10 3.5v8M6.5 8 10 11.5 13.5 8" />
+    <path d="M4 13.5v1.75a1.25 1.25 0 0 0 1.25 1.25h9.5A1.25 1.25 0 0 0 16 15.25V13.5" />
+  </Icon>
+);
+
 /** A paperclip: attach files to a message. */
 export const Paperclip = ({ size }: { size?: number }) => (
   <Icon size={size}>

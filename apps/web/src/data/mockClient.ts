@@ -20,6 +20,7 @@ import type {
   Takeover,
   Task,
   Team,
+  TeamPackage,
   Thread,
 } from '@brot/protocol';
 import {
@@ -35,6 +36,8 @@ import {
   MAX_ROOM_BOTS,
   MIN_ROOM_BOTS,
   McpServer as McpServerSchema,
+  TEAM_PACKAGE_FORMAT,
+  TEAM_PACKAGE_VERSION,
   UpdateBot,
   UpdateMcpServer,
   UpdateMemory,
@@ -45,6 +48,8 @@ import {
   UpdateThread,
   attachmentKindFor,
   defaultEgressPolicy,
+  formatTeamPackage,
+  parseTeamPackage,
   sanitizeAttachmentName,
 } from '@brot/protocol';
 import {
@@ -163,6 +168,20 @@ function pickUrl(content: string, botId: string): string {
   if (/linkedin/i.test(content) || botId === 'bot_ara') return 'https://www.linkedin.com/feed/';
   return `https://duckduckgo.com/?q=${encodeURIComponent(content.slice(0, 60))}`;
 }
+
+/** A download name from a team name: lowercase ASCII words joined by dashes. */
+function teamSlug(name: string): string {
+  const slug = name
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60);
+  return slug === '' ? 'team' : slug;
+}
+
+const IMPORTABLE_AVATAR = /^[a-z][a-z0-9-]*:[a-z][a-z0-9-]*$/;
 
 const byRecent = (threads: readonly Thread[]): Thread[] =>
   [...threads].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt) || a.id.localeCompare(b.id));
@@ -1488,6 +1507,188 @@ export function createMockClient(): BrotClient {
       if (!configured) return { ok: false, error: `The ${server.transport} server has no ${server.transport === 'stdio' ? 'command' : 'URL'}` };
       const tools = server.transport === 'stdio' ? ['read_file', 'list_directory'] : ['search'];
       return { ok: true, tools, latencyMs: server.transport === 'stdio' ? 18 : 42 };
+    },
+
+    async exportTeamPackage(teamId?: string) {
+      const scopeTeams = teamId === undefined ? [...teams.values()] : (() => {
+        const team = teams.get(teamId);
+        if (!team) throw new Error('404 Team not found');
+        return [team];
+      })();
+      const scopeBots = [...bots.values()].filter((bot) => !bot.archived && (teamId === undefined || bot.teamId === teamId));
+      if (scopeBots.length === 0) {
+        throw new Error(teamId === undefined ? 'There are no bots to export.' : 'This team has no bots to export.');
+      }
+      const teamKeys = new Map(scopeTeams.map((team, index) => [team.id, `t${index + 1}`]));
+      const botKeys = new Map(scopeBots.map((bot, index) => [bot.id, `b${index + 1}`]));
+      const teamKeyOf = (id: string): string => {
+        const key = teamKeys.get(id);
+        if (key === undefined) throw new Error(`No key for team ${id}`);
+        return key;
+      };
+      const botKeyOf = (id: string): string => {
+        const key = botKeys.get(id);
+        if (key === undefined) throw new Error(`No key for bot ${id}`);
+        return key;
+      };
+      const roomEntries = [...rooms.values()].flatMap((room) => {
+        const lead = room.thread.leadBotId ?? room.thread.botId;
+        const members = room.memberIds.filter((botId) => botKeys.has(botId)).map(botKeyOf);
+        if (!botKeys.has(lead) || members.length < MIN_ROOM_BOTS) return [];
+        return [{
+          title: room.thread.title,
+          lead: botKeyOf(lead),
+          members,
+          responder: room.thread.responder ?? 'lead',
+        }];
+      });
+      const routineEntries = [...routines.values()].flatMap((routine) => {
+        if (!botKeys.has(routine.botId) || routine.trigger.type !== 'cron') return [];
+        return [{
+          bot: botKeyOf(routine.botId),
+          name: routine.name,
+          instruction: routine.instruction,
+          cron: routine.trigger.cron,
+          ...(routine.trigger.timezone === undefined ? {} : { timezone: routine.trigger.timezone }),
+          ...(routine.catchUp === undefined ? {} : { catchUp: routine.catchUp }),
+          ...(routine.rememberLastRun === undefined ? {} : { rememberLastRun: routine.rememberLastRun }),
+          enabled: false,
+        }];
+      });
+      const skillEntries = [...skills.values()].flatMap((skill) =>
+        skill.botId === undefined || !botKeys.has(skill.botId)
+          ? []
+          : [{ name: skill.name, description: skill.description, body: skill.body, bot: botKeyOf(skill.botId) }],
+      );
+      const pkg: TeamPackage = {
+        format: TEAM_PACKAGE_FORMAT,
+        version: TEAM_PACKAGE_VERSION,
+        exportedAt: now(),
+        teams: scopeTeams.map((team) => ({
+          key: teamKeyOf(team.id),
+          name: team.name,
+          instructions: team.instructions,
+          ...(team.chiefBotId !== undefined && botKeys.has(team.chiefBotId) ? { chief: botKeyOf(team.chiefBotId) } : {}),
+        })),
+        bots: scopeBots.map((bot) => ({
+          key: botKeyOf(bot.id),
+          name: bot.name,
+          job: bot.job,
+          instructions: bot.instructions,
+          ...(bot.avatar === undefined ? {} : { avatar: bot.avatar }),
+          ...(bot.teamId !== undefined && teamKeys.has(bot.teamId) ? { team: teamKeyOf(bot.teamId) } : {}),
+        })),
+        rooms: roomEntries,
+        routines: routineEntries,
+        skills: skillEntries,
+      };
+      const content = formatTeamPackage(pkg);
+      const filename = teamId === undefined ? 'brot-workspace.md' : `brot-team-${teamSlug(teams.get(teamId)?.name ?? 'team')}.md`;
+      return { content, filename };
+    },
+
+    async importTeamPackage(content: string) {
+      const parsed = parseTeamPackage(content);
+      if (!parsed.ok) throw new Error(`Invalid team package: ${parsed.issues[0]?.message ?? 'invalid package'}`);
+      const pkg = parsed.package;
+      const at = now();
+      const botIds = new Map<string, string>();
+      const teamIds = new Map<string, string>();
+      for (const entry of pkg.teams) {
+        const id = nextId('team');
+        teams.set(id, { id, name: entry.name, instructions: entry.instructions, createdAt: at, updatedAt: at });
+        teamIds.set(entry.key, id);
+      }
+      for (const entry of pkg.bots) {
+        const id = nextId('bot');
+        const teamId = entry.team === undefined ? undefined : teamIds.get(entry.team);
+        const bot: Bot = {
+          id,
+          name: entry.name,
+          job: entry.job,
+          instructions: entry.instructions,
+          ...(entry.avatar !== undefined && IMPORTABLE_AVATAR.test(entry.avatar) ? { avatar: entry.avatar } : {}),
+          engine: 'mock',
+          computer: 'sandbox',
+          egress: defaultEgressPolicy(),
+          pinned: false,
+          archived: false,
+          ...(teamId === undefined ? {} : { teamId }),
+          createdAt: at,
+          updatedAt: at,
+        };
+        bots.set(id, bot);
+        threadsOfBot.set(id, []);
+        botIds.set(entry.key, id);
+      }
+      for (const entry of pkg.teams) {
+        const teamId = teamIds.get(entry.key);
+        const chiefId = entry.chief === undefined ? undefined : botIds.get(entry.chief);
+        const team = teamId === undefined ? undefined : teams.get(teamId);
+        if (teamId !== undefined && team !== undefined && chiefId !== undefined) teams.set(teamId, { ...team, chiefBotId: chiefId });
+      }
+      for (const entry of pkg.rooms) {
+        const leadId = botIds.get(entry.lead);
+        if (leadId === undefined) continue;
+        const memberIds = entry.members.flatMap((key) => {
+          const id = botIds.get(key);
+          return id === undefined ? [] : [id];
+        });
+        const id = nextId('room');
+        const thread: Thread = {
+          id,
+          botId: leadId,
+          title: entry.title,
+          kind: 'room',
+          leadBotId: leadId,
+          responder: entry.responder === 'mention' ? 'mention' : 'lead',
+          createdAt: at,
+          updatedAt: at,
+        };
+        rooms.set(id, { thread, memberIds });
+        remember(thread);
+        histories.set(id, []);
+        record(id, { ...base(id), type: 'room.members', botIds: [...memberIds] });
+      }
+      for (const entry of pkg.routines) {
+        const botId = botIds.get(entry.bot);
+        if (botId === undefined) continue;
+        const id = nextId('routine');
+        routines.set(id, {
+          id,
+          botId,
+          name: entry.name,
+          instruction: entry.instruction,
+          trigger: { type: 'cron', cron: entry.cron, ...(entry.timezone === undefined ? {} : { timezone: entry.timezone }) },
+          enabled: false,
+          catchUp: entry.catchUp ?? true,
+          rememberLastRun: entry.rememberLastRun ?? false,
+          createdAt: at,
+          updatedAt: at,
+        });
+        routineRuns.set(id, []);
+      }
+      for (const entry of pkg.skills) {
+        const id = nextId('skill');
+        const botId = entry.bot === undefined ? undefined : botIds.get(entry.bot);
+        skills.set(id, {
+          id,
+          ...(botId === undefined ? {} : { botId }),
+          name: entry.name,
+          description: entry.description,
+          body: entry.body,
+          version: 1,
+          createdAt: at,
+          updatedAt: at,
+        });
+      }
+      return {
+        teams: pkg.teams.length,
+        bots: pkg.bots.length,
+        rooms: pkg.rooms.length,
+        routines: pkg.routines.length,
+        skills: pkg.skills.length,
+      };
     },
   };
 }

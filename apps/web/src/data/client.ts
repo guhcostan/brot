@@ -136,6 +136,21 @@ export interface NotificationFilter {
   limit?: number;
 }
 
+/** A downloaded team package: its Markdown and the filename the server suggested. */
+export interface TeamPackageExport {
+  content: string;
+  filename: string;
+}
+
+/** How many entities one import created. */
+export interface TeamPackageImportCounts {
+  teams: number;
+  bots: number;
+  rooms: number;
+  routines: number;
+  skills: number;
+}
+
 export interface ProviderModel {
   id: string;
   label: string;
@@ -300,4 +315,9 @@ export interface BrotClient {
   deleteMcpServer(serverId: string): Promise<void>;
   /** Runs a real handshake with the server; a failed handshake is a normal result with `ok: false`. */
   testMcpServer(serverId: string): Promise<McpServerTestResult>;
+
+  /** Downloads a portable package of one team, or of the whole workspace when `teamId` is absent. */
+  exportTeamPackage(teamId?: string): Promise<TeamPackageExport>;
+  /** Imports a package previously produced by the export, or hand-written in the same format. */
+  importTeamPackage(content: string): Promise<TeamPackageImportCounts>;
 }

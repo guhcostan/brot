@@ -19,6 +19,7 @@ import {
   Device,
   Memory,
   CreateMcpServer,
+  ImportTeamPackage,
   MarkNotificationsRead,
   McpServer,
   McpServerTestResult,
@@ -62,6 +63,7 @@ import {
   type Room,
   type RoutineRunFilter,
   type RoutineRunStarted,
+  type TeamPackageImportCounts,
   type TaskFilter,
 } from './client';
 
@@ -683,7 +685,51 @@ export function createHttpClient({
       const response = await write('POST', `/api/mcp/servers/${encodeURIComponent(serverId)}/test`, {});
       return McpServerTestResult.parse(await response.json());
     },
+
+    async exportTeamPackage(teamId?: string) {
+      const suffix = teamId === undefined ? '' : `?${new URLSearchParams({ teamId }).toString()}`;
+      const path = `/api/team-packages/export${suffix}`;
+      const response = await fetch(`${root}${path}`, { headers: { Accept: 'text/markdown' } });
+      if (!response.ok) throw new Error(`GET ${path} failed: ${await describeFailure(response)}`);
+      const content = await response.text();
+      return {
+        content,
+        filename: downloadName(response.headers.get('content-disposition')) ?? 'brot-team.md',
+      };
+    },
+
+    async importTeamPackage(content) {
+      const body = ImportTeamPackage.parse({ content });
+      const response = await write('POST', '/api/team-packages/import', body);
+      return parseImportCounts(await response.json());
+    },
   };
+}
+
+/** The `filename` of a Content-Disposition header, preferring its RFC 5987 form. */
+export function downloadName(disposition: string | null): string | undefined {
+  if (disposition === null) return undefined;
+  const extended = /filename\*=UTF-8''([^;]+)/i.exec(disposition);
+  if (extended?.[1] !== undefined) {
+    try {
+      return decodeURIComponent(extended[1].trim());
+    } catch {
+      // Fall through to the plain form.
+    }
+  }
+  const plain = /filename="?([^";]+)"?/i.exec(disposition);
+  return plain?.[1]?.trim() || undefined;
+}
+
+/** Validates the counts a successful import answers. */
+export function parseImportCounts(value: unknown): TeamPackageImportCounts {
+  if (!isRecord(value)) throw new Error('Expected the import counts');
+  const count = (name: keyof TeamPackageImportCounts): number => {
+    const raw = value[name];
+    if (typeof raw !== 'number' || !Number.isInteger(raw) || raw < 0) throw new Error(`Expected ${name} to be a count`);
+    return raw;
+  };
+  return { teams: count('teams'), bots: count('bots'), rooms: count('rooms'), routines: count('routines'), skills: count('skills') };
 }
 
 /** Validates `GET /api/providers`. The shape lives in docs/COMPUTER-USE.md, not yet in @brot/protocol. */
