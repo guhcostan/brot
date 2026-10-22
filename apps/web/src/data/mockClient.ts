@@ -826,9 +826,7 @@ export function createMockClient(): BrotClient {
 
   return {
     async listBots(options = {}) {
-      return [...bots.values()]
-        .filter((bot) => options.includeArchived || !bot.archived)
-        .map((bot) => structuredClone(bot));
+      return [...bots.values()].filter((bot) => options.includeArchived || !bot.archived).map((bot) => structuredClone(bot));
     },
 
     async createBot(input) {
@@ -849,6 +847,10 @@ export function createMockClient(): BrotClient {
         createdAt: at,
         updatedAt: at,
       };
+      if (created.mcpServerIds !== undefined && created.mcpServerIds !== null) {
+        for (const serverId of created.mcpServerIds) if (!mcpServers.has(serverId)) throw new Error(`Unknown MCP server: ${serverId}`);
+        if (created.mcpServerIds.length === 0) created.mcpServerIds = [];
+      }
       bots.set(created.id, created);
 
       if (created.browser === true) setBrowserStateOf(created, 'stopped');
@@ -858,7 +860,7 @@ export function createMockClient(): BrotClient {
     async updateBot(botId, patch) {
       const current = bots.get(botId);
       if (!current) throw new Error(`Unknown bot: ${botId}`);
-      const { teamBudgetUsd, teamId, hostAcknowledged: _ack, browserProfileId, approvalMode, speakReplies, ...rest } = UpdateBot.parse(patch);
+      const { teamBudgetUsd, teamId, hostAcknowledged: _ack, browserProfileId, approvalMode, speakReplies, mcpServerIds, ...rest } = UpdateBot.parse(patch);
       if (browserProfileId !== undefined && browserProfileId !== null && !browserProfiles.has(browserProfileId)) {
         throw new Error(`Unknown browser profile: ${browserProfileId}`);
       }
@@ -867,6 +869,11 @@ export function createMockClient(): BrotClient {
       else if (approvalMode === 'ask') delete next.approvalMode;
       if (speakReplies === true) next.speakReplies = true;
       else if (speakReplies === false) delete next.speakReplies;
+      if (mcpServerIds === null) delete next.mcpServerIds;
+      else if (mcpServerIds !== undefined) {
+        for (const serverId of mcpServerIds) if (!mcpServers.has(serverId)) throw new Error(`Unknown MCP server: ${serverId}`);
+        next.mcpServerIds = [...mcpServerIds];
+      }
       if (teamBudgetUsd === null) delete next.teamBudgetUsd;
       else if (teamBudgetUsd !== undefined) next.teamBudgetUsd = teamBudgetUsd;
       if (teamId === null) delete next.teamId;

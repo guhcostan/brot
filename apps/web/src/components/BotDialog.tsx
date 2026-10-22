@@ -1,8 +1,9 @@
 import { useEffect, useId, useState, type FormEvent, type KeyboardEvent, type ReactElement } from 'react';
-import { EgressHost, type ApprovalMode, type Bot, type CreateBotInput, type Team, type UpdateBot } from '@brot/protocol';
+import { EgressHost, type ApprovalMode, type Bot, type CreateBotInput, type McpServer, type Team, type UpdateBot } from '@brot/protocol';
 import {
   AVATAR_COLOR_NAMES,
   AVATAR_SPECIES,
+  Badge,
   BotAvatar,
   Button,
   Input,
@@ -38,10 +39,16 @@ export interface BotDialogProps {
   closeBrowser: (botId: string) => Promise<void>;
   /** Shared host-browser profiles the bot can use. */
   loadBrowserProfiles: () => Promise<BrowserProfile[]>;
+  /** Every saved MCP server, for the per-bot grants checklist. */
+  loadMcpServers: () => Promise<McpServer[]>;
   /** Profiles to render before the load resolves, e.g. in an SSR render. */
   initialBrowserProfiles?: BrowserProfile[];
   /** The browser state to render before the load resolves, e.g. in an SSR render. */
   initialBrowserStatus?: BrowserStatus;
+  /** MCP servers to render before the load resolves, e.g. in an SSR render. */
+  initialMcpServers?: McpServer[];
+  /** The MCP mode to render for a new bot, e.g. in an SSR render. */
+  initialMcpMode?: 'all' | 'custom';
   onClose: () => void;
 }
 
@@ -86,6 +93,13 @@ const BROWSER_STATE_KEYS: Record<BrowserStatus['state'], TranslationKey> = {
 
 const DSH_ENGINE = 'dsh';
 
+/** Whether two id lists select the same servers, order aside. */
+function sameIds(left: readonly string[] | null, right: readonly string[]): boolean {
+  if (left === null || left.length !== right.length) return false;
+  const set = new Set(left);
+  return right.every((id) => set.has(id));
+}
+
 interface FormState {
   name: string;
   job: string;
@@ -106,6 +120,9 @@ interface FormState {
   notifications: boolean;
   approvalMode: ApprovalMode;
   speakReplies: boolean;
+  /** Every enabled MCP server, or only the listed ones. */
+  mcpMode: 'all' | 'custom';
+  mcpServerIds: string[];
 }
 
 function computerOf(bot: Pick<Bot, 'computer' | 'desktop'>): ComputerChoice {
@@ -113,7 +130,7 @@ function computerOf(bot: Pick<Bot, 'computer' | 'desktop'>): ComputerChoice {
   return bot.computer;
 }
 
-function initialState(bot: Bot | undefined): FormState {
+function initialState(bot: Bot | undefined, initialMcpMode: 'all' | 'custom' = 'all'): FormState {
   if (!bot) {
     return {
       name: '',
@@ -132,6 +149,8 @@ function initialState(bot: Bot | undefined): FormState {
       notifications: true,
       approvalMode: 'ask',
       speakReplies: false,
+      mcpMode: initialMcpMode,
+      mcpServerIds: [],
     };
   }
   const avatar = avatarOf(bot);
@@ -152,6 +171,8 @@ function initialState(bot: Bot | undefined): FormState {
     notifications: bot.notifications !== false,
     approvalMode: bot.approvalMode ?? 'ask',
     speakReplies: bot.speakReplies === true,
+    mcpMode: bot.mcpServerIds == null ? 'all' : 'custom',
+    mcpServerIds: bot.mcpServerIds ?? [],
   };
 }
 
@@ -184,9 +205,12 @@ function BotForm({
   loadBrowserProfiles,
   initialBrowserProfiles,
   initialBrowserStatus,
+  loadMcpServers,
+  initialMcpServers,
+  initialMcpMode = 'all',
   onClose,
 }: BotDialogProps): ReactElement {
-  const [form, setForm] = useState<FormState>(() => initialState(bot));
+  const [form, setForm] = useState<FormState>(() => initialState(bot, initialMcpMode));
   const [template, setTemplate] = useState<string | null>(null);
   const [providers, setProviders] = useState<Provider[] | null>(null);
   const [providerError, setProviderError] = useState<string | null>(null);
@@ -198,7 +222,35 @@ function BotForm({
   const [browserError, setBrowserError] = useState<string | null>(null);
   const [browserBusy, setBrowserBusy] = useState(false);
   const [profiles, setProfiles] = useState<BrowserProfile[] | null>(initialBrowserProfiles ?? null);
+  const [mcpServers, setMcpServers] = useState<McpServer[] | null>(initialMcpServers ?? null);
+
+  // A server disabled in Settings is never part of a bot's allowlist, so stale ids are dropped as soon as the
+  // list arrives (the row renders dimmed and unchecked).
+  useEffect(() => {
+    if (mcpServers === null) return;
+    setForm((current) =>
+      current.mcpMode === 'custom'
+        ? { ...current, mcpServerIds: current.mcpServerIds.filter((id) => mcpServers.some((server) => server.id === id && server.enabled)) }
+        : current,
+    );
+  }, [mcpServers]);
   const [liveViewOpen, setLiveViewOpen] = useState(false);
+  useEffect(() => {
+    if (initialMcpServers !== undefined) return;
+    let active = true;
+    loadMcpServers()
+      .then((servers) => {
+        if (active) setMcpServers(servers);
+      })
+      .catch((cause: unknown) => {
+        console.warn('The MCP server list did not load', cause);
+        if (active) setMcpServers([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [loadMcpServers, initialMcpServers]);
+
   const teamFieldId = useId();
 
   useEffect(() => {
@@ -318,6 +370,10 @@ function BotForm({
     const browser = browserAvailable && form.browser;
     const egress = form.hosts.length > 0 ? { mode: 'allowlist' as const, allow: form.hosts } : { mode: 'deny' as const, allow: [] };
     const avatar = formatAvatar({ species: form.species, color: form.color });
+    const grants = form.mcpServerIds.filter((id) => {
+      const server = mcpServers?.find((entry) => entry.id === id);
+      return server === undefined || server.enabled;
+    });
     try {
       if (!bot) {
         const input: CreateBotInput = {
@@ -332,6 +388,7 @@ function BotForm({
           notifications: form.notifications,
           ...(form.approvalMode === 'edits' ? { approvalMode: 'edits' as const } : {}),
           ...(form.speakReplies ? { speakReplies: true } : {}),
+          ...(form.mcpMode === 'custom' ? { mcpServerIds: grants } : {}),
           egress,
           ...(form.teamId === '' ? {} : { teamId: form.teamId }),
           ...(form.model ? { engine: DSH_ENGINE, model: form.model } : {}),
@@ -368,6 +425,12 @@ function BotForm({
         if (form.notifications !== (bot.notifications !== false)) patch.notifications = form.notifications;
         if (form.approvalMode !== (bot.approvalMode ?? 'ask')) patch.approvalMode = form.approvalMode;
         if (form.speakReplies !== (bot.speakReplies === true)) patch.speakReplies = form.speakReplies;
+        const currentGrants = bot.mcpServerIds ?? null;
+        if (form.mcpMode === 'all') {
+          if (currentGrants !== null) patch.mcpServerIds = null;
+        } else if (!sameIds(currentGrants, grants)) {
+          patch.mcpServerIds = [...grants];
+        }
         const profileId = bot.browserProfileId ?? '';
         if (form.browserProfileId !== profileId) {
           patch.browserProfileId = form.browserProfileId === '' ? null : form.browserProfileId;
@@ -519,6 +582,81 @@ function BotForm({
           ))}
         </div>
         <p className="m-0 text-xs text-ink-3">{t('botForm.approvalSafety')}</p>
+      </fieldset>
+
+      <fieldset className="m-0 flex flex-col gap-2 border-0 p-0">
+        <legend className="mb-1 p-0 text-sm font-medium">{t('botForm.mcpServers')}</legend>
+        <div className="grid gap-2 sm:grid-cols-2">
+          {(['all', 'custom'] as const).map((mode) => (
+            <label
+              key={mode}
+              className={
+                form.mcpMode === mode
+                  ? 'flex cursor-pointer flex-col gap-1 rounded-lg border border-ink bg-surface-2 p-3'
+                  : 'flex cursor-pointer flex-col gap-1 rounded-lg border border-line p-3 transition-colors duration-[var(--dur-fast)] hover:bg-surface-2'
+              }
+            >
+              <span className="flex items-center gap-2">
+                <input type="radio" name="mcp-mode" className="room-check" checked={form.mcpMode === mode} onChange={() => set('mcpMode', mode)} />
+                <span className="text-sm font-medium">{t(mode === 'all' ? 'botForm.mcpEvery' : 'botForm.mcpChoose')}</span>
+              </span>
+              <span className="text-xs text-ink-2">{t(mode === 'all' ? 'botForm.mcpEveryHint' : 'botForm.mcpChooseHint')}</span>
+            </label>
+          ))}
+        </div>
+        {form.mcpMode === 'custom' ? (
+          mcpServers === null ? (
+            <div className="flex flex-col gap-2" aria-busy="true">
+              <Skeleton height={34} shape="block" />
+              <Skeleton height={34} shape="block" />
+            </div>
+          ) : mcpServers.length === 0 ? (
+            <div className="flex flex-col items-start gap-1 rounded-lg border border-line p-3">
+              <span className="text-sm text-ink-2">{t('botForm.mcpEmpty')}</span>
+              <Button variant="ghost" size="sm" onClick={onOpenSettings} className="!px-0 text-xs">
+                {t('botForm.mcpEmptyAction')}
+              </Button>
+            </div>
+          ) : (
+            <div className="flex flex-col overflow-hidden rounded-lg border border-line">
+              {mcpServers.map((server) => {
+                const disabled = !server.enabled;
+                const checked = !disabled && form.mcpServerIds.includes(server.id);
+                const detail = server.transport === 'stdio' ? (server.command ?? '') : (server.url ?? '');
+                return (
+                  <label
+                    key={server.id}
+                    className={cx(
+                      'flex items-start gap-2.5 border-b border-line px-3 py-2 last:border-b-0',
+                      disabled ? 'cursor-not-allowed bg-surface-2/50 opacity-60' : 'cursor-pointer hover:bg-surface-2',
+                    )}
+                  >
+                    <input
+                      type="checkbox"
+                      className="room-check mt-0.5"
+                      checked={checked}
+                      disabled={disabled}
+                      onChange={() =>
+                        set('mcpServerIds', checked ? form.mcpServerIds.filter((id) => id !== server.id) : [...form.mcpServerIds, server.id])
+                      }
+                    />
+                    <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                      <span className="flex flex-wrap items-center gap-2">
+                        <span className="truncate text-sm font-medium">{server.name}</span>
+                        <Badge>{t(server.transport === 'stdio' ? 'settings.mcpBadgeStdio' : 'settings.mcpBadgeHttp')}</Badge>
+                        {disabled ? <span className="text-xs text-ink-3">{t('botForm.mcpDisabled')}</span> : null}
+                      </span>
+                      {detail !== '' ? <span className="truncate font-mono text-xs text-ink-2">{detail}</span> : null}
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          )
+        ) : null}
+        {form.mcpMode === 'custom' && form.mcpServerIds.length === 0 ? (
+          <p className="m-0 text-xs text-ink-3">{t('botForm.mcpNoneSelected')}</p>
+        ) : null}
       </fieldset>
 
       <label className="flex cursor-pointer items-start gap-2.5 rounded-md px-1 py-1 text-sm hover:bg-surface-2">

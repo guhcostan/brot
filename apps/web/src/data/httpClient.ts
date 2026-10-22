@@ -335,8 +335,13 @@ export function createHttpClient({
     async createBot(input) {
       const parsed = CreateBot.parse(input);
       // 'ask' is the server default, so it is not sent: only an explicit 'edits' travels.
-      const { approvalMode, speakReplies, ...defaults } = parsed;
-      const body = { ...(approvalMode === 'edits' ? { approvalMode } : {}), ...(speakReplies ? { speakReplies: true } : {}), ...defaults };
+      const { approvalMode, speakReplies, mcpServerIds, ...defaults } = parsed;
+      const body = {
+        ...(approvalMode === 'edits' ? { approvalMode } : {}),
+        ...(speakReplies ? { speakReplies: true } : {}),
+        ...(mcpServerIds === undefined || mcpServerIds === null ? {} : { mcpServerIds }),
+        ...defaults,
+      };
       const response = await write('POST', '/api/bots', body);
       const bot = Bot.parse(await response.json());
       knownBots.add(bot.id);

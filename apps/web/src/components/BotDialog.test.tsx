@@ -2,6 +2,7 @@ import type { Bot, Team } from '@brot/protocol';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import type { BrowserProfile } from '../data/client';
+import { DEMO_MCP_SERVERS } from '../data/fixtures';
 import { t } from '../i18n';
 import { BotDialog, type BotDialogProps } from './BotDialog';
 
@@ -37,6 +38,7 @@ function render(overrides: Partial<BotDialogProps> = {}): string {
     startBrowserLogin: async () => ({ state: 'login', profile: { kind: 'own' } }),
     closeBrowser: noop,
     loadBrowserProfiles: async () => [],
+    loadMcpServers: async () => [],
     onClose: () => undefined,
     ...overrides,
   };
@@ -223,5 +225,65 @@ describe('BotDialog speak replies', () => {
     const html = render({ bot: { ...bot, speakReplies: true } });
 
     expect(speakInput(html)).toContain('checked=""');
+  });
+});
+
+describe('BotDialog MCP grants', () => {
+  const checkboxForServer = (html: string, name: string): string => {
+    const nameAt = html.indexOf(`>${name}<`);
+    if (nameAt === -1) return '';
+    const start = html.lastIndexOf('<input', nameAt);
+    return start === -1 ? '' : html.slice(start, html.indexOf('>', start) + 1);
+  };
+
+  it('defaults a new bot to every enabled server', () => {
+    const html = render({ initialMcpServers: DEMO_MCP_SERVERS });
+    const text = textOf(html);
+
+    expect(text).toContain(t('botForm.mcpServers'));
+    expect(text).toContain(t('botForm.mcpEvery'));
+    expect(text).toContain(t('botForm.mcpEveryHint'));
+    expect(text).toContain(t('botForm.mcpChoose'));
+    expect(text).not.toContain(t('botForm.mcpEveryHint') + 'x');
+    expect(text).not.toContain(t('botForm.mcpEmpty'));
+  });
+
+  it('lists servers in choose mode, dimming the ones disabled in Settings', () => {
+    const html = render({ initialMcpMode: 'custom', initialMcpServers: DEMO_MCP_SERVERS });
+    const text = textOf(html);
+
+    expect(text).toContain(t('botForm.mcpChoose'));
+    expect(text).toContain(t('botForm.mcpChooseHint'));
+    expect(text).toContain('filesystem');
+    expect(text).toContain('search');
+    expect(text).toContain(t('settings.mcpBadgeStdio'));
+    expect(text).toContain(t('settings.mcpBadgeHttp'));
+    expect(text).toContain('npx');
+    expect(text).toContain('https://mcp.example.com/search');
+    expect(text).toContain(t('botForm.mcpDisabled'));
+    expect(checkboxForServer(html, 'search')).toContain('disabled=""');
+    expect(checkboxForServer(html, 'filesystem')).not.toContain('disabled=""');
+  });
+
+  it('prefills an allowlist from the bot and checks its servers', () => {
+    const html = render({ bot: { ...bot, mcpServerIds: ['mcp_filesystem'] }, initialMcpServers: DEMO_MCP_SERVERS });
+    const text = textOf(html);
+
+    expect(text).toContain(t('botForm.mcpChoose'));
+    expect(checkboxForServer(html, 'filesystem')).toContain('checked=""');
+    expect(checkboxForServer(html, 'search')).not.toContain('checked=""');
+  });
+
+  it('shows the settings hint when no server exists', () => {
+    const text = textOf(render({ initialMcpMode: 'custom', initialMcpServers: [] }));
+
+    expect(text).toContain(t('botForm.mcpEmpty'));
+    expect(text).toContain(t('botForm.mcpEmptyAction'));
+  });
+
+  it('says when a custom list has no server ticked', () => {
+    const text = textOf(render({ bot: { ...bot, mcpServerIds: [] }, initialMcpServers: DEMO_MCP_SERVERS }));
+
+    expect(text).toContain(t('botForm.mcpNoneSelected'));
   });
 });
