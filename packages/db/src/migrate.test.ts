@@ -50,6 +50,7 @@ describe('migrate', () => {
       'computers',
       'devices',
       'events',
+      'mcp_servers',
       'memories',
       'messages',
       'policies',
@@ -65,7 +66,7 @@ describe('migrate', () => {
     ]);
 
     const applied = await handle.client.execute('SELECT COUNT(*) AS count FROM __drizzle_migrations');
-    expect(Number(applied.rows[0]?.count)).toBe(8);
+    expect(Number(applied.rows[0]?.count)).toBe(9);
   });
 
   it('adds the rooms, team task, and per-bot session schema on a fresh database', async () => {
@@ -415,6 +416,52 @@ describe('migrate', () => {
     expect(run.status).toBe('running');
     expect(await repos.routines.remove('routine_old')).toBe(true);
     expect(await repos.routineRuns.get(run.id)).toBeUndefined();
+  });
+
+  it('adds the mcp_servers table in place with its unique name', async () => {
+    const { handle } = await tempDb();
+    const journal = JSON.parse(await readFile(join(migrationsFolder, 'meta', '_journal.json'), 'utf8')) as {
+      entries: Array<{ tag: string; when: number }>;
+    };
+    const applied = journal.entries.slice(0, 8);
+    if (applied.length !== 8 || applied[7]?.tag !== '0007_new_christian_walker') {
+      throw new Error('journal must start with the 0000 to 0007 migrations');
+    }
+
+    for (const entry of applied) {
+      await handle.client.executeMultiple(await readFile(join(migrationsFolder, `${entry.tag}.sql`), 'utf8'));
+    }
+    await handle.client.execute(
+      'CREATE TABLE "__drizzle_migrations" ("id" INTEGER PRIMARY KEY AUTOINCREMENT, "hash" text NOT NULL, "created_at" numeric)',
+    );
+    for (const entry of applied) {
+      await handle.client.execute({
+        sql: 'INSERT INTO "__drizzle_migrations" ("hash", "created_at") VALUES (?, ?)',
+        args: [entry.tag, entry.when],
+      });
+    }
+
+    await migrate(handle.db);
+
+    expect(await tableNames(handle)).toContain('mcp_servers');
+    expect(await columnNames(handle, 'mcp_servers')).toEqual([
+      'id',
+      'name',
+      'transport',
+      'command',
+      'args',
+      'env',
+      'url',
+      'enabled',
+      'created_at',
+      'updated_at',
+    ]);
+    const indexes = await handle.client.execute("PRAGMA index_list('mcp_servers')");
+    expect(indexes.rows.some((row) => row.name === 'mcp_servers_name_uq' && Number(row.unique) === 1)).toBe(true);
+
+    const repos = createRepos(handle.db);
+    const server = await repos.mcpServers.create({ name: 'tools', command: 'npx' });
+    expect((await repos.mcpServers.get(server.id))?.name).toBe('tools');
   });
 
   it('enables foreign keys on the connection', async () => {

@@ -1,11 +1,13 @@
+import { isAbsolute } from 'node:path';
 import { Hono } from 'hono';
 import { createEngineRegistry } from '@brot/engines';
 import type { ComputerHandle, CanonicalEvent, EngineDriver, EngineEvent, McpServerSpec, RunContext } from '@brot/protocol';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ApprovalScope } from './broker';
 import type { ComputerProvider } from './computers/types';
 import type { ProviderSpec } from './llm';
 import type { BrotMcpService } from './mcp/types';
+import { stdioFixtureOnPath } from './mcp-servers/test-helpers';
 import { createTestContext, recordEvents, waitUntil, type TestContext } from './testing';
 
 const contexts: TestContext[] = [];
@@ -941,5 +943,138 @@ describe('run queue', () => {
     gate.release('first');
     await first.settled;
     expect(gate.started).toEqual(['first']);
+  });
+});
+
+describe('user MCP servers', () => {
+  it('attaches every enabled user server next to the Brot MCP server', async () => {
+    const engine = fakeEngine(replies);
+    const { mcp } = fakeMcp();
+    const ctx = await contextWith({ engines: createEngineRegistry([engine.driver]), mcp: () => mcp });
+    await ctx.services.repos.mcpServers.create({
+      name: 'local-tools',
+      command: process.execPath,
+      args: ['server.mjs'],
+      env: { LEVEL: 'info' },
+    });
+    await ctx.services.repos.mcpServers.create({ name: 'off', command: process.execPath, enabled: false });
+    await ctx.services.repos.mcpServers.create({ name: 'remote', transport: 'http', url: 'https://mcp.example.com/mcp' });
+    const { threadId } = await botAndThread(ctx, { computer: 'none' });
+    const { runId } = await runToEnd(ctx, threadId);
+
+    expect(engine.contexts[0]?.mcpServers).toEqual([
+      { name: 'brot', url: `http://127.0.0.1:${ctx.services.config.port}/mcp/runs/${runId}`, headers: {} },
+      { name: 'local-tools', command: process.execPath, args: ['server.mjs'], env: { LEVEL: 'info' } },
+      { name: 'remote', url: 'https://mcp.example.com/mcp', headers: {} },
+    ]);
+    expect(engine.contexts[0]?.mcpServers?.some((spec) => spec.name === 'off')).toBe(false);
+  });
+
+  it('has no mcpServers when neither Brot nor a user server is configured', async () => {
+    const engine = fakeEngine(replies);
+    const ctx = await contextWith({ engines: createEngineRegistry([engine.driver]), computers: {} });
+    const { threadId } = await botAndThread(ctx, { computer: 'none' });
+    const { terminal } = await runToEnd(ctx, threadId);
+
+    expect(terminal.type).toBe('run.completed');
+    expect(engine.contexts[0]).not.toHaveProperty('mcpServers');
+  });
+
+  it('attaches a user server even when Brot has no MCP server', async () => {
+    const engine = fakeEngine(replies);
+    const ctx = await contextWith({ engines: createEngineRegistry([engine.driver]), computers: {} });
+    await ctx.services.repos.mcpServers.create({ name: 'local-tools', command: process.execPath });
+    const { threadId } = await botAndThread(ctx, { computer: 'none' });
+    await runToEnd(ctx, threadId);
+
+    expect(engine.contexts[0]?.mcpServers).toEqual([
+      { name: 'local-tools', command: process.execPath, args: [], env: {} },
+    ]);
+    expect(engine.contexts[0]).not.toHaveProperty('teamTools');
+  });
+
+  it('resolves secret env values into the spec but never into the prompt or the event log', async () => {
+    const engine = fakeEngine(replies);
+    const { mcp } = fakeMcp();
+    const ctx = await contextWith({ engines: createEngineRegistry([engine.driver]), mcp: () => mcp });
+    await ctx.services.vault.set('mcp-token', 's3cret-value');
+    await ctx.services.repos.mcpServers.create({
+      name: 'local-tools',
+      command: process.execPath,
+      env: { TOKEN: 'secret://mcp-token', LEVEL: 'debug' },
+    });
+    const { threadId } = await botAndThread(ctx, { computer: 'none' });
+    const { events } = await runToEnd(ctx, threadId);
+
+    const userSpec = engine.contexts[0]?.mcpServers?.find((spec) => spec.name === 'local-tools');
+    expect(userSpec).toEqual({
+      name: 'local-tools',
+      command: process.execPath,
+      args: [],
+      env: { TOKEN: 's3cret-value', LEVEL: 'debug' },
+    });
+    expect(engine.contexts[0]?.input).not.toContain('s3cret-value');
+    expect(JSON.stringify(engine.contexts[0]?.history)).not.toContain('s3cret-value');
+    expect(JSON.stringify(events)).not.toContain('s3cret-value');
+  });
+
+  it('omits an unresolvable secret from the env and still starts the run', async () => {
+    const engine = fakeEngine(replies);
+    const { mcp } = fakeMcp();
+    const ctx = await contextWith({ engines: createEngineRegistry([engine.driver]), mcp: () => mcp });
+    await ctx.services.repos.mcpServers.create({
+      name: 'local-tools',
+      command: process.execPath,
+      env: { TOKEN: 'secret://not-in-the-vault', LEVEL: 'debug' },
+    });
+    const { threadId } = await botAndThread(ctx, { computer: 'none' });
+    const { terminal } = await runToEnd(ctx, threadId);
+
+    expect(terminal.type).toBe('run.completed');
+    const userSpec = engine.contexts[0]?.mcpServers?.find((spec) => spec.name === 'local-tools');
+    expect(userSpec).toEqual({ name: 'local-tools', command: process.execPath, args: [], env: { LEVEL: 'debug' } });
+  });
+  it('resolves a PATH command to an absolute path in the engine spec', async () => {
+    const engine = fakeEngine(replies);
+    const { mcp } = fakeMcp();
+    const ctx = await contextWith({ engines: createEngineRegistry([engine.driver]), mcp: () => mcp });
+    const launcher = await stdioFixtureOnPath();
+    try {
+      await ctx.services.repos.mcpServers.create({ name: 'path-tools', command: launcher.command });
+      const { threadId } = await botAndThread(ctx, { computer: 'none' });
+      const { terminal } = await runToEnd(ctx, threadId);
+      expect(terminal.type).toBe('run.completed');
+
+      const spec = engine.contexts[0]?.mcpServers?.find((server) => server.name === 'path-tools');
+      expect(spec).toMatchObject({ command: expect.stringMatching(new RegExp(`^${launcher.dir}`)) });
+      expect(spec && 'command' in spec && isAbsolute(spec.command)).toBe(true);
+    } finally {
+      await launcher.restore();
+    }
+  });
+
+  it('skips a server whose command is not on PATH and still starts the run, logging no env value', async () => {
+    const engine = fakeEngine(replies);
+    const { mcp } = fakeMcp();
+    const ctx = await contextWith({ engines: createEngineRegistry([engine.driver]), mcp: () => mcp });
+    await ctx.services.vault.set('mcp-token', 's3cret-value');
+    await ctx.services.repos.mcpServers.create({
+      name: 'broken-tools',
+      command: 'brot-no-such-command-xyz',
+      env: { TOKEN: 'secret://mcp-token' },
+    });
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      const { threadId } = await botAndThread(ctx, { computer: 'none' });
+      const { terminal } = await runToEnd(ctx, threadId);
+      expect(terminal.type).toBe('run.completed');
+      expect(engine.contexts[0]?.mcpServers?.map((server) => server.name)).toEqual(['brot']);
+      const logged = errors.mock.calls.map((call) => call.join(' ')).join('\n');
+      expect(logged).toContain('broken-tools');
+      expect(logged).toContain('brot-no-such-command-xyz');
+      expect(logged).not.toContain('s3cret-value');
+    } finally {
+      errors.mockRestore();
+    }
   });
 });

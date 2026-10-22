@@ -19,6 +19,7 @@ import type {
   DeviceRole,
   EgressPolicy,
   MemoryKind,
+  McpServerTransport,
   MessageRole,
   PolicyEffect,
   ResponderMode,
@@ -357,4 +358,26 @@ export const tasks = sqliteTable(
     index('tasks_thread_idx').on(t.threadId),
     index('tasks_parent_idx').on(t.parentTaskId),
   ],
+);
+
+/**
+ * A user MCP server. Brot attaches every enabled one to a run next to its own MCP server. `env` holds
+ * configuration and `secret://` references only; the vault resolves a reference into the child process
+ * when it is spawned, so a value is never stored in this row.
+ */
+export const mcpServers = sqliteTable(
+  'mcp_servers',
+  {
+    id: text('id').primaryKey(),
+    name: text('name').notNull(),
+    transport: text('transport').$type<McpServerTransport>().notNull(),
+    command: text('command'),
+    args: text('args', { mode: 'json' }).$type<string[]>().notNull().default(sql`'[]'`),
+    env: text('env', { mode: 'json' }).$type<Record<string, string>>().notNull().default(sql`'{}'`),
+    url: text('url'),
+    enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
+    createdAt: text('created_at').notNull(),
+    updatedAt: text('updated_at').notNull(),
+  },
+  (t) => [uniqueIndex('mcp_servers_name_uq').on(t.name)],
 );

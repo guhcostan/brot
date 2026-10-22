@@ -159,6 +159,7 @@ export async function createServices(
     computers,
     mcp,
     llm,
+    vault,
     teamTools: teamTools.length > 0,
     mode: config.mode,
     computerImage: config.computerImage,

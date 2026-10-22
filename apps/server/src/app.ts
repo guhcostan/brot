@@ -4,6 +4,7 @@ import type { EngineRegistry } from '@brot/engines';
 import {
   ApprovalStatus,
   CreateBot,
+  CreateMcpServer,
   CreateMemory,
   CreatePolicy,
   CreateRoom,
@@ -21,6 +22,7 @@ import {
   TaskStatus,
   ThreadKind,
   UpdateBot,
+  UpdateMcpServer,
   UpdateMemory,
   UpdateRoomMembers,
   UpdateRoutine,
@@ -47,6 +49,7 @@ import type { LlmRelay, ProviderSpec } from './llm';
 import { botBrowserKind } from './browser/tools';
 import type { HostBrowserService } from './browser/types';
 import { mountDesktopRoutes, type DesktopService } from './desktop';
+import { testMcpServer } from './mcp-servers';
 import { RuleViolation } from './rooms/errors';
 import type { RoomService } from './rooms/service';
 import type { TaskService } from './rooms/tasks';
@@ -569,6 +572,61 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
   app.delete('/api/skills/:id', async (c) =>
     (await repos.skills.remove(c.req.param('id'))) ? c.body(null, 204) : notFound(c, 'Skill'),
   );
+
+  // User MCP servers: stored configuration that runs receive next to the Brot MCP server. Env values may be
+  // `secret://` references; they are returned as references and resolved only into a child process.
+
+  app.get('/api/mcp/servers', async (c) => c.json(await repos.mcpServers.list()));
+
+  app.post('/api/mcp/servers', async (c) => {
+    const body = await parseBody(c, CreateMcpServer);
+    if (!body.ok) return body.response;
+    if ((await repos.mcpServers.list()).some((server) => server.name === body.data.name)) {
+      return c.json(
+        { error: 'Invalid request', issues: [{ path: ['name'], message: 'an MCP server with that name already exists' }] },
+        400,
+      );
+    }
+    return c.json(await repos.mcpServers.create(body.data), 201);
+  });
+
+  app.patch('/api/mcp/servers/:id', async (c) => {
+    const id = c.req.param('id');
+    const current = await repos.mcpServers.get(id);
+    if (!current) return notFound(c, 'MCP server');
+    const body = await parseBody(c, UpdateMcpServer);
+    if (!body.ok) return body.response;
+    const renamed = body.data.name;
+    if (
+      renamed !== undefined &&
+      renamed !== current.name &&
+      (await repos.mcpServers.list()).some((server) => server.name === renamed)
+    ) {
+      return c.json(
+        { error: 'Invalid request', issues: [{ path: ['name'], message: 'an MCP server with that name already exists' }] },
+        400,
+      );
+    }
+    try {
+      const updated = await repos.mcpServers.update(id, body.data);
+      return updated ? c.json(updated) : notFound(c, 'MCP server');
+    } catch (error) {
+      // The patch merged with the stored server can break the transport's required field.
+      if (error instanceof z.ZodError) return invalid(c, error);
+      throw error;
+    }
+  });
+
+  app.delete('/api/mcp/servers/:id', async (c) =>
+    (await repos.mcpServers.remove(c.req.param('id'))) ? c.body(null, 204) : notFound(c, 'MCP server'),
+  );
+
+  /** Tests the handshake the way a run's engine would make it. A failed handshake is a 200 with `ok: false`. */
+  app.post('/api/mcp/servers/:id/test', async (c) => {
+    const server = await repos.mcpServers.get(c.req.param('id'));
+    if (!server) return notFound(c, 'MCP server');
+    return c.json(await testMcpServer(server, { vault }));
+  });
 
   app.get('/api/routines', async (c) => c.json(await repos.routines.list({ botId: c.req.query('botId') })));
 

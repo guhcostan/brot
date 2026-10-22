@@ -1186,3 +1186,74 @@ describe('bot team budget', () => {
     expect((await repos.bots.get(bot.id))?.teamBudgetUsd).toBeUndefined();
   });
 });
+
+describe('mcp servers', () => {
+  it('creates a stdio server with defaults and reads it back', async () => {
+    const server = await repos.mcpServers.create({ name: 'tools', command: 'npx' });
+    expect(server).toMatchObject({
+      name: 'tools',
+      transport: 'stdio',
+      command: 'npx',
+      args: [],
+      env: {},
+      enabled: true,
+    });
+    expect(server.url).toBeUndefined();
+    expect(await repos.mcpServers.get(server.id)).toEqual(server);
+    expect(await repos.mcpServers.list()).toEqual([server]);
+  });
+
+  it('stores args, env secret references and an http url', async () => {
+    const stdio = await repos.mcpServers.create({
+      name: 'with-env',
+      command: 'node',
+      args: ['server.mjs', '--stdio'],
+      env: { LOG_LEVEL: 'info', API_KEY: 'secret://mcp-key' },
+    });
+    expect((await repos.mcpServers.get(stdio.id))?.env).toEqual({
+      LOG_LEVEL: 'info',
+      API_KEY: 'secret://mcp-key',
+    });
+    expect((await repos.mcpServers.get(stdio.id))?.args).toEqual(['server.mjs', '--stdio']);
+
+    const web = await repos.mcpServers.create({ name: 'remote', transport: 'http', url: 'http://127.0.0.1:3400/mcp' });
+    expect(web).toMatchObject({ transport: 'http', url: 'http://127.0.0.1:3400/mcp', args: [], env: {} });
+    expect(web.command).toBeUndefined();
+  });
+
+  it('lists only enabled servers for runs', async () => {
+    const on = await repos.mcpServers.create({ name: 'on', command: 'node' });
+    const off = await repos.mcpServers.create({ name: 'off', command: 'node', enabled: false });
+    expect((await repos.mcpServers.listEnabled()).map((server) => server.id)).toEqual([on.id]);
+
+    expect((await repos.mcpServers.update(off.id, { enabled: true }))?.enabled).toBe(true);
+    expect((await repos.mcpServers.listEnabled()).map((server) => server.id).sort()).toEqual([on.id, off.id].sort());
+  });
+
+  it('keeps names unique', async () => {
+    await repos.mcpServers.create({ name: 'once', command: 'node' });
+    await expect(repos.mcpServers.create({ name: 'once', command: 'node' })).rejects.toThrow();
+  });
+
+  it('merges an update and validates the resulting transport fields', async () => {
+    const server = await repos.mcpServers.create({ name: 'renamable', command: 'node' });
+    const updated = await repos.mcpServers.update(server.id, { name: 'renamed', enabled: false });
+    expect(updated).toMatchObject({ name: 'renamed', enabled: false, command: 'node' });
+    expect((updated?.updatedAt ?? '') >= server.updatedAt).toBe(true);
+
+    const switched = await repos.mcpServers.update(server.id, { transport: 'http', url: 'http://localhost:9000/mcp' });
+    expect(switched).toMatchObject({ name: 'renamed', command: 'node', transport: 'http', url: 'http://localhost:9000/mcp' });
+
+    await expect(repos.mcpServers.update(server.id, { transport: 'stdio' })).resolves.toMatchObject({ transport: 'stdio' });
+    const broken = await repos.mcpServers.create({ name: 'broken', transport: 'http', url: 'https://example.com/mcp' });
+    await expect(repos.mcpServers.update(broken.id, { transport: 'stdio' })).rejects.toThrow(/command/);
+    expect(await repos.mcpServers.update('missing', { name: 'x' })).toBeUndefined();
+  });
+
+  it('removes a server and reports missing ids', async () => {
+    const server = await repos.mcpServers.create({ name: 'gone', command: 'node' });
+    expect(await repos.mcpServers.remove(server.id)).toBe(true);
+    expect(await repos.mcpServers.remove(server.id)).toBe(false);
+    expect(await repos.mcpServers.get(server.id)).toBeUndefined();
+  });
+});

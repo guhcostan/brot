@@ -21,10 +21,12 @@ import type { ComputerProvider } from './computers/types';
 import type { ServerMode } from './config';
 import type { LlmRelay, ResolvedRoute, RunUsage } from './llm';
 import type { BrotMcp } from './mcp/types';
+import { enabledMcpServerSpecs } from './mcp-servers/specs';
 import { selectForPrompt } from './memory/recall';
 import type { ChainLedger } from './rooms/chains';
 import { buildTurn, roomFor } from './rooms/context';
 import type { BotRunOutcome, BotRunRequest } from './team/types';
+import type { Vault } from './vault';
 
 /** Providers by the computer kind they serve. A `none` bot has no computer, so it has no entry. */
 export type ComputerProviders = Partial<Record<Exclude<ComputerKind, 'none'>, ComputerProvider>>;
@@ -43,6 +45,8 @@ export interface HarnessDeps {
   chains: ChainLedger;
   /** Relays model requests of `RELAYED_ENGINES` runs, so the provider key never reaches the engine. */
   llm: LlmRelay;
+  /** Resolves a user MCP server's `secret://` env values into its child process. Values never reach the model. */
+  vault: Vault;
   /** Whether the Brot team tools are attached to runs that have the Brot MCP server. Shown to the engine in the prompt. */
   teamTools?: boolean;
 }
@@ -117,7 +121,7 @@ interface ActiveRun {
 type TerminalStatus = 'completed' | 'failed' | 'cancelled';
 
 export function createHarness(deps: HarnessDeps): Harness {
-  const { repos, bus, broker, engines, computers, mcp, llm, mode, computerImage, loopbackUrl, chains } = deps;
+  const { repos, bus, broker, engines, computers, mcp, llm, mode, computerImage, loopbackUrl, chains, vault } = deps;
   const teamTools = deps.teamTools ?? false;
   /** Every run that has not ended, queued ones included, by run id. */
   const active = new Map<string, ActiveRun>();
@@ -273,9 +277,13 @@ export function createHarness(deps: HarnessDeps): Harness {
               baseUrl: `${place.brotBaseUrl}/llm/runs/${encodeURIComponent(state.runId)}/v1`,
               token: relay.token,
             };
-      const mcpServers = mcp
+      // The run's engine gets the Brot MCP server and every enabled user server. Secret env values are resolved
+      // here, for the child process only: they are part of the spec, never of the prompt or an event.
+      const userMcpServers = await enabledMcpServerSpecs(repos, vault);
+      const brotMcpServers = mcp
         ? [mcp.specForRun({ botId: bot.id, threadId: state.threadId, runId: state.runId }, place.brotBaseUrl)]
-        : undefined;
+        : [];
+      const mcpServers = [...brotMcpServers, ...userMcpServers];
       const [room, team] = await Promise.all([roomFor(repos, thread), teamFor(bot)]);
       const ctx: BrotRunContext = {
         runId: state.runId,
@@ -289,11 +297,11 @@ export function createHarness(deps: HarnessDeps): Harness {
         requestTool: (req) => requestTool(state, req),
         ...(engineSessionId === undefined ? {} : { engineSessionId }),
         ...(place.computer === undefined ? {} : { computer: place.computer }),
-        ...(mcpServers === undefined ? {} : { mcpServers }),
+        ...(mcpServers.length === 0 ? {} : { mcpServers }),
         ...(llmRoute === undefined ? {} : { llm: llmRoute }),
         ...(room === undefined ? {} : { room }),
         ...(team === undefined ? {} : { team }),
-        ...(teamTools && mcpServers !== undefined ? { teamTools: true } : {}),
+        ...(teamTools && mcp !== undefined ? { teamTools: true } : {}),
       };
       for await (const event of driver.run(ctx)) {
         if (state.controller.signal.aborted) break;

@@ -4,6 +4,7 @@ import { createBotRepo } from './bots';
 import { createComputerRepo } from './computers';
 import { createDeviceRepo } from './devices';
 import { createEventRepo } from './events';
+import { createMcpServerRepo } from './mcp-servers';
 import { createMemoryRepo } from './memories';
 import { createMessageRepo } from './messages';
 import { createPolicyRepo } from './policies';
@@ -26,6 +27,7 @@ export function createRepos(db: Db) {
     approvals: createApprovalRepo(db),
     policies: createPolicyRepo(db),
     memories: createMemoryRepo(db),
+    mcpServers: createMcpServerRepo(db),
     skills: createSkillRepo(db),
     computers: createComputerRepo(db),
     routines: createRoutineRepo(db),

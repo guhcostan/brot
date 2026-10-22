@@ -57,6 +57,13 @@
       "when": 1792674960042,
       "tag": "0007_new_christian_walker",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1792678136472,
+      "tag": "0008_smooth_puma",
+      "breakpoints": true
     }
   ]
 }
