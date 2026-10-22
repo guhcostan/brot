@@ -30,6 +30,12 @@ export const Bot = z.object({
    * bot drives and the user can watch live and take over. Absent means a headless sandbox.
    */
   desktop: z.boolean().optional(),
+  /**
+   * A browser on the server machine with the bot's own persistent profile, so logins survive restarts.
+   * Independent of `computer`: a `none` bot with `browser: true` can still browse. Browsing is subject to
+   * the bot's `egress` policy.
+   */
+  browser: z.boolean().optional(),
   /** Absent means deny-all. Stored bots always carry a policy; the default is `{ mode: 'deny', allow: [] }`. */
   egress: EgressPolicy.optional(),
   /**

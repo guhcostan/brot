@@ -38,6 +38,7 @@ export const CreateBot = z
     model: z.string().min(1).optional(),
     computer: ComputerKind.default('sandbox'),
     desktop: z.boolean().optional(),
+    browser: z.boolean().default(false),
     avatar: z.string().optional(),
     egress: EgressPolicy.default(defaultEgressPolicy),
     teamBudgetUsd: z.number().nonnegative().optional(),
@@ -57,6 +58,7 @@ export const UpdateBot = z
     model: z.string().min(1).optional(),
     computer: ComputerKind.optional(),
     desktop: z.boolean().optional(),
+    browser: z.boolean().optional(),
     egress: EgressPolicy.optional(),
     /** `null` removes the cap. */
     teamBudgetUsd: z.number().nonnegative().nullable().optional(),
@@ -289,6 +291,15 @@ export const SetTakeover = z.object({
   reason: z.string().max(500).optional(),
 });
 export type SetTakeover = z.infer<typeof SetTakeover>;
+
+/**
+ * What `GET /api/bots/:id/browser` returns: the bot's host browser. `login` means a headed window is open for the
+ * person to sign in.
+ */
+export const BrowserStatus = z.object({
+  state: z.enum(['stopped', 'running', 'login']),
+});
+export type BrowserStatus = z.infer<typeof BrowserStatus>;
 
 /** What `GET /api/bots/:id/computer` returns: the computer's state, whether it has a screen, and who drives it. */
 export const ComputerInfo = z.object({

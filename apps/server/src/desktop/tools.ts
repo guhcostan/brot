@@ -16,19 +16,12 @@ interface DesktopToolDeps {
 }
 
 const Empty = z.object({});
-const Ref = z.number().int().min(1).max(999_999);
-const OpenInput = z.object({ url: z.url({ protocol: /^https?$/ }).max(2048) });
-const ClickInput = z.object({ ref: Ref });
-const TypeInput = z.object({
-  ref: Ref,
-  text: z.string().min(1).max(2000),
-  submit: z.boolean().optional(),
-});
-const KeyInput = z.object({ key: z.string().regex(/^[A-Za-z0-9_+]{1,40}$/) });
-const ScrollInput = z.object({ direction: z.enum(['up', 'down']) });
 const TakeoverInput = z.object({ reason: z.string().min(1).max(500) });
 
-/** Every bot desktop tool, for bots that have `desktop: true` on a sandbox computer. Other bots never see them. */
+/**
+ * The tools that only a bot desktop has: a screenshot and a human takeover. The browser tools live in
+ * `browser/tools.ts`, because a bot may browse on the host instead of in its computer.
+ */
 export function createDesktopTools(deps: DesktopToolDeps): BrotTool[] {
   const { repos, desktop, takeovers } = deps;
 
@@ -38,7 +31,7 @@ export function createDesktopTools(deps: DesktopToolDeps): BrotTool[] {
   }
 
   /**
-   * A tool that drives the browser. It refuses to run while the person has control, and it refuses a bot with
+   * A tool that drives the desktop. It refuses to run while the person has control, and it refuses a bot with
    * no desktop before any approval is asked.
    */
   function driving<T>(
@@ -76,144 +69,12 @@ export function createDesktopTools(deps: DesktopToolDeps): BrotTool[] {
 
   const none = async (): Promise<undefined> => undefined;
 
-  const browserFailure = (error: unknown): ToolResult => ({
+  const desktopFailure = (error: unknown): ToolResult => ({
     ok: false,
     output: error instanceof Error ? error.message : String(error),
   });
 
   return [
-    driving(
-      'browser_open',
-      "Open a web address in the bot's browser. Navigation is a read, but the computer's egress policy still applies.",
-      OpenInput,
-      'read',
-      ({ url }) => `Open ${url} in the bot's browser`,
-      none,
-      async (bot, { url }) => {
-        try {
-          const page = await desktop.browser(bot, 'open', { url });
-          return { ok: true, output: `Opened "${String(page.title ?? '')}" at ${String(page.url ?? url)}. Take a snapshot to read it.` };
-        } catch (error) {
-          return browserFailure(error);
-        }
-      },
-    ),
-
-    driving(
-      'browser_snapshot',
-      'Read the browser page as a text tree. Interactive elements carry [ref=N]; use those refs with the click and type tools. Refs are valid until the next snapshot.',
-      Empty,
-      'read',
-      () => "Read the bot's browser page",
-      none,
-      async (bot) => {
-        try {
-          const page = await desktop.browser(bot, 'snapshot', {});
-          return { ok: true, output: `${String(page.title ?? '')} (${String(page.url ?? '')})\n${String(page.text ?? '')}` };
-        } catch (error) {
-          return browserFailure(error);
-        }
-      },
-    ),
-
-    driving(
-      'browser_click',
-      'Click an element by its [ref=N] from the latest snapshot.',
-      ClickInput,
-      'write',
-      ({ ref }) => `Click element ${ref} in the bot's browser`,
-      none,
-      async (bot, { ref }) => {
-        try {
-          const page = await desktop.browser(bot, 'click', { ref: String(ref) });
-          return { ok: true, output: `Clicked. Now at "${String(page.title ?? '')}" (${String(page.url ?? '')}). Take a snapshot to see the result.` };
-        } catch (error) {
-          return browserFailure(error);
-        }
-      },
-    ),
-
-    driving(
-      'browser_type',
-      'Type text into a field by its [ref=N]. Refuses secret:// values, password fields and card fields: the person fills those through a takeover.',
-      TypeInput,
-      'write',
-      ({ ref, text }) => `Type "${text.slice(0, 120)}" into element ${ref} in the bot's browser`,
-      async (bot, { ref, text }) => {
-        if (/secret:\/\//.test(text)) {
-          return 'Secret values cannot be typed by the bot. Call request_takeover and let the person enter them.';
-        }
-        try {
-          const info = await desktop.browser(bot, 'field', { ref: String(ref) });
-          if (info.sensitive === true) {
-            return `Refused: element ${ref} is ${String(info.reason ?? 'a sensitive field')}. Call request_takeover and let the person fill it.`;
-          }
-        } catch (error) {
-          return error instanceof Error ? error.message : String(error);
-        }
-        return undefined;
-      },
-      async (bot, { ref, text, submit }) => {
-        try {
-          await desktop.browser(bot, 'type', { ref: String(ref), text, submit: submit === true });
-          return { ok: true, output: `Typed into element ${ref}. Take a snapshot before the next step; refs may have changed.` };
-        } catch (error) {
-          return browserFailure(error);
-        }
-      },
-    ),
-
-    driving(
-      'browser_key',
-      'Press a key in the browser, for example Enter, Tab, Escape or PageDown.',
-      KeyInput,
-      'write',
-      ({ key }) => `Press ${key} in the bot's browser`,
-      none,
-      async (bot, { key }) => {
-        try {
-          await desktop.browser(bot, 'key', { key });
-          return { ok: true, output: `Pressed ${key}.` };
-        } catch (error) {
-          return browserFailure(error);
-        }
-      },
-    ),
-
-    driving(
-      'browser_scroll',
-      'Scroll the browser page up or down by about one screen.',
-      ScrollInput,
-      'read',
-      ({ direction }) => `Scroll ${direction} in the bot's browser`,
-      none,
-      async (bot, { direction }) => {
-        try {
-          await desktop.browser(bot, 'scroll', { direction });
-          return { ok: true, output: `Scrolled ${direction}. Take a snapshot to see the new part.` };
-        } catch (error) {
-          return browserFailure(error);
-        }
-      },
-    ),
-
-    driving(
-      'browser_back',
-      'Go back one page in the browser history.',
-      Empty,
-      'read',
-      () => "Go back in the bot's browser",
-      none,
-      async (bot) => {
-        try {
-          const page = await desktop.browser(bot, 'back', {});
-          return { ok: true, output: `Back at "${String(page.title ?? '')}" (${String(page.url ?? '')}).` };
-        } catch (error) {
-          return browserFailure(error);
-        }
-      },
-    ),
-
     driving(
       'computer_screenshot',
       'See the bot desktop as an image. Use it only when the text snapshot is not enough.',
@@ -230,7 +91,7 @@ export function createDesktopTools(deps: DesktopToolDeps): BrotTool[] {
             image: { mimeType: 'image/jpeg', data: Buffer.from(jpeg).toString('base64') },
           };
         } catch (error) {
-          return browserFailure(error);
+          return desktopFailure(error);
         }
       },
     ),

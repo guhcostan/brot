@@ -114,6 +114,12 @@ describe('entity schemas', () => {
     expect(roundTrip(Device, device)).toEqual(device);
   });
 
+  it('round-trips a bot with a host browser flag', () => {
+    const withBrowser = { ...bot, browser: true };
+    expect(roundTrip(Bot, withBrowser)).toEqual(withBrowser);
+    expect(Bot.parse(bot).browser).toBeUndefined();
+  });
+
   it('round-trips a bot with an egress policy and a thread with an engine session', () => {
     const withEgress = { ...bot, egress: { mode: 'allowlist', allow: ['api.github.com', '*.example.com'] } };
     expect(roundTrip(Bot, withEgress)).toEqual(withEgress);

@@ -39,6 +39,8 @@ import { PairingError, type Pairing } from './pairing';
 import { cronError, type Scheduler } from './scheduler';
 import type { BrotMcpService } from './mcp/types';
 import type { LlmRelay, ProviderSpec } from './llm';
+import { botBrowserKind } from './browser/tools';
+import type { HostBrowserService } from './browser/types';
 import { mountDesktopRoutes, type DesktopService } from './desktop';
 import { RuleViolation } from './rooms/errors';
 import type { RoomService } from './rooms/service';
@@ -71,6 +73,8 @@ export interface AppDeps {
   llm?: Pick<LlmRelay, 'route'>;
   /** The bot desktop service. Absent when no sandbox computer provider is configured: the desktop routes are then not mounted. */
   desktop?: DesktopService;
+  /** The bot browser on the server machine, for bots with `browser: true` and no desktop computer. */
+  browser: HostBrowserService;
   /** The model providers the relay knows (seeded plus providers.json). Listed by GET /api/providers. */
   providers?: readonly ProviderSpec[];
 }
@@ -157,7 +161,7 @@ function ruleViolation(c: Context<AppEnv>, error: unknown): Response {
 }
 
 export function createApp(deps: AppDeps): Hono<AppEnv> {
-  const { repos, bus, broker, harness, scheduler, vault, pairing, engines, rooms, tasks, config } = deps;
+  const { repos, bus, broker, harness, scheduler, vault, pairing, engines, rooms, tasks, config, browser } = deps;
   const trustLoopback = deps.trustLoopback ?? true;
   const app = new Hono<AppEnv>();
 
@@ -217,6 +221,37 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     await harness.cancelBotRuns(id);
     await repos.bots.remove(id);
     await scheduler.sync();
+    return c.body(null, 204);
+  });
+
+  /** What the bot's browser on the server machine is doing. A bot without `browser: true` has none. */
+  app.get('/api/bots/:id/browser', async (c) => {
+    const bot = await repos.bots.get(c.req.param('id'));
+    if (!bot) return notFound(c, 'Bot');
+    if (bot.browser !== true) return c.json({ error: 'This bot has no browser' }, 409);
+    return c.json(await browser.status(bot));
+  });
+
+  /**
+   * Opens a headed window on the server machine so the person can sign in, and leaves it open. The profile keeps
+   * the session for the bot's own runs. A desktop sandbox bot already has a browser in its computer.
+   */
+  app.post('/api/bots/:id/browser/login', async (c) => {
+    const bot = await repos.bots.get(c.req.param('id'));
+    if (!bot) return notFound(c, 'Bot');
+    if (bot.browser !== true) return c.json({ error: 'This bot has no browser' }, 409);
+    if (botBrowserKind(bot) === 'desktop') {
+      return c.json({ error: 'This bot already has a browser in its desktop' }, 409);
+    }
+    return c.json(await browser.openForLogin(bot), 202);
+  });
+
+  /** Closes the bot's browser and saves its profile. Closing a browser that is already stopped is not an error. */
+  app.post('/api/bots/:id/browser/close', async (c) => {
+    const bot = await repos.bots.get(c.req.param('id'));
+    if (!bot) return notFound(c, 'Bot');
+    if (bot.browser !== true) return c.json({ error: 'This bot has no browser' }, 409);
+    await browser.close(bot);
     return c.body(null, 204);
   });
 

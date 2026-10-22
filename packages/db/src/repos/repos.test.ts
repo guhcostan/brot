@@ -54,6 +54,19 @@ describe('bots', () => {
     expect(updated?.egress).toEqual({ mode: 'deny', allow: [] });
   });
 
+  it('stores a host browser flag and leaves it unset when false', async () => {
+    const plain = await repos.bots.create({ name: 'Ada', job: 'x' });
+    expect(plain.browser).toBeUndefined();
+
+    const browsing = await repos.bots.create({ name: 'Bo', job: 'x', browser: true });
+    expect(browsing.browser).toBe(true);
+    expect((await repos.bots.get(browsing.id))?.browser).toBe(true);
+    expect((await repos.bots.list()).find((bot) => bot.id === browsing.id)?.browser).toBe(true);
+
+    expect((await repos.bots.update(browsing.id, { browser: false }))?.browser).toBeUndefined();
+    expect((await repos.bots.update(plain.id, { browser: true }))?.browser).toBe(true);
+  });
+
   it('rejects invalid egress hosts on create and update', async () => {
     await expect(
       repos.bots.create({ name: 'Ada', job: 'x', egress: { mode: 'allowlist', allow: ['https://github.com'] } }),

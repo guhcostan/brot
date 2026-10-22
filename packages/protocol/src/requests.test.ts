@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  BrowserStatus,
   CreateBot,
   CreateRoom,
   CreateRoutine,
@@ -21,8 +22,21 @@ describe('request schemas', () => {
       instructions: '',
       engine: 'mock',
       computer: 'sandbox',
+      browser: false,
       egress: { mode: 'deny', allow: [] },
     });
+  });
+
+  it('validates a host browser status', () => {
+    expect(BrowserStatus.parse({ state: 'login' })).toEqual({ state: 'login' });
+    expect(BrowserStatus.parse({ state: 'running' })).toEqual({ state: 'running' });
+    expect(() => BrowserStatus.parse({ state: 'opening' })).toThrow();
+  });
+
+  it('accepts a browser flag on CreateBot and UpdateBot', () => {
+    expect(CreateBot.parse({ name: 'Ada', job: 'Researcher', browser: true }).browser).toBe(true);
+    expect(UpdateBot.parse({ browser: true })).toEqual({ browser: true });
+    expect(UpdateBot.parse({ browser: false })).toEqual({ browser: false });
   });
 
   it('gives each parsed CreateBot its own egress object', () => {

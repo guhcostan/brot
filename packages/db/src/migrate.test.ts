@@ -63,7 +63,7 @@ describe('migrate', () => {
     ]);
 
     const applied = await handle.client.execute('SELECT COUNT(*) AS count FROM __drizzle_migrations');
-    expect(Number(applied.rows[0]?.count)).toBe(5);
+    expect(Number(applied.rows[0]?.count)).toBe(6);
   });
 
   it('adds the rooms, team task, and per-bot session schema on a fresh database', async () => {
@@ -281,6 +281,42 @@ describe('migrate', () => {
     await handle.client.execute({ sql: 'DELETE FROM runs WHERE id = ?', args: ['run_old'] });
     expect((await repos.tasks.get('task_old'))?.workRunId).toBeUndefined();
     expect((await repos.tasks.get('task_old'))?.status).toBe('in_progress');
+  });
+
+  it('adds the host browser column in place and leaves existing bots without one', async () => {
+    const { handle } = await tempDb();
+    const journal = JSON.parse(await readFile(join(migrationsFolder, 'meta', '_journal.json'), 'utf8')) as {
+      entries: Array<{ tag: string; when: number }>;
+    };
+    const applied = journal.entries.slice(0, 5);
+    if (applied.length !== 5 || applied[4]?.tag !== '0004_bot_desktop') {
+      throw new Error('journal must start with the 0000 to 0004 migrations');
+    }
+
+    for (const entry of applied) {
+      await handle.client.executeMultiple(await readFile(join(migrationsFolder, `${entry.tag}.sql`), 'utf8'));
+    }
+    await handle.client.execute(
+      'CREATE TABLE "__drizzle_migrations" ("id" INTEGER PRIMARY KEY AUTOINCREMENT, "hash" text NOT NULL, "created_at" numeric)',
+    );
+    for (const entry of applied) {
+      await handle.client.execute({
+        sql: 'INSERT INTO "__drizzle_migrations" ("hash", "created_at") VALUES (?, ?)',
+        args: [entry.tag, entry.when],
+      });
+    }
+    await handle.client.execute(
+      `INSERT INTO bots (id, name, job, instructions, engine, computer, pinned, archived, created_at, updated_at)
+       VALUES ('bot_old', 'Ada', 'Researcher', '', 'mock', 'none', 0, 0, '2026-10-19T10:00:00.000Z', '2026-10-19T10:00:00.000Z')`,
+    );
+
+    await migrate(handle.db);
+
+    expect(await columnNames(handle, 'bots')).toContain('browser');
+    const repos = createRepos(handle.db);
+    expect((await repos.bots.get('bot_old'))?.browser).toBeUndefined();
+    expect((await repos.bots.update('bot_old', { browser: true }))?.browser).toBe(true);
+    expect((await repos.bots.get('bot_old'))?.browser).toBe(true);
   });
 
   it('enables foreign keys on the connection', async () => {

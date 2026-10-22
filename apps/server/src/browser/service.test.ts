@@ -1,0 +1,60 @@
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
+import type { HostBrowserService } from './types';
+import { botFor } from './test-helpers';
+import { createHostBrowserService } from './service';
+
+const MISSING = '/nonexistent/brot-chrome';
+const homes: string[] = [];
+const services: HostBrowserService[] = [];
+
+async function startService(): Promise<{ service: HostBrowserService; home: string }> {
+  const home = await mkdtemp(join(tmpdir(), 'brot-browser-'));
+  homes.push(home);
+  const service = createHostBrowserService({ home, binary: MISSING });
+  services.push(service);
+  return { service, home };
+}
+
+afterEach(async () => {
+  await Promise.all(services.splice(0).map((service) => service.closeAll()));
+  await Promise.all(homes.splice(0).map((home) => rm(home, { recursive: true, force: true })));
+});
+
+describe('host browser service without a usable Chrome', () => {
+  it('reports stopped before anything is started and closes idempotently', async () => {
+    const { service } = await startService();
+    const bot = botFor('bot_1');
+    expect(await service.status(bot)).toEqual({ state: 'stopped' });
+    await service.close(bot);
+    await service.close(bot);
+    expect(await service.status(bot)).toEqual({ state: 'stopped' });
+    await service.closeAll();
+    await service.closeAll();
+    expect(await service.status(bot)).toEqual({ state: 'stopped' });
+  });
+
+  it('refuses a bot command clearly and leaves the bot stopped when the binary is missing', async () => {
+    const { service } = await startService();
+    const bot = botFor('bot_1', ['example.com']);
+    await expect(service.browser(bot, 'open', { url: 'https://example.com' })).rejects.toThrow(/does not exist or is not executable/);
+    expect(await service.status(bot)).toEqual({ state: 'stopped' });
+  });
+
+  it('refuses a login window the same way when the binary is missing', async () => {
+    const { service } = await startService();
+    const bot = botFor('bot_1');
+    await expect(service.openForLogin(bot)).rejects.toThrow(new RegExp(MISSING));
+    expect(await service.status(bot)).toEqual({ state: 'stopped' });
+  });
+
+  it('keeps bots independent', async () => {
+    const { service } = await startService();
+    const first = botFor('bot_1');
+    const second = botFor('bot_2');
+    expect(await service.status(first)).toEqual({ state: 'stopped' });
+    expect(await service.status(second)).toEqual({ state: 'stopped' });
+  });
+});

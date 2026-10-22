@@ -40,6 +40,7 @@ export const bots = sqliteTable('bots', {
   model: text('model'),
   computer: text('computer').$type<ComputerKind>().notNull(),
   desktop: integer('desktop', { mode: 'boolean' }).notNull().default(false),
+  browser: integer('browser', { mode: 'boolean' }).notNull().default(false),
   egress: text('egress', { mode: 'json' })
     .$type<EgressPolicy>()
     .notNull()

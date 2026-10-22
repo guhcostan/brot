@@ -1,5 +1,8 @@
 import { createDb, createRepos, migrate, type BrotDb, type Repos } from '@brot/db';
 import type { EngineRegistry } from '@brot/engines';
+import { createHostBrowserService } from './browser';
+import { createBrowserTools } from './browser/tools';
+import type { HostBrowserService } from './browser/types';
 import { createBroker, type Broker } from './broker';
 import { createEventBus, type EventBus } from './bus';
 import type { ServerConfig } from './config';
@@ -54,6 +57,8 @@ export interface ServiceExtras {
   llm?: LlmOptions;
   /** Bot desktop options. Tests inject a fake runner here. Only used when a sandbox computer provider exists. */
   desktop?: DesktopOptions;
+  /** The bot browser on the server machine. Tests inject a fake. Defaults to a Chrome with one profile per bot. */
+  browser?: HostBrowserService;
 }
 
 export interface Services {
@@ -71,6 +76,8 @@ export interface Services {
   mcp: BrotMcpService | undefined;
   /** Bot desktops. Absent without a sandbox computer provider. */
   desktop: DesktopService | undefined;
+  /** The bot browser on the server machine. Chrome starts on the first command, never at boot. */
+  browser: HostBrowserService;
   /** The providers the model relay knows, listed by GET /api/providers. */
   providers: ProviderSpec[];
   /** Relays contained runs' model requests to their providers, adding the key from the vault. */
@@ -124,8 +131,16 @@ export async function createServices(
         ...(extras.desktop ?? {}),
       })
     : undefined;
-  const desktopTools = desktop ? createDesktopTools({ repos, desktop, takeovers: desktop.takeovers, takeoverWaitMs: extras.desktop?.takeoverWaitMs }) : [];
-  const mcp = extras.mcp?.({ repos, bus, broker, vault, tools: [...teamTools, ...desktopTools] });
+  const browser = extras.browser ?? createHostBrowserService({ home: config.home });
+  const browserTools = createBrowserTools({
+    repos,
+    host: browser,
+    ...(desktop === undefined ? {} : { desktop, takeovers: desktop.takeovers }),
+  });
+  const desktopTools = desktop
+    ? createDesktopTools({ repos, desktop, takeovers: desktop.takeovers, takeoverWaitMs: extras.desktop?.takeoverWaitMs })
+    : [];
+  const mcp = extras.mcp?.({ repos, bus, broker, vault, tools: [...teamTools, ...browserTools, ...desktopTools] });
   const providers = mergeProviders(
     SEEDED_PROVIDERS,
     await loadProviderFile(config.providersFile),
@@ -159,6 +174,7 @@ export async function createServices(
     harness.shutdown();
     scheduler.stop();
     const closers: Array<Promise<void>> = [
+      browser.closeAll(),
       ...engines.list().map((driver) => driver.close?.() ?? Promise.resolve()),
       ...uniqueProviders(computers).map((provider) => provider.close()),
     ];
@@ -183,6 +199,7 @@ export async function createServices(
     computers,
     mcp,
     desktop,
+    browser,
     providers,
     llm,
     rooms,

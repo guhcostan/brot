@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { HttpMcpServer, type Bot, type Thread } from '@brot/protocol';
 import type { ApprovalScope } from '../broker';
 import { createApp } from '../app';
+import { createBrowserTools } from '../browser/tools';
 import { createBrotMcp } from '../mcp/brot-mcp';
 import type { BrotMcpService, BrotTool, PreparedCall } from '../mcp/types';
 import { createTestContext, type TestContext } from '../testing';
@@ -51,7 +52,10 @@ beforeEach(async () => {
   thread = await repos.threads.create(bot.id, { title: 'Chat' });
   await repos.runs.create({ threadId: thread.id, botId: bot.id, engine: 'mock' });
   scope = { botId: bot.id, threadId: thread.id, runId: SCOPE_RUN };
-  const list = createDesktopTools({ repos, desktop, takeovers, takeoverWaitMs: 40 });
+  const list = [
+    ...createBrowserTools({ repos, desktop, takeovers }),
+    ...createDesktopTools({ repos, desktop, takeovers, takeoverWaitMs: 40 }),
+  ];
   tools = new Map(list.map((tool) => [tool.spec.name, tool]));
 });
 

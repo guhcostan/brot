@@ -17,6 +17,7 @@ export function toBot(row: BotRow): Bot {
     model: row.model ?? undefined,
     computer: row.computer,
     ...(row.desktop ? { desktop: true } : {}),
+    ...(row.browser ? { browser: true } : {}),
     egress: row.egress,
     teamBudgetUsd: row.teamBudgetUsd ?? undefined,
     pinned: row.pinned,

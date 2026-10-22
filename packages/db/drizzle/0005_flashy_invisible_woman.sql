@@ -1,0 +1,1 @@
+ALTER TABLE `bots` ADD `browser` integer DEFAULT false NOT NULL;
