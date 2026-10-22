@@ -73,13 +73,13 @@ Legend: ✅ parity or better · 🟡 partial · ❌ absent · 🎯 current wave.
 | Host browser (My Chrome) attach | ✅ | ❌ | W5 |
 | Saved logins vault + `fill_login` | ✅ | ❌ | W5 |
 | Connected apps (Composio marketplace) + per-bot tool grants | ✅ | ❌ | W3 |
-| Custom MCP servers (stdio/HTTP, per-bot) | ✅ | ❌ (Brot is an MCP server; no client) | W3 |
+| Custom MCP servers (stdio/HTTP, per-bot) | ✅ | 🟡 stdio/HTTP servers attach to runs with vault secrets and a real test handshake; per-bot grants and settings UI next | W5 |
 | Approval levels per bot/thread + decision log | ✅ | 🟡 per-tool broker + policies, no levels/log export | W4 |
-| Routines: cron/weekday with timezone, receipts, recovery, calendar | ✅ | 🟡 server runs/receipts/catch-up/timezone done; web surface and calendar next | W3 |
+| Routines: cron/weekday with timezone, receipts, recovery, calendar | ✅ | ✅ runs, receipts, catch-up, timezone, routines page; calendar next | W3 done |
 | Webhook triggers | ✅ | 🟡 receiver exists, no signed secret UX | W6 |
 | App-event triggers | ✅ | ❌ | W6 |
-| Memory: MEMORY.md + topics + recall + upkeep + journal/undo + About me | ✅ | 🟡 bot memories table (CRUD), no recall/upkeep/journal | W7 |
-| Skills: SKILL.md import/export, per-bot on/off, learned-skill approval | ✅ | 🟡 DB + API CRUD, no SKILL.md import/export or review | W7 |
+| Memory: MEMORY.md + topics + recall + upkeep + journal/undo + About me | ✅ | 🟡 lexical recall with caps is live; no journal/upkeep/about-me/editor UI | W4 |
+| Skills: SKILL.md import/export, per-bot on/off, learned-skill approval | ✅ | 🟡 skills now reach the prompt with budgets; no SKILL.md import/export, review or UI yet | W4 |
 | Voice: TTS providers, spoken replies, voice notes, calls, dictation | ✅ | ❌ | W8 |
 | Attachments: images/screenshots/files in transcript, quota | ✅ | ❌ | W4 |
 | Notifications: in-app/desktop, per-bot, exact-thread routing | ✅ | ❌ (webhooks + SSE only) | W4 |
@@ -104,12 +104,12 @@ end-to-end run on this machine, and its own commit on `main`.
 - **W2 — Teams and threads (done).** Named teams with shared instructions, a roster, a sidebar section and one
   Chief; several independent threads per bot with their own transcript, model override and cost; a working
   folder per bot/team (the reference's `bot.cwd`).
-- **W3 — Routines (server done; web surface next).** Plain-language schedule to cron with confirmation, timezone, run receipts, history and
+- **W3 — Routines (done).** Plain-language schedule to cron with confirmation, timezone, run receipts, history and
   calendar, catch-up and recovery rules, result posted into the bot's thread.
-- **W4 — Memory and skills.** Skills end to end (they are dormant today: `RunContext.skills` is ignored by
+- **W4 — Memory and skills (prompt + recall done; web editors next).** Skills end to end (they are dormant today: `RunContext.skills` is ignored by
   the prompt and the web tab is empty), file-based memory with recall, upkeep, journal/undo and About-me
   facts.
-- **W5 — Apps and MCP.** User MCP servers (stdio + HTTP, test handshake, per-bot grants, secret headers)
+- **W5 — Apps and MCP (bring-your-own MCP servers done; marketplace/native connectors and the settings UI next).** User MCP servers (stdio + HTTP, test handshake, per-bot grants, secret headers)
   and the first native connectors (Gmail, LinkedIn, GitHub), with per-bot scopes.
 - **W6 — Chat parity.** Attachments (images/files/screenshots, preview, quota), approval levels and
   question cards with a decision log, notifications with exact-thread routing, unread and search.

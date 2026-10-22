@@ -126,6 +126,25 @@ mapped in `docs/MAUSBOT-PARITY.md` (34 bots / 7 teams, 33 bots with a browser an
   stayed isolated with auto-titles; a real every-minute cron fired, completed and captured its result.
   1411 tests pass (125 files), typecheck 12/12, lint clean.
 
+## Wave 10: routines UI, skills and recall, bring-your-own MCP (2026-10-22)
+
+- **Routines UI.** A Routines pane next to Tasks: human schedule line with timezone, last run and
+  next run, enabled switch, Run now with the overlap 409 surfaced, inline run history (status, time,
+  trigger, duration, result, error), edit and delete. The dialog builds a schedule from presets or a
+  custom cron, with timezone, catchUp and rememberLastRun flags and the exact cron preview. i18n in
+  en/pt-BR/es.
+- **Skills and memory recall.** Skills were dormant: the prompt now has a Skills section (bot-specific
+  first, 12 kB section cap, 4 kB per body, surrogate-safe truncation). Memories are ranked by lexical
+  relevance with recency only as a tiebreak and capped at 12 / 6 kB (`apps/server/src/memory/recall.ts`).
+  Verified live: a skill made a DSH run answer PITANGA; an older Tuesday-meetings memory reached the
+  model among 15 memories.
+- **Bring-your-own MCP servers.** Saved stdio/HTTP MCP servers attach to every run next to Brot's own,
+  `secret://` env values resolve from the vault only into the child process, `/test` performs a real
+  handshake and lists tools, and bare commands resolve against PATH to the absolute path ACP demands.
+  Verified live: DSH called an external `echo` tool and answered with its result. Migration 0008.
+- Suite: 1527 tests (135 files), typecheck 12/12, lint clean. Web surfaces for skills/memory and the MCP
+  settings panel are the next wave.
+
 ## Next
 
 1. Re-run the eval suite on a live model once OpenCode Go has quota (`apps/evals`, `--base` to the server), including B8 and C; the 2026-10-20 results predate the read auto-allow and the fixes above.
