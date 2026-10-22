@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useMemo, useState, type FormEvent, type 
 import type { Device, PairingStartResponse } from '@brot/protocol';
 import { BotAvatar, Button, Skeleton, cx } from '@brot/ui';
 import type { Provider } from '../data/client';
+import { desktopNotificationState, requestDesktopNotifications, type DesktopNotificationState } from '../desktopNotifications';
 import { formatTime } from '../format';
 import { t, type Locale, type TranslationKey } from '../i18n';
 import { encodeQr, qrPath } from '../qr';
@@ -37,6 +38,7 @@ export function SettingsView({ locale, onLocaleChange, theme, onThemeChange, onO
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto flex w-full max-w-[720px] flex-col gap-10 px-4 py-8 md:px-6">
           <Providers />
+          <DesktopNotifications />
           <Section title={t('settings.appearance')} description={t('settings.appearanceBody')}>
             <div role="radiogroup" aria-label={t('settings.theme')} className="grid grid-cols-3 gap-2">
               {THEMES.map((option) => (
@@ -382,5 +384,43 @@ function PairingCard({ pairing, onDone }: { pairing: PairingStartResponse; onDon
         </Button>
       </div>
     </div>
+  );
+}
+
+const DESKTOP_STATE_KEY: Record<DesktopNotificationState, TranslationKey> = {
+  unsupported: 'settings.desktopState.unsupported',
+  default: 'settings.desktopState.default',
+  granted: 'settings.desktopState.granted',
+  denied: 'settings.desktopState.denied',
+};
+
+/** The browser's desktop notifications: state plus an explicit opt-in. Never prompts on load. */
+function DesktopNotifications(): ReactElement {
+  const [state, setState] = useState<DesktopNotificationState>(() => desktopNotificationState());
+  const [busy, setBusy] = useState(false);
+
+  const enable = async () => {
+    setBusy(true);
+    try {
+      setState(await requestDesktopNotifications());
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Section title={t('settings.desktopNotifications')} description={t('settings.desktopNotificationsBody')}>
+      <div className="flex items-center gap-3 rounded-lg border border-line bg-surface px-4 py-3">
+        <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <span className="text-sm font-medium">{t(DESKTOP_STATE_KEY[state])}</span>
+          {state === 'denied' ? <span className="text-xs text-ink-2">{t('settings.desktopDeniedHint')}</span> : null}
+        </span>
+        {state === 'default' ? (
+          <Button variant="secondary" size="sm" disabled={busy} onClick={() => void enable()}>
+            {t('settings.desktopEnable')}
+          </Button>
+        ) : null}
+      </div>
+    </Section>
   );
 }

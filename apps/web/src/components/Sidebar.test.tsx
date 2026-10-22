@@ -44,6 +44,7 @@ function render(overrides: Partial<SidebarProps> = {}): string {
     membersOf: () => [],
     activeTasks: 0,
     approvals: 0,
+    notifications: 0,
     ready: true,
     selection: { kind: 'bot', id: 'bot_1', threadId: 'thr_1' },
     onSelect: noop,
@@ -82,6 +83,24 @@ describe('sidebar threads', () => {
     expect(text).toContain('Chief of Staff');
     expect(text).not.toContain('Morning check-in');
     expect(text).toContain(t('sidebar.expandThreads', { name: 'Capy' }));
+  });
+
+  it('shows the unread notification count on its bell row', () => {
+    const html = render({ notifications: 3 });
+    const text = textOf(html);
+
+    expect(text).toContain(t('notifications.title'));
+    expect(text).toContain('3');
+    expect(html).toContain(`aria-label="${t('notifications.unreadCount', { count: '3' })}"`);
+    expect(html.indexOf(t('approvals.title'))).toBeLessThan(html.indexOf(t('notifications.title')));
+    expect(html.indexOf(t('notifications.title'))).toBeLessThan(html.indexOf(t('board.title')));
+  });
+
+  it('hides the notification badge when the inbox is read', () => {
+    const html = render({ notifications: 0 });
+
+    expect(textOf(html)).toContain(t('notifications.title'));
+    expect(html).not.toContain(t('notifications.unreadCount', { count: '0' }));
   });
 
   it('offers the Routines pane next to the task board and the approvals inbox', () => {

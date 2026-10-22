@@ -11,6 +11,7 @@ import type {
   CreateTeamInput,
   Device,
   Memory,
+  Notification,
   PairingStartResponse,
   PostMessage,
   ResolveApproval,
@@ -40,6 +41,8 @@ export type {
   CreateSkill,
   Memory,
   MemoryKind,
+  Notification,
+  NotificationKind,
   Routine,
   RoutineRun,
   RoutineRunStatus,
@@ -106,6 +109,13 @@ export interface RoutineRunFilter {
 /** The run a `POST /api/routines/:id/run` started. */
 export interface RoutineRunStarted {
   runId: string;
+}
+
+/** What `GET /api/notifications` can narrow down. */
+export interface NotificationFilter {
+  unread?: boolean;
+  botId?: string;
+  limit?: number;
 }
 
 export interface ProviderModel {
@@ -203,6 +213,13 @@ export interface BrotClient {
   uploadAttachment(threadId: string, file: File): Promise<Attachment>;
   /** Deletes an upload that never reached a message. Rejects while a message still links it. */
   deleteAttachment(attachmentId: string): Promise<void>;
+
+  /** The notification inbox, newest first. */
+  listNotifications(filter?: NotificationFilter): Promise<Notification[]>;
+  unreadNotificationCount(): Promise<number>;
+  /** Marks these notifications read, or every unread one when `ids` is omitted. Returns how many changed. */
+  markNotificationsRead(ids?: readonly string[]): Promise<number>;
+  deleteNotification(notificationId: string): Promise<void>;
 
   /** A bot's DM threads, most recently active first. */
   listThreads(botId: string): Promise<Thread[]>;

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
-import type { Takeover } from '@brot/protocol';
+import type { Notification, Takeover } from '@brot/protocol';
 import { BotAvatar, Button, EmptyState, cx } from '@brot/ui';
 import { ApprovalsView } from './components/ApprovalsView';
 import { BotDialog } from './components/BotDialog';
@@ -7,6 +7,7 @@ import { ClientProvider } from './components/client';
 import { ContextPanel, type ContextSubject } from './components/ContextPanel';
 import { Close, Plus } from './components/icons';
 import { NewRoomDialog } from './components/NewRoomDialog';
+import { NotificationsView } from './components/NotificationsView';
 import { RoomView } from './components/RoomView';
 import { RoutinesView } from './components/RoutinesView';
 import { SettingsView } from './components/SettingsView';
@@ -23,6 +24,7 @@ import { inbox, membersOf, statusOfBot, statusOfRoom, taskList, threadStatusOf, 
 import { tasksForBot, tasksForRoom } from './state/tasks';
 import { emptyThread, pendingApprovals } from './state/thread';
 import { useChat } from './state/useChat';
+import { useNotifications } from './state/useNotifications';
 import { getTheme, setTheme as saveTheme, type Theme } from './theme';
 
 type Pane = 'bots' | 'thread' | 'context';
@@ -136,6 +138,33 @@ export function App(): ReactElement {
     [newThread],
   );
 
+  /** Opens the conversation a notification points at, reading its thread list when it is still unknown. */
+  const openNotification = useCallback(
+    async (notification: Notification) => {
+      if (state.rooms.some((entry) => entry.thread.id === notification.threadId)) {
+        goTo({ kind: 'room', id: notification.threadId });
+        return;
+      }
+      let threads = state.threadLists[notification.botId];
+      if (threads === undefined || !threads.some((thread) => thread.id === notification.threadId)) {
+        try {
+          threads = await loadThreads(notification.botId);
+        } catch (error) {
+          console.warn('A thread list did not load', error);
+          threads = undefined;
+        }
+      }
+      if (threads?.some((thread) => thread.id === notification.threadId)) openThread(notification.botId, notification.threadId);
+      else void openBotPane(notification.botId);
+    },
+    [state.rooms, state.threadLists, loadThreads, openThread, openBotPane, goTo],
+  );
+
+  // The unread bell badge and the desktop banners; the hook polls, so it is created once per client.
+  const notificationInbox = useNotifications(client, (notification) => {
+    void openNotification(notification);
+  });
+
   // A thread's history is read the first time it is shown; the most recent thread of every bot is
   // already loaded at startup.
   useEffect(() => {
@@ -212,6 +241,15 @@ export function App(): ReactElement {
     main = <TaskBoard tasks={allTasks} bots={state.bots} onNewTask={() => setNewTaskOpen(true)} onOpenBots={openBots} />;
   } else if (selection?.kind === 'approvals') {
     main = <ApprovalsView entries={pending} onDecide={decide} onOpenBots={openBots} />;
+  } else if (selection?.kind === 'notifications') {
+    main = (
+      <NotificationsView
+        bots={state.bots}
+        onOpenBots={openBots}
+        onOpenNotification={(notification) => void openNotification(notification)}
+        onInboxChanged={() => void notificationInbox.refresh()}
+      />
+    );
   } else if (selection?.kind === 'routines') {
     main = <RoutinesView bots={state.bots} onOpenBots={openBots} onNewBot={newBot} />;
   } else if (selection?.kind === 'settings') {
@@ -270,7 +308,12 @@ export function App(): ReactElement {
     );
   }
 
-  const fullWidth = selection?.kind === 'tasks' || selection?.kind === 'approvals' || selection?.kind === 'routines' || selection?.kind === 'settings';
+  const fullWidth =
+    selection?.kind === 'tasks' ||
+    selection?.kind === 'approvals' ||
+    selection?.kind === 'notifications' ||
+    selection?.kind === 'routines' ||
+    selection?.kind === 'settings';
   const taskRoom = room ? { id: room.thread.id, title: room.thread.title, memberIds: membersOf(state, room.thread.id) } : undefined;
   const noticeVisible = notice !== null && !(selection !== null && selectionKey(selection) === selectionKey(notice.selection) && (wide || pane === 'context'));
 
@@ -295,6 +338,7 @@ export function App(): ReactElement {
             membersOf={(roomId) => membersOf(state, roomId)}
             activeTasks={activeTasks}
             approvals={pending.length}
+            notifications={notificationInbox.unread}
             ready={state.ready}
             selection={selection}
             onSelect={goTo}

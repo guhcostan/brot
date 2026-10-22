@@ -1,4 +1,4 @@
-import type { Approval, Bot, CanonicalEvent, Memory, Message, Routine, RoutineRun, Skill, Task, Team, Thread } from '@brot/protocol';
+import type { Approval, Bot, CanonicalEvent, Memory, Message, Notification, Routine, RoutineRun, Skill, Task, Team, Thread } from '@brot/protocol';
 
 const CREATED = '2026-10-01T09:00:00.000Z';
 
@@ -631,5 +631,46 @@ export const DEMO_SKILLS: Skill[] = [
     version: 1,
     createdAt: CREATED,
     updatedAt: CREATED,
+  },
+];
+
+/** The demo inbox: unread approvals and failures, plus a finished run that was already read. */
+export const DEMO_NOTIFICATIONS: Notification[] = [
+  {
+    id: 'ntf_tuca_approval',
+    botId: 'bot_tuca',
+    threadId: dmThreadOf('bot_tuca'),
+    kind: 'approval',
+    title: 'Tuca needs your OK',
+    body: 'Send the draft "Acme renewal: plans and export fix" to ana@acme.com.',
+    createdAt: hoursAgo(0.5),
+  },
+  {
+    id: 'ntf_onca_failed',
+    botId: 'bot_onca',
+    threadId: dmThreadOf('bot_onca'),
+    kind: 'failed',
+    title: 'Onça stopped on the export fix',
+    body: 'Two tests still fail, and the run needs your call on the fix.',
+    createdAt: hoursAgo(2),
+  },
+  {
+    id: 'ntf_capy_finished',
+    botId: 'bot_capy',
+    threadId: dmThreadOf('bot_capy'),
+    kind: 'finished',
+    title: 'Morning brief is ready',
+    body: 'Three things today: standup, the design review, and the Acme renewal call.',
+    createdAt: hoursAgo(6),
+    readAt: hoursAgo(5),
+  },
+  {
+    id: 'ntf_sol_routine',
+    botId: 'bot_sol',
+    threadId: dmThreadOf('bot_sol'),
+    kind: 'routine_failed',
+    title: 'Morning brief did not run',
+    body: 'The Gmail connection expired. Reconnect it and the next run will go through.',
+    createdAt: hoursAgo(26),
   },
 ];

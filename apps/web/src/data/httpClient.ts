@@ -15,7 +15,9 @@ import {
   CreateThread,
   Device,
   Memory,
+  MarkNotificationsRead,
   Message,
+  Notification,
   PairingStartResponse,
   PostMessage,
   ResolveApproval,
@@ -47,6 +49,7 @@ import {
   type BrotClient,
   type BrowserStatus,
   type ComputerInfo,
+  type NotificationFilter,
   type Provider,
   type Room,
   type RoutineRunFilter,
@@ -399,6 +402,30 @@ export function createHttpClient({
       await request(`/api/attachments/${encodeURIComponent(attachmentId)}`, { method: 'DELETE' });
     },
 
+    listNotifications(filter: NotificationFilter = {}) {
+      const query = new URLSearchParams();
+      if (filter.unread !== undefined) query.set('unread', String(filter.unread));
+      if (filter.botId !== undefined) query.set('botId', filter.botId);
+      if (filter.limit !== undefined) query.set('limit', String(filter.limit));
+      const suffix = query.size > 0 ? `?${query.toString()}` : '';
+      return read(`/api/notifications${suffix}`, Notification.array());
+    },
+
+    async unreadNotificationCount() {
+      const response = await request('/api/notifications/unread-count', { headers: { Accept: 'application/json' } });
+      return parseUnreadCount(await response.json());
+    },
+
+    async markNotificationsRead(ids?) {
+      const body = MarkNotificationsRead.parse(ids === undefined ? {} : { ids: [...ids] });
+      const response = await write('POST', '/api/notifications/read', body);
+      return parseUpdatedCount(await response.json());
+    },
+
+    async deleteNotification(notificationId) {
+      await request(`/api/notifications/${encodeURIComponent(notificationId)}`, { method: 'DELETE' });
+    },
+
     listThreads(botId) {
       return fetchThreads(botId);
     },
@@ -682,6 +709,18 @@ async function describeFailure(response: Response): Promise<string> {
 export function parseRunStarted(value: unknown): RoutineRunStarted {
   if (!isRecord(value)) throw new Error('Expected a routine run object');
   return { runId: textField(value.runId, 'runId') };
+}
+
+/** Validates the `{ count }` body of `GET /api/notifications/unread-count`. */
+export function parseUnreadCount(value: unknown): number {
+  if (!isRecord(value) || typeof value.count !== 'number') throw new Error('Expected an unread count object');
+  return value.count;
+}
+
+/** Validates the `{ updated }` body of `POST /api/notifications/read`. */
+export function parseUpdatedCount(value: unknown): number {
+  if (!isRecord(value) || typeof value.updated !== 'number') throw new Error('Expected an updated count object');
+  return value.updated;
 }
 
 interface HistoryRecords {

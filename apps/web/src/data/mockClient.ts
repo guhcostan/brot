@@ -9,6 +9,7 @@ import type {
   Device,
   Memory,
   Message,
+  Notification,
   PostMessage,
   ResolveApproval,
   Routine,
@@ -61,6 +62,7 @@ import {
   DEMO_BOTS,
   DEMO_HISTORY,
   DEMO_MEMORIES,
+  DEMO_NOTIFICATIONS,
   DEMO_ROOM_HISTORY,
   DEMO_ROOMS,
   DEMO_ROUTINE_RUNS,
@@ -251,6 +253,9 @@ export function createMockClient(): BrotClient {
   /** Uploaded attachment metadata and the conversation it was uploaded to, keyed by attachment id. */
   const attachments = new Map<string, { attachment: Attachment; threadId: string }>();
   const memories = new Map<string, Memory>(DEMO_MEMORIES.map((memory) => [memory.id, structuredClone(memory)]));
+  const notifications = new Map<string, Notification>(
+    DEMO_NOTIFICATIONS.map((notification) => [notification.id, structuredClone(notification)]),
+  );
   const skills = new Map<string, Skill>(DEMO_SKILLS.map((skill) => [skill.id, structuredClone(skill)]));
   const routines = new Map<string, Routine>(DEMO_ROUTINES.map((routine) => [routine.id, structuredClone(routine)]));
   /** Runs per routine, newest first. */
@@ -758,6 +763,7 @@ export function createMockClient(): BrotClient {
         if (threads.has(entry.threadId)) continue;
         attachments.delete(attachmentId);
       }
+      for (const [notificationId, notification] of notifications) if (notification.botId === botId) notifications.delete(notificationId);
       for (const [memoryId, memory] of memories) if (memory.botId === botId) memories.delete(memoryId);
       for (const [skillId, skill] of skills) if (skill.botId === botId) skills.delete(skillId);
       for (const room of rooms.values()) room.memberIds = room.memberIds.filter((id) => id !== botId);
@@ -914,6 +920,36 @@ export function createMockClient(): BrotClient {
       if (!entry) throw new Error(`Unknown attachment: ${attachmentId}`);
       if (entry.attachment.messageId !== undefined) throw new Error('409 This attachment belongs to a message and cannot be deleted');
       attachments.delete(attachmentId);
+    },
+
+    async listNotifications(filter = {}) {
+      const list = [...notifications.values()]
+        .filter((notification) => filter.unread !== true || notification.readAt === undefined)
+        .filter((notification) => filter.botId === undefined || notification.botId === filter.botId)
+        .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt) || b.id.localeCompare(a.id));
+      const limit = Math.min(Math.max(1, filter.limit ?? 50), 200);
+      return list.slice(0, limit).map((notification) => structuredClone(notification));
+    },
+
+    async unreadNotificationCount() {
+      return [...notifications.values()].filter((notification) => notification.readAt === undefined).length;
+    },
+
+    async markNotificationsRead(ids?: readonly string[]) {
+      if (ids !== undefined && ids.length === 0) return 0;
+      const at = now();
+      let updated = 0;
+      for (const [id, notification] of notifications) {
+        if (notification.readAt !== undefined) continue;
+        if (ids !== undefined && !ids.includes(id)) continue;
+        notifications.set(id, { ...notification, readAt: at });
+        updated += 1;
+      }
+      return updated;
+    },
+
+    async deleteNotification(notificationId) {
+      if (!notifications.delete(notificationId)) throw new Error(`Unknown notification: ${notificationId}`);
     },
 
     async listThreads(botId) {

@@ -1,5 +1,6 @@
 import { parseAvatar, type AvatarSpec } from '@brot/ui';
 import type { Bot } from '@brot/protocol';
+import { getLocale } from './i18n';
 
 const timeFormat = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' });
 const usdFormat = new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 4 });
@@ -20,6 +21,21 @@ export function formatCount(value: number): string {
 /** The avatar shape and color for a bot. Unknown values fall back to a stable pick from the bot id. */
 export function avatarOf(bot: Pick<Bot, 'avatar' | 'id'>): AvatarSpec {
   return parseAvatar(bot.avatar, bot.id);
+}
+
+/** "just now", "5 minutes ago", "3 hours ago", "2 days ago", written in the app's language. */
+export function formatRelativeTime(iso: string, now = Date.now()): string {
+  const at = Date.parse(iso);
+  if (Number.isNaN(at)) return '';
+  const relative = new Intl.RelativeTimeFormat(getLocale(), { numeric: 'auto' });
+  const seconds = Math.round((at - now) / 1000);
+  const abs = Math.abs(seconds);
+  if (abs < 60) return relative.format(seconds, 'second');
+  const minutes = Math.round(seconds / 60);
+  if (Math.abs(minutes) < 60) return relative.format(minutes, 'minute');
+  const hours = Math.round(minutes / 60);
+  if (Math.abs(hours) < 48) return relative.format(hours, 'hour');
+  return relative.format(Math.round(hours / 24), 'day');
 }
 
 /** A human file size: bytes under 1 KB, then KB, MB with one decimal. */

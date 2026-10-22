@@ -94,6 +94,7 @@ interface FormState {
   hosts: string[];
   budget: string;
   pinned: boolean;
+  notifications: boolean;
 }
 
 function computerOf(bot: Pick<Bot, 'computer' | 'desktop'>): ComputerChoice {
@@ -116,6 +117,7 @@ function initialState(bot: Bot | undefined): FormState {
       hosts: [],
       budget: '',
       pinned: false,
+      notifications: true,
     };
   }
   const avatar = avatarOf(bot);
@@ -132,6 +134,7 @@ function initialState(bot: Bot | undefined): FormState {
     hosts: bot.egress?.allow ?? [],
     budget: bot.teamBudgetUsd === undefined ? '' : String(bot.teamBudgetUsd),
     pinned: bot.pinned,
+    notifications: bot.notifications !== false,
   };
 }
 
@@ -289,6 +292,7 @@ function BotForm({
           ...(computer === 'sandbox' ? { desktop } : {}),
           ...(computer === 'host' ? { hostAcknowledged: true } : {}),
           browser,
+          notifications: form.notifications,
           egress,
           ...(form.teamId === '' ? {} : { teamId: form.teamId }),
           ...(form.model ? { engine: DSH_ENGINE, model: form.model } : {}),
@@ -320,6 +324,7 @@ function BotForm({
         if (before.length !== form.hosts.length || before.some((host, index) => host !== form.hosts[index])) patch.egress = egress;
         if (budget !== bot.teamBudgetUsd) patch.teamBudgetUsd = budget ?? null;
         if (form.pinned !== bot.pinned) patch.pinned = form.pinned;
+        if (form.notifications !== (bot.notifications !== false)) patch.notifications = form.notifications;
         if (Object.keys(patch).length > 0) await onUpdate(bot.id, patch);
       }
       onClose();
@@ -434,6 +439,20 @@ function BotForm({
         onChange={(event) => set('budget', event.target.value)}
         error={tried && !budgetOk ? t('botForm.budgetInvalid') : undefined}
       />
+
+      <label className="flex cursor-pointer items-start gap-2.5 rounded-md px-1 py-1 text-sm hover:bg-surface-2">
+        <input
+          type="checkbox"
+          name="notifications"
+          className="room-check mt-1"
+          checked={form.notifications}
+          onChange={(event) => set('notifications', event.target.checked)}
+        />
+        <span className="flex flex-col">
+          <span className="text-sm font-medium">{t('botForm.notifications')}</span>
+          <span className="text-xs text-ink-2">{t('botForm.notificationsHint')}</span>
+        </span>
+      </label>
 
       {bot ? (
         <label className="flex cursor-pointer items-center gap-2.5 text-sm">

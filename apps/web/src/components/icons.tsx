@@ -84,6 +84,15 @@ export const FileDoc = ({ size }: { size?: number }) => (
   </Icon>
 );
 
+/** A bell: the notification inbox. */
+export const Bell = ({ size }: { size?: number }) => (
+  <Icon size={size}>
+    <path d="M5.5 8.25a4.5 4.5 0 0 1 9 0c0 3.1.9 4.35 1.5 5H4c.6-.65 1.5-1.9 1.5-5Z" />
+    <path d="M8.25 16a1.75 1.75 0 0 0 3.5 0" />
+    <path d="M10 2.75v1" />
+  </Icon>
+);
+
 /** A clock: routines and scheduled runs. */
 export const Clock = ({ size }: { size?: number }) => (
   <Icon size={size}>

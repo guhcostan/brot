@@ -98,3 +98,24 @@ describe('BotDialog team picker', () => {
     expect(html).toMatch(/<option value="team_growth" selected="">Growth<\/option>/);
   });
 });
+
+describe('BotDialog notifications toggle', () => {
+  /** The notifications input, found by its name attribute so the browser test constants stay valid. */
+  const notificationToggle = (html: string): string => html.match(/<input[^>]*name="notifications"[^>]*>/)?.[0] ?? '';
+
+  it('offers run notifications on by default, noting that approvals and failures always notify', () => {
+    const html = render();
+    const text = textOf(html);
+
+    expect(text).toContain(t('botForm.notifications'));
+    expect(text).toContain(t('botForm.notificationsHint'));
+    expect(notificationToggle(html)).toContain('checked=""');
+  });
+
+  it('unchecks the toggle for a bot that turned run notifications off', () => {
+    const html = render({ bot: { ...bot, notifications: false } });
+
+    expect(textOf(html)).toContain(t('botForm.notifications'));
+    expect(notificationToggle(html)).not.toContain('checked=""');
+  });
+});

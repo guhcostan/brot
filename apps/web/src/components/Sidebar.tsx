@@ -5,7 +5,7 @@ import type { Room } from '../data/client';
 import { avatarOf } from '../format';
 import { t, type Locale } from '../i18n';
 import type { Selection } from '../state/store';
-import { Board, ChevronRight, Clock, Gear, Inbox, Pencil, Plus } from './icons';
+import { Bell, Board, ChevronRight, Clock, Gear, Inbox, Pencil, Plus } from './icons';
 import { useLiveMood } from './mood';
 import { memberSummary } from './RoomView';
 import { botStatusLabel } from './taskLabels';
@@ -24,6 +24,8 @@ export interface SidebarProps {
   activeTasks: number;
   /** Pending approvals across every loaded thread. */
   approvals: number;
+  /** Unread notifications, shown as the badge on the Notifications row. */
+  notifications: number;
   ready: boolean;
   selection: Selection | null;
   onSelect: (selection: Selection) => void;
@@ -68,6 +70,7 @@ export function Sidebar({
   membersOf,
   activeTasks,
   approvals,
+  notifications,
   ready,
   selection,
   onSelect,
@@ -203,6 +206,26 @@ export function Sidebar({
               aria-label={t('sidebar.pendingApprovals', { count: String(approvals) })}
             >
               {approvals}
+            </span>
+          ) : null}
+        </button>
+        <button
+          type="button"
+          aria-current={selection?.kind === 'notifications' ? 'true' : undefined}
+          onClick={() => onSelect({ kind: 'notifications' })}
+          className={cx(rowClass, 'py-1.5')}
+        >
+          <span className={cx('flex size-8 flex-none items-center justify-center', notifications > 0 ? 'text-attention-text' : 'text-ink')}>
+            <Bell />
+          </span>
+          <span className="flex-1 text-base font-medium text-ink">{t('notifications.title')}</span>
+          {notifications > 0 ? (
+            <span
+              key={notifications}
+              className="inline-flex min-w-5 animate-[brot-pop_260ms_var(--ease)_both] items-center justify-center rounded-full bg-attention px-1.5 text-xs leading-5 font-semibold text-[var(--primary-ink)] tabular-nums"
+              aria-label={t('notifications.unreadCount', { count: String(notifications) })}
+            >
+              {notifications}
             </span>
           ) : null}
         </button>
