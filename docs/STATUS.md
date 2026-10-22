@@ -293,6 +293,21 @@ mapped in `docs/MAUSBOT-PARITY.md` (34 bots / 7 teams, 33 bots with a browser an
   (no FTS index yet), SQLite ASCII-only case folding, no archive filter.
 - Suite: 1995 tests (192 files), typecheck 12/12, lint clean.
 
+## Wave 21: thread model override, sidebar message search (2026-10-22)
+
+- **Per-thread model override.** A DM thread can name its own `<provider>/<model>`; the run uses
+  `thread.model ?? bot.model` for the relay route, the run row and the run.started label, and clearing it
+  falls back. The route validates the ref format and known providers (400 issue path `model`), rooms refuse
+  a thread model (a room has no single model), and null clears on any thread. Migration 0014 adds
+  `threads.model`. Verified live: overriding a thread to deepseek made the run resolve that provider (and
+  fail on its missing key), clearing returned to the bot's model and completed.
+- **Sidebar message search.** Typing two or more characters runs a debounced global search and shows a
+  Messages section with avatar, thread title/bot name, two-line snippet and relative time; up to 8 hits with
+  an expander, loading/empty/inline-error states, Escape clears, and clicking a hit opens the room or the
+  bot's thread. The bot/room filter keeps working independently.
+- Suite: 2026 tests (197 files), typecheck 12/12, lint clean. Known flakes seen under full-suite load (both
+  pass isolated and on rerun): desktop takeover timing, browser viewer screen route, and the tasks chain-max
+  route. Gaps found: no API/UI to delete a room yet.
 ## Next
 
 1. Re-run the eval suite on a live model once OpenCode Go has quota (`apps/evals`, `--base` to the server), including B8 and C; the 2026-10-20 results predate the read auto-allow and the fixes above.

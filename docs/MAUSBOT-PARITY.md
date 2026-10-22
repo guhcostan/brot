@@ -64,8 +64,8 @@ Legend: ✅ parity or better · 🟡 partial · ❌ absent · 🎯 current wave.
 | Area | MausBot | Brot today | Plan |
 |---|---|---|---|
 | Roster of bots, one thread per bot, pin/unread/archive | ✅ | ✅ | — |
-| Multiple independent threads per bot (up to 3 running) | ✅ | ✅ any number, thread header + list | W2 done |
-| Groups/rooms with per-bot state, holds, usage badge | ✅ | 🟡 rooms with sequential responders, task board | W3 |
+| Multiple independent threads per bot | ✅ | ✅ any number, thread header + list, per-thread model override | W2 done |
+| Groups/rooms with per-bot state, holds, usage badge | ✅ | 🟡 rooms with sequential responders and a task board; no room deletion yet | W3 |
 | Teams: named section, shared instructions, roster, Chief | ✅ | ✅ teams with brief, chief and roster | W2 done |
 | Per-team working folder (`bot.cwd`) | ✅ | 🟡 sandbox `/workspace` per bot; host computer has the real cwd | W2 |
 | Browser per bot, persistent login profiles | ✅ | ✅ per-bot and shared profiles, persistent logins, egress-gated | W1 done |
@@ -81,7 +81,7 @@ Legend: ✅ parity or better · 🟡 partial · ❌ absent · 🎯 current wave.
 | Memory: MEMORY.md + topics + recall + upkeep + journal/undo + About me | ✅ | 🟡 recall, caps and an editor are live; no journal/upkeep/about-me | W4 |
 | Skills: SKILL.md import/export, per-bot on/off, learned-skill approval | ✅ | 🟡 prompt + editor with budgets; no SKILL.md import/export or learned-skill review yet | W4 |
 | Voice: TTS providers, spoken replies, voice notes, calls, dictation | ✅ | ❌ | W8 |
-| Message search across threads | ✅ | ✅ GET /api/search with snippets; sidebar UI next | W8 |
+| Message search across threads | ✅ | ✅ GET /api/search and the sidebar Messages section | W8 done |
 | Attachments: images/screenshots/files in transcript, quota | ✅ | ✅ composer, transcript gallery, storage, text-in-prompt and orphan sweep | W6 done |
 | Notifications: in-app/desktop, per-bot, exact-thread routing | ✅ | ✅ inbox, unread badge, native banners, per-bot toggle | W6 done |
 | Analytics: usage ledger, decision log, admin activity, Today page | ✅ | ✅ Insights page (Today + usage + CSV); decision log and admin activity next | W8 |
