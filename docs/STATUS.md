@@ -279,6 +279,20 @@ mapped in `docs/MAUSBOT-PARITY.md` (34 bots / 7 teams, 33 bots with a browser an
   bytes reached the event log; deleting the login removed its vault entries.
 - Suite: 1959 tests (186 files), typecheck 12/12, lint clean.
 
+## Wave 20: saved logins UI, message search (2026-10-22)
+
+- **Saved logins UI.** Settings → Saved logins lists name, label, host, TOTP badge with edit/delete; the dialog
+  creates a login or, on edit, prefills only metadata and leaves credentials blank ("Leave blank to keep the
+  saved value"), sending only typed fields and offering to remove a stored TOTP secret. The copy states
+  values are write-only and bots use fill_login only on the matching site; delete says the credentials are
+  deleted and bots can no longer sign in.
+- **Message search.** GET /api/search?q=&botId=&threadId=&limit=&before= does a parameterised LIKE across
+  messages (wildcards escaped, filters, newest first, SQL limit) and returns hits with thread title, bot
+  name, role, a 140-character snippet centred on the first match and the timestamp. Verified live: "pong"
+  returned both Capy messages, a literal % matched nothing, bad limits were 400s. Known limits: LIKE scan
+  (no FTS index yet), SQLite ASCII-only case folding, no archive filter.
+- Suite: 1995 tests (192 files), typecheck 12/12, lint clean.
+
 ## Next
 
 1. Re-run the eval suite on a live model once OpenCode Go has quota (`apps/evals`, `--base` to the server), including B8 and C; the 2026-10-20 results predate the read auto-allow and the fixes above.

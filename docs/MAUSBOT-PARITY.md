@@ -71,7 +71,7 @@ Legend: ✅ parity or better · 🟡 partial · ❌ absent · 🎯 current wave.
 | Browser per bot, persistent login profiles | ✅ | ✅ per-bot and shared profiles, persistent logins, egress-gated | W1 done |
 | Live browser view and take-over | ✅ | ✅ JPEG live panel with click/scroll/type input and takeover for host browsers | W7 done |
 | Host browser (My Chrome) attach | ✅ | ❌ | W5 |
-| Saved logins vault + `fill_login` | ✅ | ✅ vault-backed logins, host-gated fill_login with TOTP; settings UI next | W7 |
+| Saved logins vault + `fill_login` | ✅ | ✅ vault-backed logins with a Settings UI, host-gated fill_login with TOTP | W7 done |
 | Connected apps (Composio marketplace) + per-bot tool grants | ✅ | ❌ | W3 |
 | Custom MCP servers (stdio/HTTP, per-bot) | ✅ | ✅ stdio/HTTP servers with vault secrets, handshake test and Settings panel; per-bot grants pending | W5 done |
 | Approval levels per bot/thread + decision log | ✅ | 🟡 per-bot ask/edits modes with an irreversible safety floor; decision log/export next | W6 |
@@ -81,6 +81,7 @@ Legend: ✅ parity or better · 🟡 partial · ❌ absent · 🎯 current wave.
 | Memory: MEMORY.md + topics + recall + upkeep + journal/undo + About me | ✅ | 🟡 recall, caps and an editor are live; no journal/upkeep/about-me | W4 |
 | Skills: SKILL.md import/export, per-bot on/off, learned-skill approval | ✅ | 🟡 prompt + editor with budgets; no SKILL.md import/export or learned-skill review yet | W4 |
 | Voice: TTS providers, spoken replies, voice notes, calls, dictation | ✅ | ❌ | W8 |
+| Message search across threads | ✅ | ✅ GET /api/search with snippets; sidebar UI next | W8 |
 | Attachments: images/screenshots/files in transcript, quota | ✅ | ✅ composer, transcript gallery, storage, text-in-prompt and orphan sweep | W6 done |
 | Notifications: in-app/desktop, per-bot, exact-thread routing | ✅ | ✅ inbox, unread badge, native banners, per-bot toggle | W6 done |
 | Analytics: usage ledger, decision log, admin activity, Today page | ✅ | ✅ Insights page (Today + usage + CSV); decision log and admin activity next | W8 |
