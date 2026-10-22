@@ -20,6 +20,8 @@ export interface RoomPost {
   content: string;
   /** Explicit mention ids, from the request body. Ids that are not members are ignored. */
   mentions?: string[];
+  /** Uploaded attachments to link to the message before the bots answer it. */
+  attachmentIds?: readonly string[];
 }
 
 export interface RoomService {
@@ -32,10 +34,11 @@ export interface RoomService {
   /** Adds and removes members, or undefined when the thread is not a room. Throws `RuleViolation` on a rule break. */
   updateMembers(roomId: string, input: UpdateRoomMembers): Promise<RoomMember[] | undefined>;
   /**
-   * Stores a user message in a room and runs the bots that answer it, one after another, so each
-   * sees the earlier replies. Resolves with the first run's id, or null when nobody answers.
+   * Stores a user message in a room, links its attachments, and runs the bots that answer it one after
+   * another, so each sees the earlier replies. Resolves with the first run's id (null when nobody answers)
+   * and the persisted message, attachments included.
    */
-  post(thread: Thread, input: RoomPost): Promise<{ runId: string | null }>;
+  post(thread: Thread, input: RoomPost): Promise<{ runId: string | null; message: Message }>;
   /**
    * Stores the baton: `toBotId` answers the room's next message that nobody mentions. The `handoff` event is
    * published by the handoff tool, not here. Throws `RuleViolation` unless `toBotId` is a room member.
@@ -146,12 +149,17 @@ export function createRoomService(deps: { repos: Repos; bus: EventBus; harness: 
       const bots = (await memberBots(thread.id)).filter((bot) => !bot.archived);
       const memberIds = new Set(bots.map((bot) => bot.id));
       const mentions = resolveMentions(input.content, bots, input.mentions ?? []);
-      const message = await repos.messages.create({
+      const created = await repos.messages.create({
         threadId: thread.id,
         role: 'user',
         content: input.content,
         ...(mentions.length === 0 ? {} : { mentions }),
       });
+      let message = created;
+      if (input.attachmentIds !== undefined && input.attachmentIds.length > 0) {
+        await repos.attachments.linkToMessage(input.attachmentIds, created.id);
+        message = (await repos.messages.get(created.id)) ?? created;
+      }
       await bus.publish({ type: 'message.completed', threadId: thread.id, message });
 
       const responder = thread.responder ?? 'lead';
@@ -165,7 +173,7 @@ export function createRoomService(deps: { repos: Repos; bus: EventBus; harness: 
         leadBotId: thread.leadBotId ?? thread.botId,
         ...(useBaton && baton !== undefined ? { baton } : {}),
       });
-      return { runId: await startReplies(thread.id, message, responders) };
+      return { runId: await startReplies(thread.id, message, responders), message };
     },
 
     async setBaton(threadId, toBotId) {

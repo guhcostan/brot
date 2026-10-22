@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { EgressPolicy } from './egress';
 import { TEAM_MAX_DEPTH } from './constants';
+import { ATTACHMENT_NAME_MAX_LENGTH } from './attachments';
 
 export const IsoDateTime = z.iso.datetime();
 export type IsoDateTime = z.infer<typeof IsoDateTime>;
@@ -207,6 +208,26 @@ export type Takeover = z.infer<typeof Takeover>;
 export const MessageRole = z.enum(['user', 'assistant', 'system']);
 export type MessageRole = z.infer<typeof MessageRole>;
 
+/** An image is shown as a note; a file is anything else the chat accepts (text, JSON, PDF, ZIP). */
+export const AttachmentKind = z.enum(['image', 'file']);
+export type AttachmentKind = z.infer<typeof AttachmentKind>;
+
+/**
+ * A file a person attached to a message. The bytes live in the server's attachment storage; this is only the
+ * metadata the API and the run see. `messageId` is absent until the message carrying it is stored.
+ */
+export const Attachment = z.object({
+  id: z.string(),
+  name: z.string().min(1).max(ATTACHMENT_NAME_MAX_LENGTH),
+  mimeType: z.string().min(1),
+  size: z.number().int().positive(),
+  kind: AttachmentKind,
+  createdAt: IsoDateTime,
+  /** The message this attachment was linked to. Absent for a fresh upload. */
+  messageId: z.string().optional(),
+});
+export type Attachment = z.infer<typeof Attachment>;
+
 export const Message = z.object({
   id: z.string(),
   threadId: z.string(),
@@ -222,6 +243,8 @@ export const Message = z.object({
    * so the UI can render "sender → recipient".
    */
   viaBotId: z.string().optional(),
+  /** Files attached to this message, in upload order. Absent on messages without any. */
+  attachments: z.array(Attachment).optional(),
 });
 export type Message = z.infer<typeof Message>;
 

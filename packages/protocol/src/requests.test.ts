@@ -17,6 +17,7 @@ import {
   UpdateThread,
 } from './requests';
 import { MAX_ROOM_BOTS, MIN_ROOM_BOTS } from './constants';
+import { ATTACHMENT_MAX_PER_MESSAGE } from './attachments';
 
 describe('request schemas', () => {
   it('applies CreateBot defaults', () => {
@@ -103,6 +104,18 @@ describe('request schemas', () => {
     expect(() => PostMessage.parse({ content: 'x', mentions: ['bot_1', 'bot_1'] })).toThrow(/only once/);
     expect(() => PostMessage.parse({ content: 'x', mentions: [...full, 'bot_extra'] })).toThrow();
     expect(() => PostMessage.parse({ content: 'x', mentions: [''] })).toThrow();
+  });
+
+  it('accepts up to ten attachment ids on a message', () => {
+    expect(PostMessage.parse({ content: 'See this', attachmentIds: ['att_1', 'att_2'] })).toEqual({
+      content: 'See this',
+      attachmentIds: ['att_1', 'att_2'],
+    });
+    const full = Array.from({ length: ATTACHMENT_MAX_PER_MESSAGE }, (_, i) => `att_${i}`);
+    expect(PostMessage.parse({ content: 'all', attachmentIds: full }).attachmentIds).toHaveLength(ATTACHMENT_MAX_PER_MESSAGE);
+    expect(() => PostMessage.parse({ content: 'x', attachmentIds: [...full, 'att_extra'] })).toThrow();
+    expect(() => PostMessage.parse({ content: 'x', attachmentIds: [''] })).toThrow();
+    expect(() => PostMessage.parse({ content: 'x', attachmentIds: [1] })).toThrow();
   });
 
   it('validates approval decisions', () => {

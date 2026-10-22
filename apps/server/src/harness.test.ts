@@ -1,7 +1,7 @@
 import { isAbsolute } from 'node:path';
 import { Hono } from 'hono';
 import { createEngineRegistry } from '@brot/engines';
-import type { ComputerHandle, CanonicalEvent, EngineDriver, EngineEvent, McpServerSpec, RunContext } from '@brot/protocol';
+import type { Attachment, ComputerHandle, CanonicalEvent, EngineDriver, EngineEvent, McpServerSpec, RunContext } from '@brot/protocol';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ApprovalScope } from './broker';
 import type { ComputerProvider } from './computers/types';
@@ -137,17 +137,22 @@ async function botAndThread(
 }
 
 /** Starts a run and waits for its terminal event. */
-async function runToEnd(ctx: TestContext, threadId: string, input = 'hello') {
+async function runToEnd(
+  ctx: TestContext,
+  threadId: string,
+  input = 'hello',
+  attachmentIds?: readonly string[],
+) {
   const recorded = recordEvents(ctx.services.bus, threadId);
   try {
-    const { runId } = await ctx.services.harness.startRun(threadId, input);
+    const { runId, message } = await ctx.services.harness.startRun(threadId, input, attachmentIds);
     const terminal = await waitUntil(() =>
       recorded.list.find(
         (event): event is Extract<CanonicalEvent, { type: 'run.completed' | 'run.failed' }> =>
           (event.type === 'run.completed' || event.type === 'run.failed') && event.runId === runId,
       ),
     );
-    return { runId, terminal, events: [...recorded.list] };
+    return { runId, message, terminal, events: [...recorded.list] };
   } finally {
     recorded.stop();
   }
@@ -1076,5 +1081,94 @@ describe('user MCP servers', () => {
     } finally {
       errors.mockRestore();
     }
+  });
+});
+
+describe('attachments in the run input', () => {
+  /** Stores an attachment's metadata and bytes the way an upload does. */
+  async function attach(
+    ctx: TestContext,
+    threadId: string,
+    bytes: Uint8Array,
+    overrides: { name: string; mimeType: string },
+  ): Promise<Attachment> {
+    const attachment = await ctx.services.repos.attachments.create({
+      threadId,
+      name: overrides.name,
+      mimeType: overrides.mimeType,
+      size: bytes.byteLength,
+      sha256: 'a'.repeat(64),
+    });
+    await ctx.services.attachments.write(attachment.id, bytes);
+    return attachment;
+  }
+
+  it('appends a text attachment to the prompt input', async () => {
+    const engine = fakeEngine(replies);
+    const ctx = await contextWith({ engines: createEngineRegistry([engine.driver]) });
+    const { threadId } = await botAndThread(ctx, { computer: 'none' });
+    const bytes = new TextEncoder().encode('the cat sat on the mat');
+    const attachment = await attach(ctx, threadId, bytes, { name: 'notes.txt', mimeType: 'text/plain' });
+
+    const { message, terminal } = await runToEnd(ctx, threadId, 'See attached', [attachment.id]);
+
+    expect(terminal.type).toBe('run.completed');
+    expect(message.attachments?.map((item) => item.id)).toEqual([attachment.id]);
+    const input = engine.contexts[0]?.input ?? '';
+    expect(input).toContain('See attached\n\nAttachments:');
+    expect(input).toContain('- notes.txt (text/plain, 22 B)');
+    expect(input).toContain('the cat sat on the mat');
+    expect(input).not.toContain(attachment.id);
+  });
+
+  it('leaves the input byte-identical when the message has no attachments', async () => {
+    const engine = fakeEngine(replies);
+    const ctx = await contextWith({ engines: createEngineRegistry([engine.driver]) });
+    const { threadId } = await botAndThread(ctx, { computer: 'none' });
+
+    await runToEnd(ctx, threadId, 'hello');
+
+    expect(engine.contexts[0]?.input).toBe('hello');
+  });
+
+  it('cuts a long text attachment at the per-file budget', async () => {
+    const engine = fakeEngine(replies);
+    const ctx = await contextWith({ engines: createEngineRegistry([engine.driver]) });
+    const { threadId } = await botAndThread(ctx, { computer: 'none' });
+    const content = 'a'.repeat(9_000);
+    const attachment = await attach(ctx, threadId, new TextEncoder().encode(content), {
+      name: 'big.txt',
+      mimeType: 'text/plain',
+    });
+
+    await runToEnd(ctx, threadId, 'Big file', [attachment.id]);
+
+    const input = engine.contexts[0]?.input ?? '';
+    expect(input).toContain('a'.repeat(8_000));
+    expect(input).not.toContain('a'.repeat(8_001));
+    expect(input).toContain('[truncated]');
+  });
+
+  it('notes an image and lists a binary without reading their content', async () => {
+    const engine = fakeEngine(replies);
+    const ctx = await contextWith({ engines: createEngineRegistry([engine.driver]) });
+    const { threadId } = await botAndThread(ctx, { computer: 'none' });
+    const image = await attach(ctx, threadId, new TextEncoder().encode('PNGDATA'), {
+      name: 'screen.png',
+      mimeType: 'image/png',
+    });
+    const pdf = await attach(ctx, threadId, new TextEncoder().encode('PDFDATA'), {
+      name: 'report.pdf',
+      mimeType: 'application/pdf',
+    });
+
+    await runToEnd(ctx, threadId, 'Files', [image.id, pdf.id]);
+
+    const input = engine.contexts[0]?.input ?? '';
+    expect(input).toContain('- screen.png (image/png, 7 B)');
+    expect(input).toContain('image attached');
+    expect(input).toContain('- report.pdf (application/pdf, 7 B)');
+    expect(input).not.toContain('PNGDATA');
+    expect(input).not.toContain('PDFDATA');
   });
 });

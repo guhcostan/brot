@@ -6,3 +6,4 @@ export * from './events';
 export * from './engine';
 export * from './tools';
 export * from './mcp-servers';
+export * from './attachments';

@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createEngineRegistry, createMockEngine } from '@brot/engines';
@@ -50,6 +50,40 @@ describe('startServer', () => {
     const again = await boot(home);
     const botsAgain = (await (await fetch(`http://127.0.0.1:${again.port}/api/bots`)).json()) as Bot[];
     expect(botsAgain).toHaveLength(1);
+  });
+
+  it('sweeps the files of attachments whose rows a deletion cascaded away, before it listens', async () => {
+    const home = await tempHome();
+    const config = loadConfig({ BROT_HOME: home });
+    const services = await createServices(config, createEngineRegistry([createMockEngine()]));
+    const kept = await services.repos.bots.create({ name: 'Kept', job: 'x' });
+    const keptThread = await services.repos.threads.create(kept.id, { title: 'Keep' });
+    const keptAttachment = await services.repos.attachments.create({
+      threadId: keptThread.id,
+      name: 'keep.txt',
+      mimeType: 'text/plain',
+      size: 4,
+      sha256: 'b'.repeat(64),
+    });
+    await services.attachments.write(keptAttachment.id, new TextEncoder().encode('keep'));
+
+    const doomed = await services.repos.bots.create({ name: 'Doomed', job: 'x' });
+    const doomedThread = await services.repos.threads.create(doomed.id, { title: 'Bye' });
+    const orphan = await services.repos.attachments.create({
+      threadId: doomedThread.id,
+      name: 'bye.txt',
+      mimeType: 'text/plain',
+      size: 3,
+      sha256: 'a'.repeat(64),
+    });
+    await services.attachments.write(orphan.id, new TextEncoder().encode('bye'));
+    await services.repos.bots.remove(doomed.id);
+    await services.close();
+
+    const server = await boot(home);
+    expect((await fetch(`http://127.0.0.1:${server.port}/api/health`)).status).toBe(200);
+    await expect(readFile(join(home, 'attachments', orphan.id))).rejects.toThrow();
+    expect(await readFile(join(home, 'attachments', keptAttachment.id), 'utf8')).toBe('keep');
   });
 
   it('marks runs interrupted by a restart as failed', async () => {

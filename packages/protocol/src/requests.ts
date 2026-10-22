@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { defaultEgressPolicy, EgressPolicy } from './egress';
 import { MAX_ROOM_BOTS, MIN_ROOM_BOTS } from './constants';
+import { ATTACHMENT_MAX_PER_MESSAGE } from './attachments';
 import {
   ApprovalDecision,
   ComputerKind,
@@ -114,6 +115,8 @@ export const PostMessage = z
   .object({
     content: z.string().min(1),
     mentions: z.array(z.string().min(1)).max(MAX_ROOM_BOTS).optional(),
+    /** Attachments uploaded for this message, to be linked to it. */
+    attachmentIds: z.array(z.string().min(1)).max(ATTACHMENT_MAX_PER_MESSAGE).optional(),
   })
   .superRefine((value, ctx) => {
     if (value.mentions) requireUniqueBots(value.mentions, ctx, ['mentions']);

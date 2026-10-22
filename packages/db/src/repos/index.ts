@@ -1,5 +1,6 @@
 import type { Db } from '../client';
 import { createApprovalRepo } from './approvals';
+import { createAttachmentRepo } from './attachments';
 import { createBotRepo } from './bots';
 import { createComputerRepo } from './computers';
 import { createDeviceRepo } from './devices';
@@ -23,6 +24,7 @@ export function createRepos(db: Db) {
     bots: createBotRepo(db),
     threads: createThreadRepo(db),
     messages: createMessageRepo(db),
+    attachments: createAttachmentRepo(db),
     runs: createRunRepo(db),
     approvals: createApprovalRepo(db),
     policies: createPolicyRepo(db),
@@ -49,4 +51,5 @@ export type { CreateDeviceInput } from './devices';
 export type { RoutineScheduleUpdate } from './routines';
 export type { CreateRoutineRunInput, RoutineRunFilter, RoutineRunPatch } from './routine-runs';
 export type { RunPatch } from './runs';
+export type { CreateAttachmentRecord, StoredAttachment } from './attachments';
 export type { TaskFilter } from './tasks';

@@ -1257,3 +1257,72 @@ describe('mcp servers', () => {
     expect(await repos.mcpServers.get(server.id)).toBeUndefined();
   });
 });
+
+describe('attachments', () => {
+  function record(overrides: Record<string, unknown> = {}) {
+    return {
+      name: 'notes.txt',
+      mimeType: 'text/plain',
+      size: 5,
+      sha256: 'a'.repeat(64),
+      threadId: '',
+      ...overrides,
+    };
+  }
+
+  it('stores metadata, derives the kind, lists by thread and id, and links to a message', async () => {
+    const { thread } = await seed();
+    const first = await repos.attachments.create(record({ threadId: thread.id }));
+    expect(first).toMatchObject({ name: 'notes.txt', mimeType: 'text/plain', size: 5, kind: 'file' });
+    expect(first.messageId).toBeUndefined();
+
+    const image = await repos.attachments.create(
+      record({ name: 'shot.png', mimeType: 'image/png', size: 10, sha256: 'b'.repeat(64), threadId: thread.id }),
+    );
+    expect(image.kind).toBe('image');
+
+    expect(await repos.attachments.get(first.id)).toEqual(first);
+    expect((await repos.attachments.listByThread(thread.id)).map((item) => item.id)).toEqual([first.id, image.id]);
+    expect((await repos.attachments.listByIds([image.id, 'missing', first.id])).map((item) => item.id)).toEqual([
+      first.id,
+      image.id,
+    ]);
+
+    const message = await repos.messages.create({ threadId: thread.id, role: 'user', content: 'See files' });
+    await repos.attachments.linkToMessage([first.id, image.id], message.id);
+    expect((await repos.attachments.get(first.id))?.messageId).toBe(message.id);
+    expect((await repos.messages.get(message.id))?.attachments?.map((item) => item.id)).toEqual([first.id, image.id]);
+    expect(
+      (await repos.messages.listByThread(thread.id)).find((item) => item.id === message.id)?.attachments,
+    ).toHaveLength(2);
+  });
+
+  it('lists every stored id for the boot sweep', async () => {
+    const { thread } = await seed();
+    const first = await repos.attachments.create(record({ threadId: thread.id }));
+    const second = await repos.attachments.create(
+      record({ name: 'shot.png', mimeType: 'image/png', sha256: 'b'.repeat(64), threadId: thread.id }),
+    );
+    expect(await repos.attachments.listIds()).toEqual([first.id, second.id].sort());
+  });
+
+  it('leaves a message without attachments untouched and removes metadata', async () => {
+    const { thread } = await seed();
+    const plain = await repos.messages.create({ threadId: thread.id, role: 'user', content: 'hi' });
+    expect(await repos.messages.get(plain.id)).not.toHaveProperty('attachments');
+
+    const attachment = await repos.attachments.create(record({ threadId: thread.id }));
+    expect(await repos.attachments.remove(attachment.id)).toBe(true);
+    expect(await repos.attachments.remove(attachment.id)).toBe(false);
+    expect(await repos.attachments.get(attachment.id)).toBeUndefined();
+  });
+
+  it('unlinks an attachment when its message is deleted but keeps the metadata', async () => {
+    const { thread } = await seed();
+    const attachment = await repos.attachments.create(record({ threadId: thread.id }));
+    const message = await repos.messages.create({ threadId: thread.id, role: 'user', content: 'See file' });
+    await repos.attachments.linkToMessage([attachment.id], message.id);
+    await handle.client.execute({ sql: 'DELETE FROM messages WHERE id = ?', args: [message.id] });
+    expect((await repos.attachments.get(attachment.id))?.messageId).toBeUndefined();
+  });
+});

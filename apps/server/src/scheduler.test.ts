@@ -51,8 +51,9 @@ function fakeHarness(options: { failStart?: Error } = {}): {
         inputs.push({ threadId, input });
         const thread = await ctx.services.repos.threads.get(threadId);
         if (thread === undefined) throw new Error(`thread ${threadId} does not exist`);
+        const message = await ctx.services.repos.messages.create({ threadId, role: 'user', content: input });
         const run = await ctx.services.repos.runs.create({ threadId, botId: thread.botId, engine: 'mock' });
-        return { runId: run.id };
+        return { runId: run.id, message };
       },
       startBotRun: unused,
       cancelRun: unused,

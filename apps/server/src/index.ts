@@ -9,7 +9,7 @@ import { createBrotMcp } from './mcp';
 import { createTeamTools } from './team';
 import type { AppEnv, Bindings } from './auth';
 import { loadConfig, type ConfigOverrides } from './config';
-import { createServices, type ServiceExtras } from './services';
+import { createServices, type ServiceExtras, type Services } from './services';
 import { createWebhookApp } from './webhooks';
 export { createApp } from './app';
 export { createServices, type ServiceExtras, type Services } from './services';
@@ -55,6 +55,7 @@ export async function startServer(options: StartOptions = {}): Promise<ServerHan
   const recovered = await services.harness.recoverInterruptedRuns();
   if (recovered > 0) console.warn(`marked ${recovered} interrupted run(s) as failed`);
   await services.scheduler.sync();
+  await sweepOrphanedAttachments(services);
 
   const app = createApp({ ...services, trustLoopback: true });
   const webhooks = createWebhookApp(services);
@@ -80,6 +81,20 @@ export async function startServer(options: StartOptions = {}): Promise<ServerHan
       await services.close();
     },
   };
+}
+
+/**
+ * Deletes attachment files whose row is gone: deleting a bot or thread cascades the rows but not the bytes.
+ * Runs once at boot, before the API listens, so the server never serves with stale attachment files.
+ */
+async function sweepOrphanedAttachments(services: Services): Promise<void> {
+  try {
+    const { removed } = await services.attachments.sweep(new Set(await services.repos.attachments.listIds()));
+    if (removed > 0) console.log(`removed ${removed} orphaned attachment file(s)`);
+  } catch (error) {
+    // Unreachable files must not keep Brot from starting; the next boot tries again.
+    console.error('could not sweep orphaned attachment files', error);
+  }
 }
 
 async function seedFirstBot(repos: Repos): Promise<void> {

@@ -123,6 +123,27 @@ export const messages = sqliteTable(
   (t) => [index('messages_thread_idx').on(t.threadId)],
 );
 
+/**
+ * A file attached to a message. The bytes live in `<BROT_HOME>/attachments/<id>`, written with mode 0600;
+ * this row is the metadata. `message_id` is null until the message that carries it is stored.
+ */
+export const attachments = sqliteTable(
+  'attachments',
+  {
+    id: text('id').primaryKey(),
+    threadId: text('thread_id')
+      .notNull()
+      .references(() => threads.id, { onDelete: 'cascade' }),
+    messageId: text('message_id').references(() => messages.id, { onDelete: 'set null' }),
+    name: text('name').notNull(),
+    mimeType: text('mime_type').notNull(),
+    size: integer('size').notNull(),
+    sha256: text('sha256').notNull(),
+    createdAt: text('created_at').notNull(),
+  },
+  (t) => [index('attachments_thread_idx').on(t.threadId), index('attachments_message_idx').on(t.messageId)],
+);
+
 export const runs = sqliteTable(
   'runs',
   {

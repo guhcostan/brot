@@ -68,6 +68,29 @@ describe('entity schemas', () => {
     expect(roundTrip(Run, run)).toEqual(run);
   });
 
+  it('round-trips a message with attachments', () => {
+    const attachment = {
+      id: 'att_1',
+      name: 'notes.txt',
+      mimeType: 'text/plain',
+      size: 5,
+      kind: 'file' as const,
+      createdAt: at,
+      messageId: 'm1',
+    };
+    const image = {
+      id: 'att_2',
+      name: 'screen.png',
+      mimeType: 'image/png',
+      size: 2048,
+      kind: 'image' as const,
+      createdAt: at,
+    };
+    const message = { id: 'm1', threadId: 't1', role: 'user', content: 'See files', createdAt: at, attachments: [attachment, image] };
+    expect(roundTrip(Message, message)).toEqual(message);
+    expect(() => Message.parse({ ...message, attachments: [{ ...attachment, kind: 'video' }] })).toThrow();
+  });
+
   it('round-trips approval, policy, memory, and skill', () => {
     const approval = {
       id: 'a1',

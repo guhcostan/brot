@@ -46,6 +46,7 @@ describe('migrate', () => {
     expect(await tableNames(handle)).toEqual([
       '__drizzle_migrations',
       'approvals',
+      'attachments',
       'bots',
       'computers',
       'devices',
@@ -66,7 +67,7 @@ describe('migrate', () => {
     ]);
 
     const applied = await handle.client.execute('SELECT COUNT(*) AS count FROM __drizzle_migrations');
-    expect(Number(applied.rows[0]?.count)).toBe(9);
+    expect(Number(applied.rows[0]?.count)).toBe(10);
   });
 
   it('adds the rooms, team task, and per-bot session schema on a fresh database', async () => {
@@ -462,6 +463,61 @@ describe('migrate', () => {
     const repos = createRepos(handle.db);
     const server = await repos.mcpServers.create({ name: 'tools', command: 'npx' });
     expect((await repos.mcpServers.get(server.id))?.name).toBe('tools');
+  });
+
+  it('adds the attachments table in place, linked to its thread and message', async () => {
+    const { handle } = await tempDb();
+    const journal = JSON.parse(await readFile(join(migrationsFolder, 'meta', '_journal.json'), 'utf8')) as {
+      entries: Array<{ tag: string; when: number }>;
+    };
+    const applied = journal.entries.slice(0, 9);
+    if (applied.length !== 9 || applied[8]?.tag !== '0008_smooth_puma') {
+      throw new Error('journal must start with the 0000 to 0008 migrations');
+    }
+
+    for (const entry of applied) {
+      await handle.client.executeMultiple(await readFile(join(migrationsFolder, `${entry.tag}.sql`), 'utf8'));
+    }
+    await handle.client.execute(
+      'CREATE TABLE "__drizzle_migrations" ("id" INTEGER PRIMARY KEY AUTOINCREMENT, "hash" text NOT NULL, "created_at" numeric)',
+    );
+    for (const entry of applied) {
+      await handle.client.execute({
+        sql: 'INSERT INTO "__drizzle_migrations" ("hash", "created_at") VALUES (?, ?)',
+        args: [entry.tag, entry.when],
+      });
+    }
+
+    await migrate(handle.db);
+
+    expect(await tableNames(handle)).toContain('attachments');
+    expect(await columnNames(handle, 'attachments')).toEqual([
+      'id',
+      'thread_id',
+      'message_id',
+      'name',
+      'mime_type',
+      'size',
+      'sha256',
+      'created_at',
+    ]);
+    const indexes = await handle.client.execute("PRAGMA index_list('attachments')");
+    expect(indexes.rows.some((row) => row.name === 'attachments_thread_idx')).toBe(true);
+    expect(indexes.rows.some((row) => row.name === 'attachments_message_idx')).toBe(true);
+
+    const repos = createRepos(handle.db);
+    const bot = await repos.bots.create({ name: 'Ada', job: 'x' });
+    const thread = await repos.threads.create(bot.id);
+    const attachment = await repos.attachments.create({
+      name: 'notes.txt',
+      mimeType: 'text/plain',
+      size: 5,
+      sha256: 'a'.repeat(64),
+      threadId: thread.id,
+    });
+    const message = await repos.messages.create({ threadId: thread.id, role: 'user', content: 'See notes' });
+    await repos.attachments.linkToMessage([attachment.id], message.id);
+    expect((await repos.messages.get(message.id))?.attachments).toEqual([{ ...attachment, messageId: message.id }]);
   });
 
   it('enables foreign keys on the connection', async () => {

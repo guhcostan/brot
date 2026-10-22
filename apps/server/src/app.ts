@@ -48,6 +48,7 @@ import type { BrotMcpService } from './mcp/types';
 import type { LlmRelay, ProviderSpec } from './llm';
 import { botBrowserKind } from './browser/tools';
 import type { HostBrowserService } from './browser/types';
+import { mountAttachmentRoutes, type AttachmentStorage } from './attachments';
 import { mountDesktopRoutes, type DesktopService } from './desktop';
 import { testMcpServer } from './mcp-servers';
 import { RuleViolation } from './rooms/errors';
@@ -87,6 +88,8 @@ export interface AppDeps {
   desktop?: DesktopService;
   /** The bot browser on the server machine, for bots with `browser: true` and no desktop computer. */
   browser: HostBrowserService;
+  /** Attachment bytes under `<home>/attachments`. Only ids reach the API; no path does. */
+  attachments: AttachmentStorage;
   /** The model providers the relay knows (seeded plus providers.json). Listed by GET /api/providers. */
   providers?: readonly ProviderSpec[];
 }
@@ -164,6 +167,33 @@ async function unknownBots(repos: Repos, ids: readonly string[]): Promise<string
   return missing;
 }
 
+/**
+ * Why a message may not link these attachment ids: an id names nothing, an attachment belongs to another
+ * thread, or one is already linked to a message.
+ */
+async function attachmentLinkIssues(
+  repos: Repos,
+  threadId: string,
+  ids: readonly string[],
+): Promise<Array<{ path: string[]; message: string }>> {
+  if (ids.length === 0) return [];
+  const stored = new Map(
+    (await repos.attachments.listByIds([...new Set(ids)])).map((attachment) => [attachment.id, attachment]),
+  );
+  const issues: Array<{ path: string[]; message: string }> = [];
+  for (const [index, id] of ids.entries()) {
+    const attachment = stored.get(id);
+    if (attachment === undefined) {
+      issues.push({ path: ['attachmentIds', String(index)], message: 'unknown attachment' });
+    } else if (attachment.threadId !== threadId) {
+      issues.push({ path: ['attachmentIds', String(index)], message: 'this attachment belongs to another thread' });
+    } else if (attachment.messageId !== undefined) {
+      issues.push({ path: ['attachmentIds', String(index)], message: 'this attachment is already linked to a message' });
+    }
+  }
+  return issues;
+}
+
 function invalidReference(c: Context<AppEnv>, path: string, message: string): Response {
   return c.json({ error: 'Invalid request', issues: [{ path: [path], message }] }, 400);
 }
@@ -192,12 +222,17 @@ function ruleViolation(c: Context<AppEnv>, error: unknown): Response {
 }
 
 export function createApp(deps: AppDeps): Hono<AppEnv> {
-  const { repos, bus, broker, harness, scheduler, vault, pairing, engines, rooms, tasks, config, browser } = deps;
+  const { repos, bus, broker, harness, scheduler, vault, pairing, engines, rooms, tasks, config, browser, attachments } = deps;
   const trustLoopback = deps.trustLoopback ?? true;
   const app = new Hono<AppEnv>();
 
   app.use('/api/*', cors({ origin: ALLOWED_ORIGINS, allowHeaders: ['Authorization', 'Content-Type'] }));
-  app.use('/api/*', requireJsonWrites());
+  // Every state-changing call is JSON, which forces a CORS preflight; the attachment upload alone speaks multipart.
+  const jsonWrites = requireJsonWrites();
+  app.use('/api/*', async (c, next) => {
+    if (c.req.method === 'POST' && c.req.path === '/api/attachments') return next();
+    return jsonWrites(c, next);
+  });
   app.use('/api/*', authenticate({ devices: repos.devices, trustLoopback }));
 
   app.onError((error, c) => {
@@ -330,7 +365,10 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     return c.json(await repos.runs.listByThread(id));
   });
 
-  /** In a room, the responders run one after another and `runId` is the first one's (null when nobody answers). */
+  /**
+   * Stores the user message and starts the answer. In a room the responders run one after another and `runId`
+   * is the first one's (null when nobody answers). The persisted message is returned with its attachments.
+   */
   app.post('/api/threads/:id/messages', async (c) => {
     const id = c.req.param('id');
     const thread = await repos.threads.get(id);
@@ -341,12 +379,14 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
       const title = titleFromMessage(body.data.content);
       if (title !== '') await repos.threads.setTitle(id, title);
     }
+    const attachmentIssues = await attachmentLinkIssues(repos, thread.id, body.data.attachmentIds ?? []);
+    if (attachmentIssues.length > 0) return c.json({ error: 'Invalid request', issues: attachmentIssues }, 400);
     if (thread.kind === 'room') {
-      const { runId } = await rooms.post(thread, body.data);
-      return c.json({ runId }, 202);
+      const { runId, message } = await rooms.post(thread, body.data);
+      return c.json({ runId, message }, 202);
     }
-    const { runId } = await harness.startRun(id, body.data.content);
-    return c.json({ runId }, 202);
+    const { runId, message } = await harness.startRun(id, body.data.content, body.data.attachmentIds);
+    return c.json({ runId, message }, 202);
   });
 
   /** The log in order. Without `after`, the first page; with it, the page of events that follow that event id. */
@@ -817,6 +857,8 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     );
     return c.json(listed);
   });
+
+  mountAttachmentRoutes(app, { repos, storage: attachments });
 
   if (deps.desktop) mountDesktopRoutes(app, { repos, desktop: deps.desktop });
 

@@ -20,6 +20,7 @@ import { DESKTOP_IMAGE } from './computers/docker-args';
 import type { ComputerProvider } from './computers/types';
 import type { ServerMode } from './config';
 import type { LlmRelay, ResolvedRoute, RunUsage } from './llm';
+import { appendAttachmentContext, type AttachmentStorage } from './attachments';
 import type { BrotMcp } from './mcp/types';
 import { enabledMcpServerSpecs } from './mcp-servers/specs';
 import { selectForPrompt } from './memory/recall';
@@ -47,6 +48,8 @@ export interface HarnessDeps {
   llm: LlmRelay;
   /** Resolves a user MCP server's `secret://` env values into its child process. Values never reach the model. */
   vault: Vault;
+  /** Reads attachment bytes for the prompt. Only attachment ids reach it; no filesystem path does. */
+  attachments: AttachmentStorage;
   /** Whether the Brot team tools are attached to runs that have the Brot MCP server. Shown to the engine in the prompt. */
   teamTools?: boolean;
 }
@@ -78,8 +81,11 @@ export interface StartedBotRun {
 }
 
 export interface Harness {
-  /** Starts a run for the thread's own bot on a new user message. */
-  startRun(threadId: string, input: string): Promise<{ runId: string }>;
+  /**
+   * Starts a run for the thread's own bot on a new user message, linking the given uploaded attachments
+   * to it. Resolves with the persisted message, attachments included.
+   */
+  startRun(threadId: string, input: string, attachmentIds?: readonly string[]): Promise<{ runId: string; message: Message }>;
   /**
    * Starts a run for any bot in a thread. Returns once the run is recorded, before it finishes. The run is recorded
    * as `running` even while it waits for the bot's previous run in the thread to end.
@@ -121,7 +127,21 @@ interface ActiveRun {
 type TerminalStatus = 'completed' | 'failed' | 'cancelled';
 
 export function createHarness(deps: HarnessDeps): Harness {
-  const { repos, bus, broker, engines, computers, mcp, llm, mode, computerImage, loopbackUrl, chains, vault } = deps;
+  const {
+    repos,
+    bus,
+    broker,
+    engines,
+    computers,
+    mcp,
+    llm,
+    mode,
+    computerImage,
+    loopbackUrl,
+    chains,
+    vault,
+    attachments: attachmentStorage,
+  } = deps;
   const teamTools = deps.teamTools ?? false;
   /** Every run that has not ended, queued ones included, by run id. */
   const active = new Map<string, ActiveRun>();
@@ -139,26 +159,48 @@ export function createHarness(deps: HarnessDeps): Harness {
     recordUsage(state, usage).catch((error: unknown) => console.error(`usage of run ${runId} could not be recorded`, error));
   });
 
+  /** Links the uploaded attachments to the stored message and returns the message as the API sees it. */
+  async function linkAttachments(ids: readonly string[], messageId: string): Promise<Message> {
+    await repos.attachments.linkToMessage(ids, messageId);
+    const linked = await repos.messages.get(messageId);
+    if (linked === undefined) throw new Error(`Message ${messageId} disappeared while its attachments were linked`);
+    return linked;
+  }
+
   async function storeMessage(input: {
     threadId: string;
     role: Message['role'];
     content: string;
     authorBotId?: string;
     viaBotId?: string;
+    attachmentIds?: readonly string[];
   }): Promise<Message> {
-    const message = await repos.messages.create(input);
+    const created = await repos.messages.create(input);
+    const message =
+      input.attachmentIds === undefined || input.attachmentIds.length === 0
+        ? created
+        : await linkAttachments(input.attachmentIds, created.id);
     await bus.publish({ type: 'message.completed', threadId: input.threadId, message });
     return message;
   }
 
-  async function startRun(threadId: string, input: string): Promise<{ runId: string }> {
+  async function startRun(
+    threadId: string,
+    input: string,
+    attachmentIds?: readonly string[],
+  ): Promise<{ runId: string; message: Message }> {
     const thread = await repos.threads.get(threadId);
     if (!thread) throw new Error(`Thread ${threadId} does not exist`);
     const bot = await repos.bots.get(thread.botId);
     if (!bot) throw new Error(`Bot ${thread.botId} does not exist`);
-    const message = await storeMessage({ threadId, role: 'user', content: input });
+    const message = await storeMessage({
+      threadId,
+      role: 'user',
+      content: input,
+      ...(attachmentIds === undefined || attachmentIds.length === 0 ? {} : { attachmentIds }),
+    });
     const started = await startBotRun({ botId: bot.id, threadId, input, inputMessage: message });
-    return { runId: started.runId };
+    return { runId: started.runId, message };
   }
 
   async function startBotRun(req: StartBotRunInput): Promise<StartedBotRun> {
@@ -263,6 +305,7 @@ export function createHarness(deps: HarnessDeps): Harness {
         resumed: engineSessionId !== undefined,
         ...(previousTriggerId === undefined ? {} : { previousTriggerId }),
       });
+      const input = await appendAttachmentContext(attachmentStorage, turn.input, trigger.attachments);
       const driver = await readyDriver(bot);
       const relay = RELAYED_ENGINES.has(bot.engine) ? await relayRoute(state, bot) : undefined;
       const place = await placeRun(state, bot, relay === undefined ? modelHostsFor(bot.engine) : []);
@@ -290,7 +333,7 @@ export function createHarness(deps: HarnessDeps): Harness {
         threadId: state.threadId,
         bot,
         history: turn.history,
-        input: turn.input,
+        input,
         memories: selectForPrompt(await repos.memories.listByBot(bot.id), turn.input),
         skills: await repos.skills.listForBot(bot.id),
         signal: state.controller.signal,

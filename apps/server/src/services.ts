@@ -1,5 +1,6 @@
 import { createDb, createRepos, migrate, type BrotDb, type Repos } from '@brot/db';
 import type { EngineRegistry } from '@brot/engines';
+import { createAttachmentStorage, type AttachmentStorage } from './attachments';
 import { createHostBrowserService } from './browser';
 import { createBrowserTools } from './browser/tools';
 import type { HostBrowserService } from './browser/types';
@@ -78,6 +79,8 @@ export interface Services {
   desktop: DesktopService | undefined;
   /** The bot browser on the server machine. Chrome starts on the first command, never at boot. */
   browser: HostBrowserService;
+  /** Attachment bytes under `<home>/attachments`, reached by id only. */
+  attachments: AttachmentStorage;
   /** The providers the model relay knows, listed by GET /api/providers. */
   providers: ProviderSpec[];
   /** Relays contained runs' model requests to their providers, adding the key from the vault. */
@@ -102,6 +105,7 @@ export async function createServices(
   const bus = createEventBus(repos.events);
   const broker = createBroker({ repos, bus });
   const vault = createVault({ dir: config.home });
+  const attachments = createAttachmentStorage({ home: config.home });
   const computers = extras.computers ?? {};
 
   // The harness needs the MCP server, the MCP server needs the team tools, and the team tools need the
@@ -160,6 +164,7 @@ export async function createServices(
     mcp,
     llm,
     vault,
+    attachments,
     teamTools: teamTools.length > 0,
     mode: config.mode,
     computerImage: config.computerImage,
@@ -201,6 +206,7 @@ export async function createServices(
     mcp,
     desktop,
     browser,
+    attachments,
     providers,
     llm,
     rooms,
