@@ -2,13 +2,15 @@ import { useEffect, useRef, useState, type ReactElement, type ReactNode } from '
 import type { ApprovalDecision, Attachment, Bot, Thread } from '@brot/protocol';
 import { BotAvatar, Button, EmptyState, Skeleton, StatusDot, TypingIndicator, type BotStatus } from '@brot/ui';
 import type { Provider } from '../data/client';
+import type { VoiceContext } from '../voice';
 import { avatarOf } from '../format';
 import { t } from '../i18n';
 import type { ThreadState } from '../state/thread';
 import { Composer } from './Composer';
 import { botStatusLabel } from './taskLabels';
-import { ChevronLeft, Pencil, Sparkle } from './icons';
+import { ChevronLeft, Pencil, Sparkle, SpeakerOff } from './icons';
 import { ThreadModelPicker } from './ThreadModelPicker';
+import { useAutoSpeak } from './useAutoSpeak';
 import { useLiveMood } from './mood';
 import { Timeline } from './Timeline';
 
@@ -22,6 +24,8 @@ export interface ThreadViewProps {
   loadProviders?: () => Promise<Provider[]>;
   /** Patches this thread's model; null goes back to the bot's model. */
   onPickThreadModel?: (model: string | null) => Promise<unknown>;
+  /** Voice availability and the speak call for listen/auto-speak. */
+  voice?: VoiceContext;
   thread: ThreadState;
   /** False until the bot's history has loaded. */
   loaded: boolean;
@@ -49,8 +53,9 @@ export function useStickToBottom(deps: readonly unknown[]) {
   return ref;
 }
 
-export function ThreadView({ bot, title, threadMeta, loadProviders, onPickThreadModel, thread, loaded, status, onSend, uploadAttachment, discardAttachment, onEdit, onDecide, onOpenBots, onOpenContext }: ThreadViewProps): ReactElement {
+export function ThreadView({ bot, title, threadMeta, loadProviders, onPickThreadModel, voice, thread, loaded, status, onSend, uploadAttachment, discardAttachment, onEdit, onDecide, onOpenBots, onOpenContext }: ThreadViewProps): ReactElement {
   const [modelOpen, setModelOpen] = useState(false);
+  const autoSpeak = useAutoSpeak({ thread, voice, defaultBotId: bot.id, speaks: () => bot.speakReplies === true });
   const effectiveModel = threadMeta?.model ?? bot.model;
   const lastItem = thread.items.at(-1);
   const streaming = lastItem?.kind === 'message' && lastItem.streaming;
@@ -80,6 +85,11 @@ export function ThreadView({ bot, title, threadMeta, loadProviders, onPickThread
             <Sparkle size={13} />
             <span className="truncate">{effectiveModel ?? t('thread.noModel')}</span>
             {threadMeta.model === undefined ? <span className="font-sans text-ink-3">· {t('thread.modelDefault')}</span> : null}
+          </Button>
+        ) : null}
+        {autoSpeak.playing ? (
+          <Button variant="ghost" size="sm" onClick={autoSpeak.stop} aria-label={t('voice.stopAutoSpeak')} title={t('voice.stopAutoSpeak')}>
+            <SpeakerOff size={16} />
           </Button>
         ) : null}
         <StatusDot key={status} status={status} label={botStatusLabel(status)} className="hidden animate-[brot-fade_var(--dur-base)_linear_both] sm:inline-flex" />

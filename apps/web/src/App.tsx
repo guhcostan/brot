@@ -25,6 +25,7 @@ import { inbox, membersOf, statusOfBot, statusOfRoom, taskList, threadStatusOf, 
 import { tasksForBot, tasksForRoom } from './state/tasks';
 import { emptyThread, pendingApprovals } from './state/thread';
 import { useChat } from './state/useChat';
+import type { VoiceInfo, VoiceContext } from './voice';
 import { useNotifications } from './state/useNotifications';
 import { getTheme, setTheme as saveTheme, type Theme } from './theme';
 
@@ -69,6 +70,19 @@ interface TakeoverNoticeState {
 export function App(): ReactElement {
   const client = useMemo(() => createClient(), []);
   const chat = useChat(client);
+  const [voiceStatus, setVoiceStatus] = useState<VoiceInfo | null>(null);
+  const loadVoice = useCallback(async () => {
+    try {
+      setVoiceStatus(await client.getVoiceSettings());
+    } catch (error) {
+      console.warn('Voice settings did not load', error);
+      setVoiceStatus(null);
+    }
+  }, [client]);
+  useEffect(() => {
+    void loadVoice();
+  }, [loadVoice]);
+  const voice = useMemo<VoiceContext>(() => ({ status: voiceStatus, speak: client.speakText }), [voiceStatus, client]);
   const { state, select, openBot, newThread, loadThreads, loadHistory, send, sendToRoom, decide, createRoom, createTask, cancelTask, updateBot, createTeam, updateTeam, deleteTeam } = chat;
   const [pane, setPane] = useState<Pane>('thread');
   const [locale, setLocaleState] = useState<Locale>(getLocale);
@@ -275,7 +289,7 @@ export function App(): ReactElement {
       />
     );
   } else if (selection?.kind === 'settings') {
-    main = <SettingsView locale={locale} onLocaleChange={changeLocale} theme={theme} onThemeChange={changeTheme} onOpenBots={openBots} />;
+    main = <SettingsView locale={locale} onLocaleChange={changeLocale} theme={theme} onThemeChange={changeTheme} onOpenBots={openBots} onVoiceChanged={() => void loadVoice()} />;
   } else if (room) {
     main = (
       <RoomView
@@ -291,6 +305,7 @@ export function App(): ReactElement {
         onOpenBots={openBots}
         onOpenContext={openContext}
         onDeleteRoom={deleteRoom}
+        voice={voice}
       />
     );
   } else if (bot && selectedThreadId !== null) {
@@ -302,6 +317,7 @@ export function App(): ReactElement {
         threadMeta={selectedThread}
         loadProviders={client.listProviders}
         onPickThreadModel={(model) => chat.updateThread(selectedThreadId, { model })}
+        voice={voice}
         thread={state.threads[selectedThreadId] ?? emptyThread}
         loaded={state.threads[selectedThreadId] !== undefined}
         status={statusOfBot(state, bot.id)}

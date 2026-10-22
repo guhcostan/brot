@@ -206,3 +206,22 @@ describe('BotDialog approval mode', () => {
     expect(radio(html, 'edits')).not.toContain('checked=""');
   });
 });
+
+describe('BotDialog speak replies', () => {
+  const speakInput = (html: string): string => html.match(/<input[^>]*name="speakReplies"[^>]*>/)?.[0] ?? '';
+
+  it('is off by default for a new bot and explains the hint', () => {
+    const html = render();
+    const text = textOf(html);
+
+    expect(text).toContain(t('botForm.speakReplies'));
+    expect(text).toContain(t('botForm.speakRepliesHint'));
+    expect(speakInput(html)).not.toContain('checked=""');
+  });
+
+  it('is checked when the bot already speaks its replies', () => {
+    const html = render({ bot: { ...bot, speakReplies: true } });
+
+    expect(speakInput(html)).toContain('checked=""');
+  });
+});

@@ -8,8 +8,10 @@ import { ConfirmDialog } from './Dialog';
 import { botActivity, type ThreadState } from '../state/thread';
 import { Composer } from './Composer';
 import { botStatusLabel } from './taskLabels';
-import { More } from './icons';
+import { More, SpeakerOff } from './icons';
 import { moodOf } from './team';
+import type { VoiceContext } from '../voice';
+import { useAutoSpeak } from './useAutoSpeak';
 import { Timeline, WorkingBots } from './Timeline';
 import { PaneHeader, useStickToBottom } from './ThreadView';
 
@@ -32,6 +34,8 @@ export interface RoomViewProps {
   initialMenuOpen?: boolean;
   /** Starts with the delete confirmation open, e.g. in an SSR render. */
   initialDeleteOpen?: boolean;
+  /** Voice availability and the speak call for listen/auto-speak. */
+  voice?: VoiceContext;
 }
 
 /** Names a list for screen readers: "Capy, Onça and 2 more". */
@@ -54,9 +58,16 @@ export function RoomView({
   onDeleteRoom,
   initialMenuOpen = false,
   initialDeleteOpen = false,
+  voice,
 }: RoomViewProps): ReactElement {
   const [menuOpen, setMenuOpen] = useState(initialMenuOpen);
   const [deleting, setDeleting] = useState(initialDeleteOpen);
+  const autoSpeak = useAutoSpeak({
+    thread,
+    voice,
+    defaultBotId: room.thread.leadBotId,
+    speaks: (botId) => members.find((member) => member.id === botId)?.speakReplies === true,
+  });
   const lastItem = thread.items.at(-1);
   const logRef = useStickToBottom([thread.items.length, lastItem, Object.keys(thread.activeRuns).length]);
   const lead = members.find((bot) => bot.id === room.thread.leadBotId);
@@ -78,6 +89,11 @@ export function RoomView({
             {t('room.subtitle', { count: String(members.length), lead: lead?.name ?? t('team.unknownBot') })}
           </p>
         </div>
+        {autoSpeak.playing ? (
+          <Button variant="ghost" size="sm" onClick={autoSpeak.stop} aria-label={t('voice.stopAutoSpeak')} title={t('voice.stopAutoSpeak')}>
+            <SpeakerOff size={16} />
+          </Button>
+        ) : null}
         {status === 'idle' ? null : <StatusDot status={status} label={botStatusLabel(status)} className="hidden sm:inline-flex" />}
         {onDeleteRoom !== undefined ? (
           <div className="relative" onKeyDown={(event) => (event.key === 'Escape' ? setMenuOpen(false) : undefined)}>
@@ -132,7 +148,7 @@ export function RoomView({
               />
             </div>
           ) : (
-            <Timeline thread={thread} mode="room" members={members} onDecide={onDecide} />
+            <Timeline thread={thread} mode="room" members={members} onDecide={onDecide} voice={voice} />
           )}
           <WorkingBots thread={thread} />
         </div>

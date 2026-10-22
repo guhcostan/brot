@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { createMockClient } from '../data/mockClient';
 import { DEMO_BOTS, DEMO_BROWSER_PROFILES, DEMO_MCP_SERVERS, DEMO_SAVED_LOGINS, DEMO_TEAMS } from '../data/fixtures';
 import { TEAM_PACKAGE_FORMAT, TEAM_PACKAGE_VERSION, formatTeamPackage, type TeamPackage } from '@brot/protocol';
+import type { VoiceInfo } from '../voice';
 import { t } from '../i18n';
 import { ClientProvider } from './client';
 import { SettingsView, type SettingsViewProps } from './SettingsView';
@@ -189,5 +190,44 @@ describe('settings saved logins', () => {
 
     expect(text).toContain(t('settings.savedLoginsEmpty'));
     expect(text).toContain(t('settings.savedLoginNew'));
+  });
+});
+
+const voiceSystem: VoiceInfo = {
+  settings: { provider: 'system', voice: 'Samantha', secretName: 'tts', updatedAt: '2026-10-19T09:00:00.000Z' },
+  available: true,
+};
+
+const voiceCompatible: VoiceInfo = {
+  settings: {
+    provider: 'openai-compatible',
+    voice: 'alloy',
+    baseUrl: 'https://api.example.com/v1',
+    model: 'tts-1',
+    secretName: 'voice_key',
+    updatedAt: '2026-10-19T09:00:00.000Z',
+  },
+  available: false,
+  reason: 'The speech key is missing.',
+};
+
+describe('settings voice', () => {
+  it('renders the voice section with providers, availability and the test action', () => {
+    const text = textOf(render({ initialVoice: voiceSystem, initialSecretNames: [] }));
+
+    expect(text).toContain(t('settings.voice'));
+    expect(text).toContain(t('settings.voiceBody'));
+    expect(text).toContain(t('settings.voiceProviderSystem'));
+    expect(text).toContain(t('settings.voiceProviderCompatible'));
+    expect(text).toContain(t('settings.voiceAvailable'));
+    expect(text).toContain(t('settings.voiceTest'));
+  });
+
+  it('shows the compatible key state and the unavailable reason', () => {
+    const text = textOf(render({ initialVoice: voiceCompatible, initialSecretNames: ['voice_key'] }));
+
+    expect(text).toContain(t('settings.voiceKeySaved'));
+    expect(text).toContain(t('settings.voiceUnavailable', { reason: 'The speech key is missing.' }));
+    expect(text).toContain('https://api.example.com/v1');
   });
 });

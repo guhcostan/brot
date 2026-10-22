@@ -57,12 +57,18 @@ import {
   UpdateTeam,
   SearchQuery,
   UpdateThread,
+  UpdateVoiceSettings,
   UsageSummary,
+  VoiceInfo,
+  VoiceSettings,
+  VoiceSpeakRequest,
   DESKTOP_HEIGHT,
   DESKTOP_WIDTH,
   type CanonicalEventType,
 } from '@brot/protocol';
 import { skillFileFallbackFromId } from '../skillFileName';
+import { voiceTextAllowed } from '../voice';
+
 import {
   ScreenUnavailable,
   type BotEvent,
@@ -328,8 +334,8 @@ export function createHttpClient({
     async createBot(input) {
       const parsed = CreateBot.parse(input);
       // 'ask' is the server default, so it is not sent: only an explicit 'edits' travels.
-      const { approvalMode, ...defaults } = parsed;
-      const body = approvalMode === 'edits' ? parsed : defaults;
+      const { approvalMode, speakReplies, ...defaults } = parsed;
+      const body = { ...(approvalMode === 'edits' ? { approvalMode } : {}), ...(speakReplies ? { speakReplies: true } : {}), ...defaults };
       const response = await write('POST', '/api/bots', body);
       const bot = Bot.parse(await response.json());
       knownBots.add(bot.id);
@@ -422,6 +428,24 @@ export function createHttpClient({
       const body = ImportSkill.parse({ content: input.content, ...(input.botId === undefined ? {} : { botId: input.botId }) });
       const response = await write('POST', '/api/skills/import', body);
       return Skill.parse(await response.json());
+    },
+
+    getVoiceSettings() {
+      return read('/api/voice', VoiceInfo);
+    },
+
+    async updateVoiceSettings(patch) {
+      const body = UpdateVoiceSettings.parse(patch);
+      const response = await write('PUT', '/api/voice', body);
+      return VoiceSettings.parse(await response.json());
+    },
+
+    async speakText(text) {
+      if (!voiceTextAllowed(text)) throw new Error('Voice text must be 1 to 2000 characters');
+      const body = VoiceSpeakRequest.parse({ text });
+      const response = await write('POST', '/api/voice/speak', body);
+      const blob = await response.blob();
+      return { blob, contentType: response.headers.get('content-type') ?? blob.type };
     },
 
     async uploadAttachment(threadId, file) {
@@ -619,6 +643,14 @@ export function createHttpClient({
     async setSecret(name, value) {
       await write('PUT', `/api/secrets/${encodeURIComponent(name)}`, { value });
     },
+
+    async listSecretNames() {
+      const response = await request('/api/secrets', { headers: { Accept: 'application/json' } });
+      const raw: unknown = await response.json();
+      if (!Array.isArray(raw) || raw.some((name) => typeof name !== 'string')) throw new Error('Expected the secret names');
+      return raw as string[];
+    },
+
 
     listDevices() {
       return read('/api/devices', Device.array());

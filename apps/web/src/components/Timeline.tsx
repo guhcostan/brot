@@ -1,5 +1,6 @@
 import type { ReactElement, ReactNode } from 'react';
 import type { ApprovalDecision, Attachment } from '@brot/protocol';
+import type { VoiceContext } from '../voice';
 import { ApprovalCard, MessageBubble, StatusDot, TaskStatusLabel, ToolTimeline, TypingIndicator, cx, type MessageBubbleProps } from '@brot/ui';
 import { formatTime } from '../format';
 import { t } from '../i18n';
@@ -20,6 +21,7 @@ import { timelineLabels, toStep } from './toolLabels';
 import { taskStatusLabel } from './taskLabels';
 import { ArrowRight, Baton } from './icons';
 import { MessageAttachments } from './MessageAttachments';
+import { VoiceListenButton } from './VoiceListenButton';
 import { TeamAvatar, moodOf, useBotName, useTeam } from './team';
 
 export interface TimelineProps {
@@ -31,6 +33,8 @@ export interface TimelineProps {
   /** Who can be @mentioned, for mention chips. */
   members: readonly Mentionable[];
   onDecide: (approvalId: string, decision: ApprovalDecision, reply?: string) => Promise<void>;
+  /** Voice availability and the speak call; when absent no Listen buttons render. */
+  voice?: VoiceContext;
 }
 
 type Block =
@@ -100,7 +104,7 @@ function AttachedMessage({ attachments, ...bubble }: { attachments?: Attachment[
   );
 }
 
-export function Timeline({ thread, mode, defaultBotId, members, onDecide }: TimelineProps): ReactElement {
+export function Timeline({ thread, mode, defaultBotId, members, onDecide, voice }: TimelineProps): ReactElement {
   const renderText = (text: string): ReactNode => <MentionText text={text} members={members} />;
   const gazes = gazeTargets(thread);
   const stepLabels = timelineLabels();
@@ -110,7 +114,7 @@ export function Timeline({ thread, mode, defaultBotId, members, onDecide }: Time
       {toBlocks(thread.items, defaultBotId).map((block) => {
         const key = blockKey(block);
         if (block.kind === 'turn') {
-          return <BotTurn key={key} botId={block.botId} messages={block.messages} mode={mode} renderText={renderText} thread={thread} />;
+          return <BotTurn key={key} botId={block.botId} messages={block.messages} mode={mode} renderText={renderText} thread={thread} voice={voice} />;
         }
         if (block.kind === 'tools') return <ToolTimeline key={key} steps={block.items.map(toStep)} labels={stepLabels} />;
         const { item } = block;
@@ -176,25 +180,30 @@ interface BotTurnProps {
   mode: 'dm' | 'room';
   thread: ThreadState;
   renderText: (text: string) => ReactNode;
+  voice?: VoiceContext;
 }
 
-function BotTurn({ botId, messages, mode, thread, renderText }: BotTurnProps): ReactElement {
+function BotTurn({ botId, messages, mode, thread, renderText, voice }: BotTurnProps): ReactElement {
   const nameOf = useBotName();
   const name = nameOf(botId);
   if (mode === 'dm' || botId === undefined) {
     return (
       <div className="flex flex-col gap-2">
         {messages.map((message, index) => (
-          <AttachedMessage
-            key={message.id}
-            attachments={message.attachments}
-            role="assistant"
-            content={message.content}
-            author={index === 0 ? name : undefined}
-            time={index === 0 ? formatTime(message.at) : undefined}
-            streaming={message.streaming}
-            renderText={renderText}
-          />
+          <div key={message.id} className="flex flex-col gap-1">
+            <AttachedMessage
+              attachments={message.attachments}
+              role="assistant"
+              content={message.content}
+              author={index === 0 ? name : undefined}
+              time={index === 0 ? formatTime(message.at) : undefined}
+              streaming={message.streaming}
+              renderText={renderText}
+            />
+            {message.role === 'assistant' && !message.streaming && message.content.trim() !== '' && voice !== undefined ? (
+              <VoiceListenButton text={message.content} voice={voice} />
+            ) : null}
+          </div>
         ))}
       </div>
     );
@@ -206,16 +215,20 @@ function BotTurn({ botId, messages, mode, thread, renderText }: BotTurnProps): R
       </div>
       <div className="flex min-w-0 flex-1 flex-col gap-2">
         {messages.map((message, index) => (
-          <AttachedMessage
-            key={message.id}
-            attachments={message.attachments}
-            role="assistant"
-            content={message.content}
-            author={index === 0 ? name : undefined}
-            time={index === 0 ? formatTime(message.at) : undefined}
-            streaming={message.streaming}
-            renderText={renderText}
-          />
+          <div key={message.id} className="flex flex-col gap-1">
+            <AttachedMessage
+              attachments={message.attachments}
+              role="assistant"
+              content={message.content}
+              author={index === 0 ? name : undefined}
+              time={index === 0 ? formatTime(message.at) : undefined}
+              streaming={message.streaming}
+              renderText={renderText}
+            />
+            {message.role === 'assistant' && !message.streaming && message.content.trim() !== '' && voice !== undefined ? (
+              <VoiceListenButton text={message.content} voice={voice} />
+            ) : null}
+          </div>
         ))}
       </div>
     </div>

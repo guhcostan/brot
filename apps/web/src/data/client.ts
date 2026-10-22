@@ -94,6 +94,8 @@ export type {
   UsageSummary,
   UsageTotals,
 } from '@brot/protocol';
+import type { UpdateVoiceSettings, VoiceInfo, VoiceSettings } from '@brot/protocol';
+export type { UpdateVoiceSettings, VoiceInfo, VoiceProvider, VoiceSettings } from '@brot/protocol';
 export type { Team } from '@brot/protocol';
 
 /**
@@ -343,6 +345,8 @@ export interface BrotClient {
   listProviders(): Promise<Provider[]>;
   /** Stores a secret in the vault. The value is never read back. */
   setSecret(name: string, value: string): Promise<void>;
+  /** The names of vault secrets (never their values). */
+  listSecretNames(): Promise<string[]>;
   listDevices(): Promise<Device[]>;
   removeDevice(deviceId: string): Promise<void>;
   startPairing(): Promise<PairingStartResponse>;
@@ -406,4 +410,10 @@ export interface BrotClient {
 
   /** Full-text message search, newest first; snippets are plain text. */
   searchMessages(filter: MessageSearchFilter): Promise<SearchHit[]>;
+
+  /** Voice settings and whether they can speak right now. */
+  getVoiceSettings(): Promise<VoiceInfo>;
+  updateVoiceSettings(patch: UpdateVoiceSettings): Promise<VoiceSettings>;
+  /** Turns text into audio bytes; 400/503 reject with the server message. */
+  speakText(text: string): Promise<{ blob: Blob; contentType: string }>;
 }

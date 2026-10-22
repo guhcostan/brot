@@ -105,6 +105,7 @@ interface FormState {
   pinned: boolean;
   notifications: boolean;
   approvalMode: ApprovalMode;
+  speakReplies: boolean;
 }
 
 function computerOf(bot: Pick<Bot, 'computer' | 'desktop'>): ComputerChoice {
@@ -130,6 +131,7 @@ function initialState(bot: Bot | undefined): FormState {
       pinned: false,
       notifications: true,
       approvalMode: 'ask',
+      speakReplies: false,
     };
   }
   const avatar = avatarOf(bot);
@@ -149,6 +151,7 @@ function initialState(bot: Bot | undefined): FormState {
     pinned: bot.pinned,
     notifications: bot.notifications !== false,
     approvalMode: bot.approvalMode ?? 'ask',
+    speakReplies: bot.speakReplies === true,
   };
 }
 
@@ -317,7 +320,7 @@ function BotForm({
     const avatar = formatAvatar({ species: form.species, color: form.color });
     try {
       if (!bot) {
-        const input = {
+        const input: CreateBotInput = {
           name: form.name.trim(),
           job: form.job.trim(),
           instructions: form.instructions,
@@ -328,6 +331,7 @@ function BotForm({
           browser,
           notifications: form.notifications,
           ...(form.approvalMode === 'edits' ? { approvalMode: 'edits' as const } : {}),
+          ...(form.speakReplies ? { speakReplies: true } : {}),
           egress,
           ...(form.teamId === '' ? {} : { teamId: form.teamId }),
           ...(form.model ? { engine: DSH_ENGINE, model: form.model } : {}),
@@ -363,6 +367,7 @@ function BotForm({
         if (form.pinned !== bot.pinned) patch.pinned = form.pinned;
         if (form.notifications !== (bot.notifications !== false)) patch.notifications = form.notifications;
         if (form.approvalMode !== (bot.approvalMode ?? 'ask')) patch.approvalMode = form.approvalMode;
+        if (form.speakReplies !== (bot.speakReplies === true)) patch.speakReplies = form.speakReplies;
         const profileId = bot.browserProfileId ?? '';
         if (form.browserProfileId !== profileId) {
           patch.browserProfileId = form.browserProfileId === '' ? null : form.browserProfileId;
@@ -527,6 +532,20 @@ function BotForm({
         <span className="flex flex-col">
           <span className="text-sm font-medium">{t('botForm.notifications')}</span>
           <span className="text-xs text-ink-2">{t('botForm.notificationsHint')}</span>
+        </span>
+      </label>
+
+      <label className="flex cursor-pointer items-start gap-2.5 rounded-md px-1 py-1 text-sm hover:bg-surface-2">
+        <input
+          type="checkbox"
+          name="speakReplies"
+          className="room-check mt-1"
+          checked={form.speakReplies}
+          onChange={(event) => set('speakReplies', event.target.checked)}
+        />
+        <span className="flex flex-col">
+          <span className="text-sm font-medium">{t('botForm.speakReplies')}</span>
+          <span className="text-xs text-ink-2">{t('botForm.speakRepliesHint')}</span>
         </span>
       </label>
 

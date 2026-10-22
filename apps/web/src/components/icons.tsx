@@ -69,6 +69,22 @@ export const ArrowRight = ({ size = 12 }: { size?: number }) => (
   </Icon>
 );
 
+/** A speaker: read this reply aloud. */
+export const Speaker = ({ size }: { size?: number }) => (
+  <Icon size={size}>
+    <path d="M4 8.25h2.75L10.5 5v10L6.75 11.75H4z" />
+    <path d="M13 7.5a3.5 3.5 0 0 1 0 5M15.25 5.5a6.5 6.5 0 0 1 0 9" />
+  </Icon>
+);
+
+/** A muted speaker: stop reading aloud. */
+export const SpeakerOff = ({ size }: { size?: number }) => (
+  <Icon size={size}>
+    <path d="M4 8.25h2.75L10.5 5v10L6.75 11.75H4z" />
+    <path d="m13.5 8 4 4M17.5 8l-4 4" />
+  </Icon>
+);
+
 /** A down arrow into a tray: download a file. */
 export const Download = ({ size }: { size?: number }) => (
   <Icon size={size}>

@@ -3,6 +3,7 @@ import type { Device, PairingStartResponse } from '@brot/protocol';
 import { BotAvatar, Button, Skeleton, cx } from '@brot/ui';
 import type { BrowserProfile, Provider } from '../data/client';
 import type { McpServer, SavedLogin, Team } from '@brot/protocol';
+import type { VoiceInfo } from '../voice';
 import { desktopNotificationState, requestDesktopNotifications, type DesktopNotificationState } from '../desktopNotifications';
 import { formatTime } from '../format';
 import { t, type Locale, type TranslationKey } from '../i18n';
@@ -14,6 +15,7 @@ import { LanguageSwitcher } from './LanguageSwitcher';
 import { BrowserProfiles } from './BrowserProfiles';
 import { McpServers } from './McpServers';
 import { SavedLogins } from './SavedLogins';
+import { VoiceSection } from './VoiceSection';
 import { TeamPackages } from './TeamPackages';
 import { PaneHeader } from './ThreadView';
 
@@ -25,6 +27,12 @@ export interface SettingsViewProps {
   initialMcpServers?: McpServer[];
   /** Saved logins to render before the client load resolves, e.g. in an SSR render. */
   initialSavedLogins?: SavedLogin[];
+  /** Voice state to render before the client load resolves, e.g. in an SSR render. */
+  initialVoice?: VoiceInfo;
+  /** Vault secret names to render before the client load resolves, e.g. in an SSR render. */
+  initialSecretNames?: string[];
+  /** Called after the voice settings change, so the app can refresh listen availability. */
+  onVoiceChanged?: () => void;
   /** Teams for the export scope before the client load resolves, e.g. in an SSR render. */
   initialTeams?: Team[];
   /** Package content to preview in the import box, e.g. in an SSR render. */
@@ -41,7 +49,7 @@ const THEME_LABEL: Record<Theme, TranslationKey> = {
   dark: 'settings.theme.dark',
 };
 
-export function SettingsView({ locale, onLocaleChange, theme, onThemeChange, onOpenBots, initialBrowserProfiles, initialMcpServers, initialSavedLogins, initialTeams, initialTeamPackageContent }: SettingsViewProps): ReactElement {
+export function SettingsView({ locale, onLocaleChange, theme, onThemeChange, onOpenBots, initialBrowserProfiles, initialMcpServers, initialSavedLogins, initialVoice, initialSecretNames, onVoiceChanged, initialTeams, initialTeamPackageContent }: SettingsViewProps): ReactElement {
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg">
       <PaneHeader onOpenBots={onOpenBots}>
@@ -59,6 +67,9 @@ export function SettingsView({ locale, onLocaleChange, theme, onThemeChange, onO
           </Section>
           <Section title={t('settings.savedLogins')} description={t('settings.savedLoginsBody')}>
             <SavedLogins initialLogins={initialSavedLogins} />
+          </Section>
+          <Section title={t('settings.voice')} description={t('settings.voiceBody')}>
+            <VoiceSection initialStatus={initialVoice} initialSecretNames={initialSecretNames} onChanged={onVoiceChanged} />
           </Section>
           <Section title={t('settings.mcpServers')} description={t('settings.mcpServersBody')}>
             <McpServers initialServers={initialMcpServers} />

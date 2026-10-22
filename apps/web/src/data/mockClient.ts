@@ -76,6 +76,8 @@ import {
   type Room,
   type RoomMessage,
   type TaskFilter,
+  type VoiceInfo,
+  type VoiceSettings,
 } from './client';
 import { applyInput, navigate, newScreen, renderScreen, type FakeScreen } from './mockComputer';
 import {
@@ -106,6 +108,7 @@ import {
 import { findMentions } from '../mentions';
 import { skillFileFilename } from '../skillFileName';
 import { buildSearchSnippet } from '../search';
+import { DEFAULT_SYSTEM_VOICE, silentWavBlob, voiceTextAllowed } from '../voice';
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 const now = () => new Date().toISOString();
@@ -283,6 +286,27 @@ export function createMockClient(): BrotClient {
   const mcpServers = new Map<string, McpServer>(DEMO_MCP_SERVERS.map((server) => [server.id, structuredClone(server)]));
   /** Value-free views the API returns; the credentials live only in `savedLoginSecrets`. */
   const savedLogins = new Map<string, SavedLogin>(DEMO_SAVED_LOGINS.map((login) => [login.id, structuredClone(login)]));
+  /** Vault secret names only: the mock never stores or returns values. */
+  const secretNames = new Set<string>();
+  let voiceSettings: VoiceSettings = {
+    provider: 'system',
+    voice: DEFAULT_SYSTEM_VOICE,
+    secretName: 'tts',
+    updatedAt: SEEDED_AT,
+  };
+  const voiceAvailability = (): VoiceInfo => {
+    const settings = structuredClone(voiceSettings);
+    if (settings.provider === 'system') return { settings, available: true };
+    const baseUrl = settings.baseUrl?.trim() ?? '';
+    const model = settings.model?.trim() ?? '';
+    const secretName = settings.secretName.trim();
+    if (baseUrl !== '' && model !== '' && secretName !== '' && secretNames.has(secretName)) return { settings, available: true };
+    return {
+      settings,
+      available: false,
+      reason: 'The OpenAI-compatible provider needs a base URL, a model and a saved key.',
+    };
+  };
   const savedLoginSecrets = new Map<string, { username: string; password: string; totp?: string }>([
     ['login_github', { username: 'capivara', password: 'fake-password', totp: 'JBSWY3DPEHPK3PXP' }],
     ['login_x', { username: 'capivara', password: 'fake-password' }],
@@ -796,7 +820,9 @@ export function createMockClient(): BrotClient {
 
   return {
     async listBots(options = {}) {
-      return [...bots.values()].filter((bot) => options.includeArchived || !bot.archived).map((bot) => structuredClone(bot));
+      return [...bots.values()]
+        .filter((bot) => options.includeArchived || !bot.archived)
+        .map((bot) => structuredClone(bot));
     },
 
     async createBot(input) {
@@ -805,10 +831,11 @@ export function createMockClient(): BrotClient {
         throw new Error(`Unknown browser profile: ${parsed.browserProfileId}`);
       }
       const at = now();
-      const { hostAcknowledged: _ack, approvalMode, ...fields } = parsed;
+      const { hostAcknowledged: _ack, approvalMode, speakReplies, ...fields } = parsed;
       const created: Bot = {
         ...fields,
         ...(approvalMode === 'edits' ? { approvalMode } : {}),
+        ...(speakReplies ? { speakReplies: true } : {}),
         id: nextId('bot'),
         egress: parsed.egress ?? defaultEgressPolicy(),
         pinned: false,
@@ -817,6 +844,7 @@ export function createMockClient(): BrotClient {
         updatedAt: at,
       };
       bots.set(created.id, created);
+
       if (created.browser === true) setBrowserStateOf(created, 'stopped');
       return structuredClone(created);
     },
@@ -824,13 +852,15 @@ export function createMockClient(): BrotClient {
     async updateBot(botId, patch) {
       const current = bots.get(botId);
       if (!current) throw new Error(`Unknown bot: ${botId}`);
-      const { teamBudgetUsd, teamId, hostAcknowledged: _ack, browserProfileId, approvalMode, ...rest } = UpdateBot.parse(patch);
+      const { teamBudgetUsd, teamId, hostAcknowledged: _ack, browserProfileId, approvalMode, speakReplies, ...rest } = UpdateBot.parse(patch);
       if (browserProfileId !== undefined && browserProfileId !== null && !browserProfiles.has(browserProfileId)) {
         throw new Error(`Unknown browser profile: ${browserProfileId}`);
       }
       let next: Bot = { ...current, ...rest, updatedAt: now() };
       if (approvalMode === 'edits') next.approvalMode = 'edits';
       else if (approvalMode === 'ask') delete next.approvalMode;
+      if (speakReplies === true) next.speakReplies = true;
+      else if (speakReplies === false) delete next.speakReplies;
       if (teamBudgetUsd === null) delete next.teamBudgetUsd;
       else if (teamBudgetUsd !== undefined) next.teamBudgetUsd = teamBudgetUsd;
       if (teamId === null) delete next.teamId;
@@ -1417,7 +1447,38 @@ export function createMockClient(): BrotClient {
 
     async setSecret(name, value) {
       if (!value) throw new Error('A secret needs a value.');
+      secretNames.add(name);
       for (const provider of providers) if (provider.secretName === name) provider.configured = true;
+    },
+
+    async listSecretNames() {
+      return [...secretNames].sort();
+    },
+
+    async getVoiceSettings() {
+      return voiceAvailability();
+    },
+
+    async updateVoiceSettings(patch) {
+      const previous = voiceSettings;
+      const provider = patch.provider;
+      if (provider !== 'system' && provider !== 'openai-compatible') throw new Error('Unknown voice provider');
+      voiceSettings = {
+        provider,
+        voice: patch.voice ?? previous.voice ?? (provider === 'system' ? DEFAULT_SYSTEM_VOICE : ''),
+        secretName: patch.secretName ?? previous.secretName,
+        ...(patch.model ?? previous.model) === undefined ? {} : { model: patch.model ?? previous.model },
+        ...(patch.baseUrl ?? previous.baseUrl) === undefined ? {} : { baseUrl: patch.baseUrl ?? previous.baseUrl },
+        updatedAt: now(),
+      };
+      return structuredClone(voiceSettings);
+    },
+
+    async speakText(text) {
+      if (!voiceTextAllowed(text)) throw new Error('Voice text must be 1 to 2000 characters');
+      const availability = voiceAvailability();
+      if (!availability.available) throw new Error(`503 Voice is not available: ${availability.reason ?? 'unavailable'}`);
+      return { blob: silentWavBlob(), contentType: 'audio/wav' };
     },
 
     async listDevices() {
