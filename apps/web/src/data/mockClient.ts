@@ -4,6 +4,7 @@ import type {
   ApprovalKind,
   Attachment,
   Bot,
+  BrowserTakeover,
   CanonicalEvent,
   ComputerState,
   Device,
@@ -24,6 +25,7 @@ import type {
   Thread,
 } from '@brot/protocol';
 import {
+  ComputerInput,
   CreateBot,
   CreateMcpServer,
   CreateMemory,
@@ -267,6 +269,8 @@ export function createMockClient(): BrotClient {
   const mcpServers = new Map<string, McpServer>(DEMO_MCP_SERVERS.map((server) => [server.id, structuredClone(server)]));
   /** Browser session state keyed by effective profile: `own:<botId>` or `profile:<id>`. */
   const browserStates = new Map<string, BrowserStatus['state']>();
+  /** Browser takeover per effective profile key, like the server's per-profile state. */
+  const browserTakeovers = new Map<string, BrowserTakeover>();
   const takeoverWaiters = new Map<string, () => void>();
   const listeners = new Set<(event: BotEvent) => void>();
   /** Every event a thread has produced, keyed by thread id. */
@@ -830,7 +834,11 @@ export function createMockClient(): BrotClient {
     async deleteBot(botId) {
       const removed = bots.get(botId);
       if (!bots.delete(botId)) throw new Error(`Unknown bot: ${botId}`);
-      if (removed) browserStates.delete(browserStateKeyOf(removed));
+      if (removed) {
+        const key = browserStateKeyOf(removed);
+        browserStates.delete(key);
+        if (browserProfileRefOf(removed).kind === 'own') browserTakeovers.delete(key);
+      }
       clearChiefOf(botId);
       for (const thread of dmThreadsOf(botId)) {
         threads.delete(thread.id);
@@ -1422,6 +1430,42 @@ export function createMockClient(): BrotClient {
       setBrowserStateOf(bot, 'stopped');
     },
 
+    async browserScreen(botId) {
+      const bot = bots.get(botId);
+      if (!bot || bot.browser !== true) throw new ScreenUnavailable(409);
+      const state = browserStateOf(bot);
+      // The real route refuses the sign-in window; a stopped browser starts lazily.
+      if (state === 'login') throw new ScreenUnavailable(409);
+      if (state !== 'running') setBrowserStateOf(bot, 'running');
+      return new Blob(['jpeg'], { type: 'image/jpeg' });
+    },
+
+    async getBrowserTakeover(botId) {
+      const bot = hostBrowserOf(botId);
+      return structuredClone(browserTakeovers.get(browserStateKeyOf(bot)) ?? { active: false });
+    },
+
+    async setBrowserTakeover(botId, input) {
+      const bot = hostBrowserOf(botId);
+      const takeover: BrowserTakeover = {
+        active: input.active,
+        ...(input.active ? { since: now() } : {}),
+        ...(input.reason === undefined ? {} : { reason: input.reason }),
+      };
+      browserTakeovers.set(browserStateKeyOf(bot), takeover);
+      return structuredClone(takeover);
+    },
+
+    async browserInput(botId, input) {
+      const bot = hostBrowserOf(botId);
+      const parsed = ComputerInput.parse(input);
+      if (browserTakeovers.get(browserStateKeyOf(bot))?.active !== true) throw new Error('409 No takeover is active.');
+      if (browserStateOf(bot) !== 'running') throw new Error('409 The browser is not running.');
+      if ((parsed.type === 'click' || parsed.type === 'move' || parsed.type === 'scroll') && (parsed.x >= 1280 || parsed.y >= 800)) {
+        throw new Error('400 The point is outside the browser viewport');
+      }
+    },
+
     async listBrowserProfiles() {
       return [...browserProfiles.values()]
         .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id))
@@ -1450,6 +1494,7 @@ export function createMockClient(): BrotClient {
     async deleteBrowserProfile(profileId) {
       if (!browserProfiles.delete(profileId)) throw new Error(`Unknown browser profile: ${profileId}`);
       browserStates.delete(`profile:${profileId}`);
+      browserTakeovers.delete(`profile:${profileId}`);
       for (const [botId, bot] of bots) {
         if (bot.browserProfileId !== profileId) continue;
         bots.set(botId, clearBrowserProfile(bot));

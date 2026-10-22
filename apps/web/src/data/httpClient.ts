@@ -18,6 +18,7 @@ import {
   CreateThread,
   Device,
   Memory,
+  BrowserTakeover as BrowserTakeoverSchema,
   CreateMcpServer,
   ImportTeamPackage,
   MarkNotificationsRead,
@@ -32,6 +33,7 @@ import {
   Routine,
   RoutineRun,
   Run,
+  SetBrowserTakeover,
   SetTakeover,
   Skill,
   Takeover,
@@ -639,6 +641,34 @@ export function createHttpClient({
 
     async closeBrowser(botId) {
       await write('POST', `${botPath(botId)}/browser/close`, {});
+    },
+
+    async browserScreen(botId, signal) {
+      const response = await fetch(`${root}${botPath(botId)}/browser/screen`, {
+        headers: { Accept: 'image/jpeg' },
+        cache: 'no-store',
+        ...(signal ? { signal } : {}),
+      });
+      if (!response.ok) {
+        if (response.status === 404 || response.status === 409) throw new ScreenUnavailable(response.status);
+        throw new Error(`GET ${botPath(botId)}/browser/screen failed: ${await describeFailure(response)}`);
+      }
+      return response.blob();
+    },
+
+    getBrowserTakeover(botId) {
+      return read(`${botPath(botId)}/browser/takeover`, BrowserTakeoverSchema);
+    },
+
+    async setBrowserTakeover(botId, input) {
+      const body = SetBrowserTakeover.parse(input);
+      const response = await write('POST', `${botPath(botId)}/browser/takeover`, body);
+      return BrowserTakeoverSchema.parse(await response.json());
+    },
+
+    async browserInput(botId, input) {
+      const body = ComputerInput.parse(input);
+      await write('POST', `${botPath(botId)}/browser/input`, body);
     },
 
     listBrowserProfiles() {

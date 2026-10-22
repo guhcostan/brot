@@ -18,6 +18,7 @@ import type { BrowserProfile, BrowserStatus, Provider } from '../data/client';
 import { ROLE_TEMPLATES, type ComputerChoice, type RoleTemplate } from '../data/templates';
 import { avatarOf } from '../format';
 import { t, type TranslationKey } from '../i18n';
+import { BrowserPanel } from './BrowserPanel';
 import { ConfirmDialog, Dialog } from './Dialog';
 import { Archive, Close, Trash } from './icons';
 
@@ -191,6 +192,7 @@ function BotForm({
   const [browserError, setBrowserError] = useState<string | null>(null);
   const [browserBusy, setBrowserBusy] = useState(false);
   const [profiles, setProfiles] = useState<BrowserProfile[] | null>(initialBrowserProfiles ?? null);
+  const [liveViewOpen, setLiveViewOpen] = useState(false);
   const teamFieldId = useId();
 
   useEffect(() => {
@@ -459,6 +461,7 @@ function BotForm({
         onProfile={(value) => set('browserProfileId', value)}
         onLogin={() => void openBrowserLogin()}
         onClose={() => void closeHostBrowser()}
+        onLiveView={bot ? () => setLiveViewOpen(true) : undefined}
       />
 
       {form.computer !== 'host' && (form.computer !== 'none' || form.browser) ? (
@@ -526,6 +529,15 @@ function BotForm({
           {bot ? t('botForm.save') : t('botForm.create')}
         </Button>
       </div>
+
+      {bot ? (
+        <BrowserPanel
+          open={liveViewOpen}
+          bot={bot}
+          profile={liveBrowserStatus?.profile}
+          onClose={() => setLiveViewOpen(false)}
+        />
+      ) : null}
 
       {bot ? (
         <ConfirmDialog
@@ -759,10 +771,12 @@ interface BrowserPickerProps {
   onProfile: (profileId: string) => void;
   onLogin: () => void;
   onClose: () => void;
+  /** Opens the live view of this bot's browser. Absent for an unsaved bot. */
+  onLiveView?: (() => void) | undefined;
 }
 
 /** Opt-in for the bot's browser on the server machine, its shared profile and its live state. */
-function BrowserPicker({ hasBrowser, enabled, desktop, status, profiles, profileId, error, busy, onToggle, onProfile, onLogin, onClose }: BrowserPickerProps): ReactElement {
+function BrowserPicker({ hasBrowser, enabled, desktop, status, profiles, profileId, error, busy, onToggle, onProfile, onLogin, onClose, onLiveView }: BrowserPickerProps): ReactElement {
   const profileSelectId = useId();
   if (desktop) {
     return (
@@ -818,6 +832,11 @@ function BrowserPicker({ hasBrowser, enabled, desktop, status, profiles, profile
             {status?.state === 'running' || status?.state === 'login' ? (
               <Button variant="ghost" size="sm" disabled={busy} onClick={onClose}>
                 {t('botForm.browserClose')}
+              </Button>
+            ) : null}
+            {onLiveView !== undefined ? (
+              <Button variant="ghost" size="sm" disabled={busy} onClick={onLiveView}>
+                {t('browserPanel.liveView')}
               </Button>
             ) : null}
           </div>

@@ -3,6 +3,7 @@ import type {
   Bot,
   BrowserProfile,
   BrowserStatus,
+  BrowserTakeover,
   CanonicalEvent,
   ComputerInput,
   ComputerState,
@@ -25,6 +26,7 @@ import type {
   Routine,
   RoutineRun,
   RoutineRunStatus,
+  SetBrowserTakeover,
   SetTakeover,
   Skill,
   Takeover,
@@ -47,6 +49,7 @@ export type {
   BrowserProfile,
   BrowserProfileRef,
   BrowserStatus,
+  BrowserTakeover,
   CreateBrowserProfile,
   CreateMcpServerInput,
   CreateMemory,
@@ -62,6 +65,7 @@ export type {
   Routine,
   RoutineRun,
   RoutineRunStatus,
+  SetBrowserTakeover,
   Skill,
   UpdateBrowserProfile,
   UpdateMcpServer,
@@ -300,6 +304,13 @@ export interface BrotClient {
   startBrowserLogin(botId: string): Promise<BrowserStatus>;
   /** Closes the browser, saving its profile. Shared profiles close for every bot using them. */
   closeBrowser(botId: string): Promise<void>;
+  /** A JPEG of the live browser page; throws ScreenUnavailable for 404/409. */
+  browserScreen(botId: string, signal?: AbortSignal): Promise<Blob>;
+  /** Who currently holds the bot's browser (shared with every bot on its profile). */
+  getBrowserTakeover(botId: string): Promise<BrowserTakeover>;
+  setBrowserTakeover(botId: string, input: SetBrowserTakeover): Promise<BrowserTakeover>;
+  /** One mouse or keyboard event from the person; refused while they do not hold control. */
+  browserInput(botId: string, input: ComputerInput): Promise<void>;
 
   /** Shared host-browser profiles, by name. */
   listBrowserProfiles(): Promise<BrowserProfile[]>;
