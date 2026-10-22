@@ -80,7 +80,7 @@ Legend: ✅ parity or better · 🟡 partial · ❌ absent · 🎯 current wave.
 | App-event triggers | ✅ | ❌ | W6 |
 | Memory: MEMORY.md + topics + recall + upkeep + journal/undo + About me | ✅ | 🟡 recall, caps and an editor are live; no journal/upkeep/about-me | W4 |
 | Skills: SKILL.md import/export, per-bot on/off, learned-skill approval | ✅ | ✅ SKILL.md import/export in the UI with prompt budgets; learned-skill review next | W4 |
-| Voice: TTS providers, spoken replies, voice notes, calls, dictation | ✅ | ❌ | W8 |
+| Voice: TTS providers, spoken replies, voice notes, calls, dictation | ✅ | 🟡 system and OpenAI-compatible TTS, listen button, per-bot auto-speak; calls/voice notes/dictation next | W8 |
 | Message search across threads | ✅ | ✅ GET /api/search and the sidebar Messages section | W8 done |
 | Attachments: images/screenshots/files in transcript, quota | ✅ | ✅ composer, transcript gallery, storage, text-in-prompt and orphan sweep | W6 done |
 | Notifications: in-app/desktop, per-bot, exact-thread routing | ✅ | ✅ inbox, unread badge, native banners, per-bot toggle | W6 done |

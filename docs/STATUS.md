@@ -335,6 +335,21 @@ mapped in `docs/MAUSBOT-PARITY.md` (34 bots / 7 teams, 33 bots with a browser an
   for the host browser) into its optional `chromium-bidi` requires. `playwright-core` is now external in the
   desktop server bundle and a production dependency; web, site and desktop builds all pass (main.cjs ~2.2 MB).
 - Suite: 2092 tests (210 files), typecheck 12/12, lint clean; full `pnpm build` green.
+## Wave 24: voice (TTS) (2026-10-22)
+
+- **TTS providers.** GET /api/voice returns the voice settings plus a cheap availability probe (never the
+  key); PUT /api/voice saves them; POST /api/voice/speak returns audio bytes for 1-2000 characters with
+  no-store. The system provider (macOS) runs `say` and converts to WAV with `afconvert`, falling back to
+  AIFF; an OpenAI-compatible provider posts to /audio/speech with a vault key read at call time and returns
+  MP3. Failures are plain 503 reasons with no key and no spoken text. Bots gain `speakReplies` (off by
+  default). Migration 0015 adds a generic settings table and bots.speak_replies.
+- **Voice UI.** Assistant messages get a speaker button (loading, stop/replace, inline errors, disabled with
+  the reason when unavailable); bots with speakReplies speak new completed replies once (latest wins, with a
+  stop control near the thread header); the bot dialog gains the toggle and Settings gains a Voice section
+  (provider radio, voice, base URL/model/secret name, write-only key, availability reason, Test voice).
+  en/pt-BR/es.
+- Verified live: POST /api/voice/speak returned a 55 KB RIFF WAV rendered by the real `say` + `afconvert`.
+- Suite: 2174 tests (221 files), typecheck 12/12, lint clean.
 ## Next
 
 1. Re-run the eval suite on a live model once OpenCode Go has quota (`apps/evals`, `--base` to the server), including B8 and C; the 2026-10-20 results predate the read auto-allow and the fixes above.
