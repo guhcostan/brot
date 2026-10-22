@@ -5,6 +5,8 @@ export type {
   CreateApprovalInput,
   CreateDeviceInput,
   CreateMessageInput,
+  MessageSearchFilter,
+  MessageSearchRow,
   CreateRoutineRunInput,
   RoutineRunFilter,
   RoutineRunPatch,

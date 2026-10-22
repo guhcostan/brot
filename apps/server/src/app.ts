@@ -59,6 +59,7 @@ import { botBrowserKind } from './browser/tools';
 import { BrowserError } from './browser/service';
 import type { HostBrowserService } from './browser/types';
 import { mountAttachmentRoutes, type AttachmentStorage } from './attachments';
+import { mountSearchRoutes } from './search';
 import { mountTeamPackageRoutes } from './team-packages';
 import { mountTodayRoutes } from './today';
 import { mountUsageRoutes } from './usage';
@@ -1084,6 +1085,8 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
   mountTeamPackageRoutes(app, { repos, ...(deps.now === undefined ? {} : { now: deps.now }) });
 
   mountTodayRoutes(app, { repos, ...(deps.now === undefined ? {} : { now: deps.now }) });
+
+  mountSearchRoutes(app, { repos });
 
   if (deps.desktop) mountDesktopRoutes(app, { repos, desktop: deps.desktop });
 

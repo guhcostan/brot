@@ -52,7 +52,7 @@ export function createRepos(db: Db) {
 export type Repos = ReturnType<typeof createRepos>;
 
 export type { CreateApprovalInput } from './approvals';
-export type { CreateMessageInput } from './messages';
+export type { CreateMessageInput, MessageSearchFilter, MessageSearchRow } from './messages';
 export type { CreateDeviceInput } from './devices';
 export type { RoutineScheduleUpdate } from './routines';
 export type { CreateRoutineRunInput, RoutineRunFilter, RoutineRunPatch } from './routine-runs';

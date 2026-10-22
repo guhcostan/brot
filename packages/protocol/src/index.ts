@@ -11,3 +11,4 @@ export * from './notifications';
 export * from './usage';
 export * from './team-package';
 export * from './today';
+export * from './search';

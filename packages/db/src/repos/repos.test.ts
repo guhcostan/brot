@@ -367,6 +367,120 @@ describe('messages', () => {
   });
 });
 
+describe('message search', () => {
+  async function seedBotsAndThreads() {
+    const ada = await repos.bots.create({ name: 'Ada', job: 'Lead' });
+    const grace = await repos.bots.create({ name: 'Grace', job: 'Ops' });
+    const adaChat = await repos.threads.create(ada.id, { title: 'Ada chat' });
+    const graceChat = await repos.threads.create(grace.id, { title: 'Grace chat' });
+    const room = await repos.rooms.create({ title: 'Team room', botIds: [ada.id, grace.id], leadBotId: ada.id });
+    return { ada, grace, adaChat, graceChat, room };
+  }
+
+  async function addMessage(
+    threadId: string,
+    role: 'user' | 'assistant' | 'system',
+    content: string,
+    createdAt: string,
+    authorBotId?: string,
+  ): Promise<string> {
+    const message = await repos.messages.create({
+      threadId,
+      role,
+      content,
+      ...(authorBotId === undefined ? {} : { authorBotId }),
+    });
+    await handle.client.execute({ sql: 'UPDATE messages SET created_at = ? WHERE id = ?', args: [createdAt, message.id] });
+    return message.id;
+  }
+
+  it('matches content case-insensitively, newest first, with the thread and author context', async () => {
+    const { ada, adaChat, room } = await seedBotsAndThreads();
+    const first = await addMessage(adaChat.id, 'user', 'Please deploy the Release', '2026-10-20T10:00:00.000Z');
+    const second = await addMessage(
+      adaChat.id,
+      'assistant',
+      'The RELEASE is out',
+      '2026-10-20T11:00:00.000Z',
+      ada.id,
+    );
+    await addMessage(room.id, 'assistant', 'Room deploy note', '2026-10-20T12:00:00.000Z', ada.id);
+    await addMessage(adaChat.id, 'user', 'unrelated', '2026-10-20T13:00:00.000Z');
+
+    const rows = await repos.messages.search({ query: 'release', limit: 10 });
+    expect(rows.map((row) => row.id)).toEqual([second, first]);
+    expect(rows[0]).toMatchObject({
+      threadId: adaChat.id,
+      threadTitle: 'Ada chat',
+      threadKind: 'dm',
+      threadBotId: ada.id,
+      threadBotName: 'Ada',
+      authorBotId: ada.id,
+      authorBotName: 'Ada',
+      role: 'assistant',
+      content: 'The RELEASE is out',
+      createdAt: '2026-10-20T11:00:00.000Z',
+    });
+    expect(rows[1]?.role).toBe('user');
+    expect(rows[1]?.authorBotId).toBeUndefined();
+    expect((await repos.messages.search({ query: 'RELEASE', limit: 10 })).map((row) => row.id)).toEqual([
+      second,
+      first,
+    ]);
+    expect(await repos.messages.search({ query: 'nowhere', limit: 10 })).toEqual([]);
+  });
+
+  it('treats %, _ and \\ as literal characters instead of LIKE wildcards', async () => {
+    const { adaChat } = await seedBotsAndThreads();
+    const percent = await addMessage(adaChat.id, 'user', '100% done', '2026-10-20T10:00:00.000Z');
+    await addMessage(adaChat.id, 'user', '1000 done', '2026-10-20T11:00:00.000Z');
+    const underscore = await addMessage(adaChat.id, 'user', 'file_name', '2026-10-20T12:00:00.000Z');
+    await addMessage(adaChat.id, 'user', 'filexname', '2026-10-20T13:00:00.000Z');
+    const backslash = await addMessage(adaChat.id, 'user', 'C:\\path\\to', '2026-10-20T14:00:00.000Z');
+    await addMessage(adaChat.id, 'user', 'C:path\to', '2026-10-20T15:00:00.000Z');
+
+    expect((await repos.messages.search({ query: '100%', limit: 10 })).map((row) => row.id)).toEqual([percent]);
+    expect((await repos.messages.search({ query: 'file_name', limit: 10 })).map((row) => row.id)).toEqual([
+      underscore,
+    ]);
+    expect((await repos.messages.search({ query: '\\', limit: 10 })).map((row) => row.id)).toEqual([backslash]);
+  });
+
+  it('filters by thread bot, thread and oldest-than boundary, and limits in SQL', async () => {
+    const { ada, grace, adaChat, graceChat, room } = await seedBotsAndThreads();
+    const first = await addMessage(adaChat.id, 'user', 'needle in ada chat', '2026-10-20T10:00:00.000Z');
+    const graceHit = await addMessage(graceChat.id, 'user', 'needle in grace chat', '2026-10-20T11:00:00.000Z');
+    const roomHit = await addMessage(room.id, 'assistant', 'needle in room', '2026-10-20T12:00:00.000Z', grace.id);
+    const second = await addMessage(adaChat.id, 'user', 'needle again', '2026-10-20T13:00:00.000Z');
+
+    // The thread's bot is the room lead, so Ada's filter sees her room even when Grace authored the message.
+    expect((await repos.messages.search({ query: 'needle', botId: ada.id, limit: 10 })).map((row) => row.id)).toEqual([
+      second,
+      roomHit,
+      first,
+    ]);
+    expect((await repos.messages.search({ query: 'needle', botId: grace.id, limit: 10 })).map((row) => row.id)).toEqual([
+      graceHit,
+    ]);
+    expect((await repos.messages.search({ query: 'needle', threadId: adaChat.id, limit: 10 })).map((row) => row.id)).toEqual([
+      second,
+      first,
+    ]);
+    expect(
+      (await repos.messages.search({ query: 'needle', before: '2026-10-20T12:00:00.000Z', limit: 10 })).map(
+        (row) => row.id,
+      ),
+    ).toEqual([graceHit, first]);
+    expect(
+      (await repos.messages.search({ query: 'needle', before: '2026-10-20T12:00:00Z', limit: 10 })).map((row) => row.id),
+    ).toEqual([graceHit, first]);
+    expect((await repos.messages.search({ query: 'needle', limit: 2 })).map((row) => row.id)).toEqual([
+      second,
+      roomHit,
+    ]);
+  });
+});
+
 describe('threads engine session', () => {
   it('stores and clears the engine session without touching updatedAt', async () => {
     const { bot } = await seed();
