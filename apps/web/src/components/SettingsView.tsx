@@ -4,6 +4,7 @@ import { BotAvatar, Button, Skeleton, cx } from '@brot/ui';
 import type { BrowserProfile, Provider } from '../data/client';
 import type { McpServer, Memory, SavedLogin, Team } from '@brot/protocol';
 import type { BotPreset } from '@brot/protocol';
+import type { Decision } from '../data/client';
 import type { VoiceInfo } from '../voice';
 import { desktopNotificationState, requestDesktopNotifications, type DesktopNotificationState } from '../desktopNotifications';
 import { formatTime } from '../format';
@@ -17,6 +18,7 @@ import { BrowserProfiles } from './BrowserProfiles';
 import { McpServers } from './McpServers';
 import { SavedLogins } from './SavedLogins';
 import { AboutMeSection } from './AboutMeSection';
+import { ActivitySection } from './ActivitySection';
 import { BotPresetsSection } from './BotPresetsSection';
 import { VoiceSection } from './VoiceSection';
 import { TeamPackages } from './TeamPackages';
@@ -38,6 +40,8 @@ export interface SettingsViewProps {
   initialWorkspaceMemories?: Memory[];
   /** Bot presets to render before the client load resolves, e.g. in an SSR render. */
   initialBotPresets?: BotPreset[];
+  /** Approval decisions to render before the client load resolves, e.g. in an SSR render. */
+  initialDecisions?: Decision[];
   /** Called after the voice settings change, so the app can refresh listen availability. */
   onVoiceChanged?: () => void;
   /** Teams for the export scope before the client load resolves, e.g. in an SSR render. */
@@ -56,7 +60,7 @@ const THEME_LABEL: Record<Theme, TranslationKey> = {
   dark: 'settings.theme.dark',
 };
 
-export function SettingsView({ locale, onLocaleChange, theme, onThemeChange, onOpenBots, initialBrowserProfiles, initialMcpServers, initialSavedLogins, initialVoice, initialSecretNames, initialWorkspaceMemories, initialBotPresets, onVoiceChanged, initialTeams, initialTeamPackageContent }: SettingsViewProps): ReactElement {
+export function SettingsView({ locale, onLocaleChange, theme, onThemeChange, onOpenBots, initialBrowserProfiles, initialMcpServers, initialSavedLogins, initialVoice, initialSecretNames, initialWorkspaceMemories, initialBotPresets, initialDecisions, onVoiceChanged, initialTeams, initialTeamPackageContent }: SettingsViewProps): ReactElement {
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg">
       <PaneHeader onOpenBots={onOpenBots}>
@@ -83,6 +87,9 @@ export function SettingsView({ locale, onLocaleChange, theme, onThemeChange, onO
           </Section>
           <Section title={t('settings.botPresets')} description={t('settings.botPresetsBody')}>
             <BotPresetsSection initialPresets={initialBotPresets} />
+          </Section>
+          <Section title={t('settings.activity')} description={t('settings.activityBody')}>
+            <ActivitySection initialDecisions={initialDecisions} />
           </Section>
           <Section title={t('settings.mcpServers')} description={t('settings.mcpServersBody')}>
             <McpServers initialServers={initialMcpServers} />

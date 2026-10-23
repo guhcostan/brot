@@ -181,6 +181,18 @@ export interface TeamPackageExport {
 /** Reusable defaults for new bots: only name, job, instructions and look travel. */
 export type { BotPreset, CreateBotPreset, CreatePresetFromBot, UpdateBotPreset } from '@brot/protocol';
 
+/** One resolved approval in the Activity audit trail. */
+export type { Decision } from '@brot/protocol';
+
+/** The filters the Activity log sends; `from`/`to` bound `decidedAt`. */
+export interface DecisionFilter {
+  from?: string;
+  to?: string;
+  botId?: string;
+  decision?: import('@brot/protocol').Decision['decision'];
+  limit?: number;
+}
+
 /** How many entities one import created. */
 export interface TeamPackageImportCounts {
   teams: number;
@@ -414,6 +426,11 @@ export interface BrotClient {
   updateSavedLogin(loginId: string, patch: UpdateSavedLogin): Promise<SavedLogin>;
   /** Deletes the login and the vault values behind it. */
   deleteSavedLogin(loginId: string): Promise<void>;
+
+  /** Resolved approvals, newest first; tool arguments never appear in a decision. */
+  listDecisions(filter?: DecisionFilter): Promise<import('@brot/protocol').Decision[]>;
+  /** The same-origin CSV export URL for the same filters. */
+  decisionsExportUrl(filter?: Omit<DecisionFilter, 'limit'>): string;
 
   /** Reusable bot defaults offered by the create dialog and managed in Settings. */
   listBotPresets(): Promise<import('@brot/protocol').BotPreset[]>;

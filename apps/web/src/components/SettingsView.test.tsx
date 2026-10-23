@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { createMockClient } from '../data/mockClient';
-import { DEMO_BOTS, DEMO_BOT_PRESETS, DEMO_BROWSER_PROFILES, DEMO_MCP_SERVERS, DEMO_SAVED_LOGINS, DEMO_TEAMS, DEMO_WORKSPACE_MEMORIES } from '../data/fixtures';
+import { DEMO_BOTS, DEMO_BOT_PRESETS, DEMO_BROWSER_PROFILES, DEMO_DECISIONS, DEMO_MCP_SERVERS, DEMO_SAVED_LOGINS, DEMO_TEAMS, DEMO_WORKSPACE_MEMORIES } from '../data/fixtures';
 import { TEAM_PACKAGE_FORMAT, TEAM_PACKAGE_VERSION, formatTeamPackage, type TeamPackage } from '@brot/protocol';
 import type { VoiceInfo } from '../voice';
 import { t } from '../i18n';
@@ -42,6 +42,7 @@ function render(overrides: Partial<SettingsViewProps> = {}, bots = botsRecord): 
     initialSavedLogins: DEMO_SAVED_LOGINS,
     initialWorkspaceMemories: DEMO_WORKSPACE_MEMORIES,
     initialBotPresets: DEMO_BOT_PRESETS,
+    initialDecisions: DEMO_DECISIONS,
     ...overrides,
   };
   return renderToStaticMarkup(
@@ -275,5 +276,46 @@ describe('settings bot presets', () => {
     expect(text).toContain(t('settings.botPresetEmptyTitle'));
     expect(text).toContain(t('settings.botPresetEmptyBody'));
     expect(text).toContain(t('settings.botPresetNew'));
+  });
+});
+
+describe('settings activity', () => {
+  it('lists the decision log with badges, bots, tools, summaries and the reply', () => {
+    const html = render();
+    const text = textOf(html);
+
+    expect(text).toContain(t('settings.activity'));
+    expect(text).toContain(t('settings.activityBody'));
+    expect(text).toContain(t('settings.activityDeny'));
+    expect(text).toContain(t('settings.activityAllowAlways'));
+    expect(text).toContain(t('settings.activityAllowOnce'));
+    expect(text).toContain('gmail.send');
+    expect(text).toContain('Tuca');
+    expect(text).toContain('Capy');
+    expect(text).toContain('Send "Acme renewal: plans and export fix" to ana@acme.com');
+    expect(text).toContain('Hold this until the export fix ships.');
+    expect(html).toContain('data-tone="attention"');
+  });
+
+  it('offers the decision filter, range, refresh and CSV controls', () => {
+    const text = textOf(render());
+
+    expect(text).toContain(t('settings.activityDecision'));
+    expect(text).toContain(t('settings.activityAll'));
+    expect(text).toContain(t('settings.activityAllowed'));
+    expect(text).toContain(t('settings.activityDenied'));
+    expect(text).toContain(t('settings.activity24h'));
+    expect(text).toContain(t('settings.activity7d'));
+    expect(text).toContain(t('settings.activity30d'));
+    expect(text).toContain(t('settings.activityRefresh'));
+    expect(text).toContain(t('settings.activityDownload'));
+  });
+
+  it('shows the empty state when there are no decisions', () => {
+    const text = textOf(render({ initialDecisions: [] }));
+
+    expect(text).toContain(t('settings.activityEmptyTitle'));
+    expect(text).toContain(t('settings.activityEmptyBody'));
+    expect(text).toContain(t('settings.activityDownload'));
   });
 });

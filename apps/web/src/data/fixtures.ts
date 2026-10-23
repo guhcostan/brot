@@ -1,4 +1,4 @@
-import type { Approval, Bot, BotPreset, CanonicalEvent, McpServer, Memory, Message, Notification, Routine, RoutineRun, SavedLogin, Skill, Task, Team, Thread } from '@brot/protocol';
+import type { Approval, Bot, BotPreset, CanonicalEvent, Decision, McpServer, Memory, Message, Notification, Routine, RoutineRun, SavedLogin, Skill, Task, Team, Thread } from '@brot/protocol';
 
 import type { BrowserProfile } from './client';
 
@@ -799,5 +799,43 @@ export const DEMO_BOT_PRESETS: BotPreset[] = [
     avatar: 'arara:amber',
     createdAt: CREATED,
     updatedAt: CREATED,
+  },
+];
+
+/** Resolved approvals for the Activity audit trail: allowed, allowed-always and denied. */
+export const DEMO_DECISIONS: Decision[] = [
+  {
+    id: 'decision_1',
+    runId: 'run_tuca_seed',
+    threadId: tucaThread,
+    botId: 'bot_tuca',
+    kind: 'send',
+    tool: 'gmail.send',
+    summary: 'Send "Acme renewal: plans and export fix" to ana@acme.com',
+    decision: 'deny',
+    reply: 'Hold this until the export fix ships.',
+    decidedAt: hoursAgo(2),
+  },
+  {
+    id: 'decision_2',
+    runId: 'run_capy_1',
+    threadId: dmThreadOf('bot_capy'),
+    botId: 'bot_capy',
+    kind: 'shell',
+    tool: 'bash',
+    summary: 'Run npm run build in the workspace',
+    decision: 'allow_always',
+    decidedAt: hoursAgo(26),
+  },
+  {
+    id: 'decision_3',
+    runId: 'run_onca_1',
+    threadId: dmThreadOf('bot_onca'),
+    botId: 'bot_onca',
+    kind: 'file_write',
+    tool: 'fs.write',
+    summary: 'Overwrite src/export/pages.ts with the streaming version',
+    decision: 'allow_once',
+    decidedAt: hoursAgo(24 * 9),
   },
 ];

@@ -22,6 +22,8 @@ import {
   Memory,
   BotPreset as BotPresetSchema,
   BrowserTakeover as BrowserTakeoverSchema,
+  Decision as DecisionSchema,
+  DecisionQuery,
   CreateBotPreset,
   CreateMcpServer,
   CreatePresetFromBot,
@@ -824,6 +826,24 @@ export function createHttpClient({
     usageExportUrl(filter: Omit<UsageFilter, 'group'> = {}) {
       const suffix = querySuffix({ from: filter.from, to: filter.to, botId: filter.botId });
       return `${root}/api/usage/export.csv${suffix}`;
+    },
+
+    async listDecisions(filter = {}) {
+      const query = DecisionQuery.parse(filter);
+      const suffix = querySuffix({
+        from: query.from,
+        to: query.to,
+        botId: query.botId,
+        decision: query.decision,
+        limit: String(query.limit),
+      });
+      const response = await request(`/api/decisions${suffix}`, { headers: { Accept: 'application/json' } });
+      return DecisionSchema.array().parse(await response.json());
+    },
+
+    decisionsExportUrl(filter = {}) {
+      const suffix = querySuffix({ from: filter.from, to: filter.to, botId: filter.botId, decision: filter.decision });
+      return `${root}/api/decisions/export.csv${suffix}`;
     },
 
     listSavedLogins() {

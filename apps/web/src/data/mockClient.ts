@@ -9,6 +9,7 @@ import type {
   SavedLogin,
   CanonicalEvent,
   ComputerState,
+  Decision,
   Device,
   Memory,
   McpServer,
@@ -40,6 +41,7 @@ import {
   CreateSkill,
   CreateTeam,
   CreateThread,
+  DecisionQuery,
   DESKTOP_HEIGHT,
   DESKTOP_WIDTH,
   MAX_ROOM_BOTS,
@@ -89,6 +91,7 @@ import {
   DEFAULT_THREAD_TITLE,
   DEMO_BOT_BROWSER_PROFILES,
   DEMO_BOT_PRESETS,
+  DEMO_DECISIONS,
   DEMO_BOTS,
   DEMO_BROWSER_PROFILES,
   DEMO_HISTORY,
@@ -271,6 +274,7 @@ function nextMockRunAt(cron: string, from = Date.now()): string | undefined {
 export function createMockClient(): BrotClient {
   const bots = new Map<string, Bot>(DEMO_BOTS.map((bot) => [bot.id, structuredClone(bot)]));
   const botPresets = new Map<string, BotPreset>(DEMO_BOT_PRESETS.map((preset) => [preset.id, structuredClone(preset)]));
+  const decisions: Decision[] = DEMO_DECISIONS.map((decision) => structuredClone(decision));
   const teams = new Map<string, Team>(DEMO_TEAMS.map((team) => [team.id, structuredClone(team)]));
   const nameOf = (botId: string) => bots.get(botId)?.name ?? botId;
   const byTeamName = (a: Team, b: Team) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id);
@@ -1050,6 +1054,34 @@ export function createMockClient(): BrotClient {
       throw new Error(`Unknown memory: ${memoryId}`);
     },
 
+    async listDecisions(filter = {}) {
+      const query = DecisionQuery.parse(filter);
+      const from = query.from === undefined ? undefined : Date.parse(query.from);
+      const to = query.to === undefined ? undefined : Date.parse(query.to);
+      return decisions
+        .filter((decision) => {
+          if (query.decision !== undefined && decision.decision !== query.decision) return false;
+          if (query.botId !== undefined && decision.botId !== query.botId) return false;
+          const at = Date.parse(decision.decidedAt);
+          if (from !== undefined && at < from) return false;
+          if (to !== undefined && at >= to) return false;
+          return true;
+        })
+        .sort((a, b) => Date.parse(b.decidedAt) - Date.parse(a.decidedAt) || b.id.localeCompare(a.id))
+        .slice(0, query.limit)
+        .map((decision) => structuredClone(decision));
+    },
+
+    decisionsExportUrl(filter = {}) {
+      const query = new URLSearchParams();
+      if (filter.from !== undefined) query.set('from', filter.from);
+      if (filter.to !== undefined) query.set('to', filter.to);
+      if (filter.botId !== undefined) query.set('botId', filter.botId);
+      if (filter.decision !== undefined) query.set('decision', filter.decision);
+      const suffix = query.size === 0 ? '' : `?${query.toString()}`;
+      return `/api/decisions/export.csv${suffix}`;
+    },
+
     async listBotPresets() {
       return [...botPresets.values()]
         .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id))
@@ -1340,6 +1372,18 @@ export function createMockClient(): BrotClient {
         resolvedAt: now(),
       };
       approvals.set(approvalId, { threadId: entry.threadId, approval: resolved });
+      decisions.unshift({
+        id: nextId('decision'),
+        runId: resolved.runId,
+        threadId: entry.threadId,
+        botId: resolved.botId,
+        kind: resolved.kind,
+        tool: resolved.tool,
+        summary: resolved.summary,
+        decision: input.decision,
+        ...(input.reply === undefined ? {} : { reply: input.reply }),
+        decidedAt: now(),
+      });
       record(entry.threadId, { ...base(entry.threadId, resolved.runId), type: 'approval.resolved', approval: resolved });
 
       const resume = waiting.get(approvalId);
