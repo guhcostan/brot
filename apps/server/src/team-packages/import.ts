@@ -103,8 +103,8 @@ export async function importTeamPackage(repos: Repos, pkg: TeamPackage): Promise
     }
 
     for (const entry of pkg.rooms) {
-      // `auto` is an alias of the default `lead` responder.
-      const responder = entry.responder === undefined || entry.responder === 'auto' ? undefined : entry.responder;
+      // Older packages may omit the responder; the room default (`lead`) applies then. `auto` is preserved.
+      const responder = entry.responder;
       await repos.rooms.create({
         title: entry.title,
         leadBotId: mapped(botIds, entry.lead, 'bot'),

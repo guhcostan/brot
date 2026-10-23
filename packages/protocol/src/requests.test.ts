@@ -17,6 +17,7 @@ import {
   SetBrowserTakeover,
   UpdateBot,
   UpdateBrowserProfile,
+  UpdateRoomDeciderSettings,
   UpdateRoomMembers,
   UpdateRoutine,
   UpdateSavedLogin,
@@ -335,7 +336,22 @@ describe('room, membership, and task requests', () => {
   it('rejects a room that names a bot twice or has no title', () => {
     expect(() => CreateRoom.parse({ title: 'Team', botIds: ['bot_1', 'bot_1'], leadBotId: 'bot_1' })).toThrow(/only once/);
     expect(() => CreateRoom.parse({ botIds: ['bot_1', 'bot_2'], leadBotId: 'bot_1' })).toThrow();
-    expect(() => CreateRoom.parse({ title: 'Team', botIds: ['bot_1', 'bot_2'], leadBotId: 'bot_1', responder: 'auto' })).toThrow();
+    expect(CreateRoom.parse({ title: 'Team', botIds: ['bot_1', 'bot_2'], leadBotId: 'bot_1', responder: 'auto' }).responder).toBe(
+      'auto',
+    );
+    expect(() =>
+      CreateRoom.parse({ title: 'Team', botIds: ['bot_1', 'bot_2'], leadBotId: 'bot_1', responder: 'round-robin' }),
+    ).toThrow();
+  });
+
+  it('sets and clears the room decider model', () => {
+    expect(UpdateRoomDeciderSettings.parse({ model: 'deepseek/deepseek-flash' })).toEqual({
+      model: 'deepseek/deepseek-flash',
+    });
+    expect(UpdateRoomDeciderSettings.parse({ model: null })).toEqual({ model: null });
+    expect(UpdateRoomDeciderSettings.parse({})).toEqual({});
+    expect(() => UpdateRoomDeciderSettings.parse({ model: 'no-slash' })).toThrow();
+    expect(() => UpdateRoomDeciderSettings.parse({ model: '' })).toThrow();
   });
 
   it('accepts membership changes and rejects empty, overlapping, or repeated ones', () => {

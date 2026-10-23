@@ -32,8 +32,9 @@ export function resolveMentions(content: string, members: readonly MentionableBo
 }
 
 /**
- * The bots that answer one room message, in order. Mentioned bots answer in both modes. With nobody
- * mentioned, `lead` answers with the baton holder or the lead bot, and `mention` stays silent.
+ * The bots that answer one room message, in order. Mentioned bots answer in every mode. With nobody mentioned,
+ * `lead` answers with the baton holder or the lead bot, and `mention` stays silent. `auto` returns nothing here:
+ * the room service asks the decider for a pick first, then falls back to the lead rules.
  */
 export function chooseResponders(input: {
   responder: ResponderMode;
@@ -42,6 +43,6 @@ export function chooseResponders(input: {
   baton?: string;
 }): string[] {
   if (input.mentions.length > 0) return [...input.mentions];
-  if (input.responder === 'mention') return [];
+  if (input.responder === 'mention' || input.responder === 'auto') return [];
   return [input.baton ?? input.leadBotId];
 }

@@ -138,9 +138,22 @@ export type ThreadKind = z.infer<typeof ThreadKind>;
  * - `mention`: only the bots @mentioned in a message answer.
  * - `lead`: the mentioned bots answer. When nobody is mentioned, the lead bot answers and may hand the
  *   message to another member.
+ * - `auto`: the mentioned bots answer. When nobody is mentioned, the room's decider model picks one member;
+ *   without a usable decider the baton holder or the lead bot answers.
  */
-export const ResponderMode = z.enum(['mention', 'lead']);
+export const ResponderMode = z.enum(['mention', 'lead', 'auto']);
 export type ResponderMode = z.infer<typeof ResponderMode>;
+
+/**
+ * The model that routes room messages when a room's responder is `auto`. It never carries a key: the
+ * decider reads the provider's vault secret when it calls. Absent means no decider is configured.
+ */
+export const RoomDeciderSettings = z.object({
+  /** `<provider>/<model>` for a provider with the openai-completions API. */
+  model: z.string().optional(),
+  updatedAt: IsoDateTime.optional(),
+});
+export type RoomDeciderSettings = z.infer<typeof RoomDeciderSettings>;
 
 /**
  * A conversation: a DM with one bot (`kind: 'dm'`) or a room with several bots (`kind: 'room'`).

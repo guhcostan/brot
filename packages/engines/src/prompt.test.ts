@@ -166,6 +166,22 @@ describe('buildPrompt', () => {
     expect(prompt.startsWith('You are Onca, Reviewer. You are a bot in Brot, working for the user.')).toBe(true);
   });
 
+  it('states the auto responder mode: the workspace decider picks when nobody is mentioned', () => {
+    const prompt = buildPrompt({
+      bot: testBot,
+      memories: [],
+      skills: [],
+      history: [],
+      input: 'go',
+      room: { title: 'Ops', responder: 'auto', members: room.members },
+    });
+    expect(prompt).toContain(
+      "Responders: mentioned members answer; when a message mentions nobody, the workspace's decider model picks which member answers.",
+    );
+    // The lead wording is unchanged for the default mode.
+    expect(prompt).not.toContain('goes to the lead');
+  });
+
   it('states the mention-only responder mode and leaves the lead out when there is none', () => {
     const prompt = buildPrompt({
       bot: testBot,

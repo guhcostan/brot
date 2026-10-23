@@ -194,7 +194,7 @@ describe('POST /api/team-packages/import', () => {
     expect(skill?.botId).toBeUndefined();
   });
 
-  it('maps the auto responder alias to the default lead responder', async () => {
+  it('preserves the auto responder mode from a package', async () => {
     const res = await importPackage(
       JSON.stringify(
         minimalPackage({
@@ -203,6 +203,23 @@ describe('POST /api/team-packages/import', () => {
             { key: 'b2', name: 'Grace', job: 'Ops', instructions: '' },
           ],
           rooms: [{ title: 'Launch', lead: 'b1', members: ['b1', 'b2'], responder: 'auto' }],
+        }),
+      ),
+    );
+    expect(res.status).toBe(201);
+    const [room] = await repos().threads.listRooms();
+    expect(room?.responder).toBe('auto');
+  });
+
+  it('keeps accepting an older package whose room has no responder', async () => {
+    const res = await importPackage(
+      JSON.stringify(
+        minimalPackage({
+          bots: [
+            { key: 'b1', name: 'Ada', job: 'Lead', instructions: '' },
+            { key: 'b2', name: 'Grace', job: 'Ops', instructions: '' },
+          ],
+          rooms: [{ title: 'Launch', lead: 'b1', members: ['b1', 'b2'] }],
         }),
       ),
     );

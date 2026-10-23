@@ -13,6 +13,7 @@ import {
 import type { EventBus } from '../bus';
 import type { Harness } from '../harness';
 import type { ChainRef } from '../team/types';
+import type { RoomDecider } from './decider';
 import { RuleViolation } from './errors';
 import { chooseResponders, resolveMentions } from './routing';
 
@@ -50,7 +51,13 @@ export interface RoomService {
  * Room operations. The baton is kept in memory: it lasts until the next message in its room or the server
  * restarts, whichever comes first.
  */
-export function createRoomService(deps: { repos: Repos; bus: EventBus; harness: () => Harness }): RoomService {
+export function createRoomService(deps: {
+  repos: Repos;
+  bus: EventBus;
+  harness: () => Harness;
+  /** The optional model that picks the answering bot in `auto` rooms. Absent means the lead fallback only. */
+  decider?: RoomDecider;
+}): RoomService {
   const { repos, bus } = deps;
   const batons = new Map<string, string>();
 
@@ -88,6 +95,23 @@ export function createRoomService(deps: { repos: Repos; bus: EventBus; harness: 
       await postNotice(threadId, `The room stopped before its next reply: ${error instanceof Error ? error.message : String(error)}`);
     });
     return firstRunId;
+  }
+
+  /**
+   * Asks the decider which member should answer. The decider already turns every failure into undefined; the
+   * catch keeps a broken implementation from breaking the room.
+   */
+  async function deciderChoice(threadId: string, message: string, bots: readonly Bot[]): Promise<string | undefined> {
+    if (deps.decider === undefined) return undefined;
+    try {
+      return await deps.decider.choose({
+        members: bots.map((bot) => ({ id: bot.id, name: bot.name, job: bot.job })),
+        message,
+      });
+    } catch (error) {
+      console.error(`room ${threadId} decider failed`, error);
+      return undefined;
+    }
   }
 
   /** Stores a system note in a room, so a stopped exchange is visible in the timeline. */
@@ -163,16 +187,32 @@ export function createRoomService(deps: { repos: Repos; bus: EventBus; harness: 
       await bus.publish({ type: 'message.completed', threadId: thread.id, message });
 
       const responder = thread.responder ?? 'lead';
+      const leadBotId = thread.leadBotId ?? thread.botId;
       const baton = batons.get(thread.id);
       const batonHolds = baton !== undefined && memberIds.has(baton);
-      const useBaton = mentions.length === 0 && responder === 'lead' && batonHolds;
-      if (useBaton || (baton !== undefined && !batonHolds)) batons.delete(thread.id);
-      const responders = chooseResponders({
+      if (baton !== undefined && !batonHolds) batons.delete(thread.id);
+      const fallback = (): string[] =>
+        chooseResponders({
+          responder: 'lead',
+          mentions: [],
+          leadBotId,
+          ...(batonHolds && baton !== undefined ? { baton } : {}),
+        });
+      // Mentions always win. `auto` asks the decider when nobody is mentioned; anything but a member falls back
+      // to the baton holder or the lead.
+      let responders: string[] = chooseResponders({
         responder,
         mentions,
-        leadBotId: thread.leadBotId ?? thread.botId,
-        ...(useBaton && baton !== undefined ? { baton } : {}),
+        leadBotId,
+        ...(batonHolds && baton !== undefined ? { baton } : {}),
       });
+      if (responders.length === 0 && responder === 'auto') {
+        const picked = await deciderChoice(thread.id, input.content, bots);
+        responders = picked !== undefined && memberIds.has(picked) ? [picked] : fallback();
+      }
+      if (batonHolds && baton !== undefined && mentions.length === 0 && responders[0] === baton) {
+        batons.delete(thread.id);
+      }
       return { runId: await startReplies(thread.id, message, responders), message };
     },
 

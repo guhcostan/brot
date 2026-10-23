@@ -143,9 +143,14 @@ describe('input and takeover', () => {
 
 describe('GET /api/providers', () => {
   it('lists each provider, with configured true only when the vault holds its secret', async () => {
-    const before = (await (await call(ctx.app, 'GET', '/api/providers')).json()) as Array<{ id: string; configured: boolean; secretName: string }>;
+    const before = (await (await call(ctx.app, 'GET', '/api/providers')).json()) as Array<{
+      id: string;
+      api: string;
+      configured: boolean;
+      secretName: string;
+    }>;
     const opencode = before.find((provider) => provider.id === 'opencode-go');
-    expect(opencode).toMatchObject({ configured: false, secretName: 'opencode-go' });
+    expect(opencode).toMatchObject({ api: 'openai-completions', configured: false, secretName: 'opencode-go' });
 
     await ctx.services.vault.set('opencode-go', 'sk-test-not-a-real-key');
     const after = (await (await call(ctx.app, 'GET', '/api/providers')).json()) as Array<{ id: string; configured: boolean; models: unknown[] }>;

@@ -24,6 +24,7 @@ import type { BrotMcpService, BrotTool } from './mcp/types';
 import { createNotificationsService, type NotificationsService } from './notifications';
 import { createPairing, type Pairing } from './pairing';
 import { createChainLedger, readRoomChainBudgetUsd, type ChainLedger } from './rooms/chains';
+import { createRoomDecider, type RoomDecider } from './rooms/decider';
 import { createRoomService, type RoomService } from './rooms/service';
 import { createTaskService, type TaskService } from './rooms/tasks';
 import { createTeamRunner, type TeamRunnerService } from './rooms/team-runner';
@@ -61,6 +62,8 @@ export interface ServiceExtras {
   desktop?: DesktopOptions;
   /** The bot browser on the server machine. Tests inject a fake. Defaults to a Chrome per browser profile (own or shared). */
   browser?: HostBrowserService;
+  /** Room decider options: the decider model call's outbound HTTP and timeout. Tests inject a fake upstream. */
+  decider?: { fetch?: FetchLike; timeoutMs?: number };
 }
 
 export interface Services {
@@ -89,6 +92,8 @@ export interface Services {
   /** Relays contained runs' model requests to their providers, adding the key from the vault. */
   llm: LlmRelay;
   rooms: RoomService;
+  /** Picks the answering bot for `auto` rooms, using the model stored under the `room-decider` setting. */
+  roomDecider: RoomDecider;
   tasks: TaskService;
   teamRunner: TeamRunnerService;
   chains: ChainLedger;
@@ -120,8 +125,25 @@ export async function createServices(
     if (late.harness === undefined) throw new Error('the harness is not ready');
     return late.harness;
   };
+  const providers = mergeProviders(
+    SEEDED_PROVIDERS,
+    await loadProviderFile(config.providersFile),
+    extras.llm?.providers ?? [],
+  );
+  const providerRegistry = createProviderRegistry(providers);
+  const llm = createLlmRelay({
+    vault,
+    providers: providerRegistry,
+    ...(extras.llm?.fetch === undefined ? {} : { fetch: extras.llm.fetch }),
+  });
+  const roomDecider = createRoomDecider({
+    repos,
+    providers: providerRegistry,
+    vault,
+    ...(extras.decider === undefined ? {} : extras.decider),
+  });
   const chains = createChainLedger({ roomBudgetUsd: readRoomChainBudgetUsd(process.env.BROT_TEAM_CHAIN_BUDGET_USD) });
-  const rooms = createRoomService({ repos, bus, harness: currentHarness });
+  const rooms = createRoomService({ repos, bus, harness: currentHarness, decider: roomDecider });
   const teamRunner = createTeamRunner({ harness: currentHarness, chains });
   const tasks = createTaskService({ repos, bus, harness: currentHarness, runner: teamRunner });
   const teamTools =
@@ -150,16 +172,6 @@ export async function createServices(
     ? createDesktopTools({ repos, desktop, takeovers: desktop.takeovers, takeoverWaitMs: extras.desktop?.takeoverWaitMs })
     : [];
   const mcp = extras.mcp?.({ repos, bus, broker, vault, tools: [...teamTools, ...browserTools, ...desktopTools] });
-  const providers = mergeProviders(
-    SEEDED_PROVIDERS,
-    await loadProviderFile(config.providersFile),
-    extras.llm?.providers ?? [],
-  );
-  const llm = createLlmRelay({
-    vault,
-    providers: createProviderRegistry(providers),
-    ...(extras.llm?.fetch === undefined ? {} : { fetch: extras.llm.fetch }),
-  });
   const harness = createHarness({
     repos,
     bus,
@@ -217,6 +229,7 @@ export async function createServices(
     providers,
     llm,
     rooms,
+    roomDecider,
     tasks,
     teamRunner,
     chains,

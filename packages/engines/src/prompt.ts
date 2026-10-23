@@ -181,7 +181,9 @@ function roomSection(room: PromptRoom, bot: Bot): string {
   const responders =
     room.responder === 'mention'
       ? 'only the members mentioned with @name answer.'
-      : 'mentioned members answer; a message that mentions nobody goes to the lead.';
+      : room.responder === 'auto'
+        ? "mentioned members answer; when a message mentions nobody, the workspace's decider model picks which member answers."
+        : 'mentioned members answer; a message that mentions nobody goes to the lead.';
   const lines = [`Room "${room.title}".`, `Members: ${members}.`];
   if (lead) lines.push(`Lead: ${lead.name}.`);
   lines.push(`Responders: ${responders}`, `Messages labeled [Name] were written by that bot; you are ${bot.name}.`);

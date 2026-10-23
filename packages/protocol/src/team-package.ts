@@ -42,8 +42,8 @@ export const TeamPackageBot = z.strictObject({
 export type TeamPackageBot = z.infer<typeof TeamPackageBot>;
 
 /**
- * A room in a package. `members` includes the `lead`. `responder` uses the stored modes; `auto` is accepted as
- * an alias of `lead` for hand-written packages. The responder defaults to `lead` on import.
+ * A room in a package. `members` includes the `lead`. `responder` uses the stored modes, `auto` included; when
+ * absent the room defaults to `lead` on import.
  */
 export const TeamPackageResponder = z.enum(['lead', 'mention', 'auto']);
 export type TeamPackageResponder = z.infer<typeof TeamPackageResponder>;

@@ -42,6 +42,11 @@ describe('chooseResponders', () => {
     expect(chooseResponders({ responder: 'mention', mentions: [], leadBotId: 'capy', baton: 'ana' })).toEqual([]);
   });
 
+  it('leaves auto routing to the room service when nobody is mentioned, and runs mentions like every mode', () => {
+    expect(chooseResponders({ responder: 'auto', mentions: [], leadBotId: 'capy', baton: 'ana' })).toEqual([]);
+    expect(chooseResponders({ responder: 'auto', mentions: ['dex'], leadBotId: 'capy', baton: 'ana' })).toEqual(['dex']);
+  });
+
   it('lets the lead bot answer when nobody is mentioned, unless a baton names someone else', () => {
     expect(chooseResponders({ responder: 'lead', mentions: [], leadBotId: 'capy' })).toEqual(['capy']);
     expect(chooseResponders({ responder: 'lead', mentions: [], leadBotId: 'capy', baton: 'ana' })).toEqual(['ana']);

@@ -13,6 +13,7 @@ import {
   Message,
   Policy,
   ResponderMode,
+  RoomDeciderSettings,
   RoomMember,
   Routine,
   RoutineRun,
@@ -356,14 +357,26 @@ describe('rooms, messages, and team tasks', () => {
     };
     expect(roundTrip(Thread, room)).toEqual(room);
     expect(ThreadKind.options).toEqual(['dm', 'room']);
-    expect(ResponderMode.options).toEqual(['mention', 'lead']);
+    expect(ResponderMode.options).toEqual(['mention', 'lead', 'auto']);
   });
 
   it('rejects an unknown thread kind or responder mode', () => {
     expect(() => Thread.parse({ id: 't', botId: 'b', title: 'x', kind: 'group', createdAt: at, updatedAt: at })).toThrow();
+    expect(Thread.parse({ id: 't', botId: 'b', title: 'x', responder: 'auto', createdAt: at, updatedAt: at }).responder).toBe(
+      'auto',
+    );
     expect(() =>
-      Thread.parse({ id: 't', botId: 'b', title: 'x', responder: 'auto', createdAt: at, updatedAt: at }),
+      Thread.parse({ id: 't', botId: 'b', title: 'x', responder: 'round-robin', createdAt: at, updatedAt: at }),
     ).toThrow();
+  });
+
+  it('round-trips the room decider settings and accepts an empty object', () => {
+    const settings = { model: 'deepseek/deepseek-flash', updatedAt: at };
+    expect(roundTrip(RoomDeciderSettings, settings)).toEqual(settings);
+    expect(RoomDeciderSettings.parse({})).toEqual({});
+    expect(RoomDeciderSettings.parse({ model: 'deepseek/deepseek-flash' })).toEqual({
+      model: 'deepseek/deepseek-flash',
+    });
   });
 
   it('round-trips room membership', () => {

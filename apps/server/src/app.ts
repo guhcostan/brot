@@ -38,6 +38,7 @@ import {
   UpdateBrowserProfile,
   UpdateMcpServer,
   UpdateMemory,
+  UpdateRoomDeciderSettings,
   UpdateRoomMembers,
   UpdateRoutine,
   UpdateSavedLogin,
@@ -77,6 +78,7 @@ import { mountDecisionRoutes } from './decisions';
 import { mountUsageRoutes } from './usage';
 import { mountDesktopRoutes, type DesktopService } from './desktop';
 import { testMcpServer } from './mcp-servers';
+import { readRoomDeciderSettings, writeRoomDeciderSettings } from './rooms/decider';
 import { RuleViolation } from './rooms/errors';
 import { skillFileName } from './skills';
 import type { RoomService } from './rooms/service';
@@ -298,6 +300,22 @@ function fallbackModelIssues(
   });
   if (unknown.length === 0) return [];
   return [{ path: ['fallbackModels'], message: `unknown model providers in: ${unknown.join(', ')}` }];
+}
+
+/** Why a model cannot route room messages: an unknown provider, or one that does not speak chat-completions. */
+function roomDeciderModelIssues(
+  providers: readonly ProviderSpec[] | undefined,
+  model: string,
+): Array<{ path: string[]; message: string }> {
+  const unknown = modelProviderIssues(providers, model);
+  if (unknown.length > 0) return unknown;
+  const slash = model.indexOf('/');
+  const providerId = slash > 0 ? model.slice(0, slash) : model;
+  const provider = (providers ?? []).find((spec) => spec.id === providerId);
+  if (provider?.api !== 'openai-completions') {
+    return [{ path: ['model'], message: 'the room decider needs an openai-completions provider' }];
+  }
+  return [];
 }
 
 /** Deletes a saved login's three vault values. The names derive from the id, so no row is needed. */
@@ -653,6 +671,21 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
   });
 
   app.get('/api/rooms', async (c) => c.json(await rooms.list()));
+
+  /** The model that routes room messages when a room's responder is `auto`. `{}` when none is configured. */
+  app.get('/api/room-decider', async (c) => c.json(await readRoomDeciderSettings(repos)));
+
+  app.put('/api/room-decider', async (c) => {
+    const body = await parseBody(c, UpdateRoomDeciderSettings);
+    if (!body.ok) return body.response;
+    const { model } = body.data;
+    if (model === undefined) return c.json(await readRoomDeciderSettings(repos));
+    if (model !== null) {
+      const issues = roomDeciderModelIssues(deps.providers, model);
+      if (issues.length > 0) return c.json({ error: 'Invalid request', issues }, 400);
+    }
+    return c.json(await writeRoomDeciderSettings(repos, model));
+  });
 
   app.get('/api/rooms/:id/members', async (c) => {
     const members = await rooms.members(c.req.param('id'));
@@ -1351,6 +1384,7 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
       (deps.providers ?? []).map(async (spec) => ({
         id: spec.id,
         label: spec.id,
+        api: spec.api,
         models: (spec.models ?? []).map((model) => ({ id: model.id, label: model.id })),
         configured: await vault.has(spec.secretName),
         secretName: spec.secretName,

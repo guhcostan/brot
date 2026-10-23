@@ -216,6 +216,12 @@ export const UpdateRoomMembers = z
   });
 export type UpdateRoomMembers = z.infer<typeof UpdateRoomMembers>;
 
+/** Sets the model that routes room messages when a room's responder is `auto`. `null` clears it. */
+export const UpdateRoomDeciderSettings = z.object({
+  model: ModelRef.nullable().optional(),
+});
+export type UpdateRoomDeciderSettings = z.infer<typeof UpdateRoomDeciderSettings>;
+
 /**
  * Creates a task. A user creates a root task (depth 0) by leaving out `createdByBotId`. A bot that
  * delegates sets `createdByBotId`, and may name the task it works under as `parentTaskId`.
