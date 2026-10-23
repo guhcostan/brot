@@ -2,6 +2,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import type { Repos, TaskFilter } from '@brot/db';
 import type { EngineRegistry } from '@brot/engines';
 import {
+  ApplyMemoryUpkeep,
   ApprovalStatus,
   BotPresetAvatar,
   ComputerInput,
@@ -23,6 +24,7 @@ import {
   ImportSkill,
   IsoDateTime,
   MarkNotificationsRead,
+  MemoryUpkeepScope,
   myChromeEndpointIssues,
   PairingComplete,
   PostMessage,
@@ -71,6 +73,7 @@ import { PairingError, type Pairing } from './pairing';
 import { triggerIssues, type Scheduler } from './scheduler';
 import type { BrotMcpService } from './mcp/types';
 import type { LlmRelay, ProviderSpec } from './llm';
+import { MemoryUpkeepConflictError, applyMemoryUpkeep, buildMemoryUpkeepReport } from './memory/upkeep';
 import { botBrowserKind } from './browser/tools';
 import { BrowserError } from './browser/service';
 import type { HostBrowserService } from './browser/types';
@@ -1029,6 +1032,46 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     const body = await parseBody(c, CreateWorkspaceMemory);
     if (!body.ok) return body.response;
     return c.json(await repos.memories.create({ ...body.data, scope: 'workspace' }), 201);
+  });
+
+  /**
+   * Dry-run memory upkeep for one scope: duplicate memories grouped by kind and normalized text, with the newest of
+   * each group kept. Never mixes a bot's memories with the workspace's.
+   */
+  app.get('/api/memories/upkeep', async (c) => {
+    const scope = c.req.query('scope');
+    const botId = c.req.query('botId');
+    const parsed = MemoryUpkeepScope.safeParse({
+      ...(scope === undefined ? {} : { scope }),
+      ...(botId === undefined || botId === '' ? {} : { botId }),
+    });
+    if (!parsed.success) return invalid(c, parsed.error);
+    if (parsed.data.scope === 'bot') {
+      const bot = await repos.bots.get(parsed.data.botId ?? '');
+      if (!bot) return invalidReference(c, 'botId', `unknown bot ${parsed.data.botId ?? ''}`);
+    }
+    return c.json(await buildMemoryUpkeepReport(repos, parsed.data));
+  });
+
+  /** Applies a preview: validates every id against a fresh report, then deletes the duplicates (all or nothing). */
+  app.post('/api/memories/upkeep', async (c) => {
+    const body = await parseBody(c, ApplyMemoryUpkeep);
+    if (!body.ok) return body.response;
+    if (body.data.scope === 'bot') {
+      const bot = await repos.bots.get(body.data.botId ?? '');
+      if (!bot) return invalidReference(c, 'botId', `unknown bot ${body.data.botId ?? ''}`);
+    }
+    try {
+      return c.json(await applyMemoryUpkeep(repos, body.data));
+    } catch (error) {
+      if (error instanceof MemoryUpkeepConflictError) {
+        return c.json(
+          { error: 'Invalid request', issues: [{ path: ['removeIds'], message: error.message }], ids: error.ids },
+          400,
+        );
+      }
+      throw error;
+    }
   });
 
   /** Every memory write, newest first. Filters: `botId`, `scope` and a `limit` of 1..200 (default 50). */

@@ -16,3 +16,4 @@ export * from './team-package';
 export * from './today';
 export * from './search';
 export * from './presets';
+export * from './memory-upkeep';
