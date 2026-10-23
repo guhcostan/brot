@@ -1,9 +1,7 @@
 import { chmod, copyFile, cp, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 
-/**
- * The filesystem operations `brot backup` and `brot restore` need. The default wraps `node:fs/promises`;
- * tests may inject their own implementation.
- */
+/** The filesystem operations the backup core needs. The default wraps `node:fs/promises`; tests may inject. */
 export interface BackupFs {
   mkdir(path: string, options: { recursive: boolean; mode?: number }): Promise<unknown>;
   readdir(path: string): Promise<string[]>;
@@ -51,4 +49,15 @@ export async function directoryExists(fs: BackupFs, path: string): Promise<boole
   } catch {
     return false;
   }
+}
+
+/** Sum of the sizes of every file under `dir`, as the size estimate shown by the CLI and API. */
+export async function directorySize(fs: BackupFs, dir: string): Promise<number> {
+  let total = 0;
+  for (const entry of await fs.readdir(dir)) {
+    const path = join(dir, entry);
+    const info = await fs.stat(path);
+    total += info.isDirectory() ? await directorySize(fs, path) : info.size;
+  }
+  return total;
 }

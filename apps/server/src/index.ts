@@ -16,12 +16,15 @@ import { createBrotMcp } from './mcp';
 import { createTeamTools } from './team';
 import type { AppEnv, Bindings } from './auth';
 import { loadConfig, type ConfigOverrides } from './config';
+import { createBackupScheduler } from './backup';
 import { expireOrphanedApprovals } from './harness';
+import { recordActivity } from './activity/record';
 import { createServices, type ServiceExtras, type Services } from './services';
 import { createWebhookApp } from './webhooks';
 export { createApp } from './app';
 export { createServices, type ServiceExtras, type Services } from './services';
 export { createWebhookApp } from './webhooks';
+export * from './backup';
 
 export interface StartOptions extends ConfigOverrides {
   engines?: EngineRegistry;
@@ -95,12 +98,24 @@ export async function startServer(options: StartOptions = {}): Promise<ServerHan
     throw error;
   }
 
+  // Scheduled backups: a 15-minute check while Brot runs. The timer is unref'd and every failure is contained.
+  const backupScheduler = createBackupScheduler({
+    service: services.backups,
+    recordActivity: () =>
+      recordActivity(
+        { repos: services.repos },
+        { action: 'created', targetType: 'backup', summary: 'Created scheduled backup', actor: 'local' },
+      ),
+  });
+  backupScheduler.start();
+
   return {
     host: config.host,
     port: api.port,
     webhookPort: hooks.port,
     app,
     async close() {
+      backupScheduler.stop();
       await Promise.all([closeServer(api.server), closeServer(hooks.server)]);
       await services.close();
     },

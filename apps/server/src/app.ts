@@ -87,6 +87,7 @@ import { botBrowserKind } from './browser/tools';
 import { BrowserError } from './browser/service';
 import type { HostBrowserService } from './browser/types';
 import { activityActor, recordActivity, type RecordActivityEntry } from './activity/record';
+import { mountBackupRoutes, type BackupService } from './backup';
 import { mountAttachmentRoutes, type AttachmentStorage } from './attachments';
 import { mountSearchRoutes } from './search';
 import { mountStarterTeamRoutes, mountTeamPackageRoutes } from './team-packages';
@@ -160,6 +161,8 @@ export interface AppDeps {
   computers: ComputerProviders;
   /** Attachment bytes under `<home>/attachments`. Only ids reach the API; no path does. */
   attachments: AttachmentStorage;
+  /** Backup settings, history and create/prune operations behind /api/backups. Absent: the routes are not mounted. */
+  backups?: BackupService;
   /** The model providers the relay knows (seeded plus providers.json). Listed by GET /api/providers. */
   providers?: readonly ProviderSpec[];
   /** Clock the usage range defaults read. Tests inject a fixed time. */
@@ -1782,6 +1785,10 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     ...(deps.now === undefined ? {} : { now: deps.now }),
     record: (c, entry) => record(c, entry),
   });
+
+  if (deps.backups !== undefined) {
+    mountBackupRoutes(app, { backups: deps.backups, record: (c, entry) => record(c, entry) });
+  }
 
   mountTodayRoutes(app, { repos, ...(deps.now === undefined ? {} : { now: deps.now }) });
 

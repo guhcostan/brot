@@ -1,6 +1,7 @@
 import { createDb, createRepos, migrate, type BrotDb, type Repos } from '@brot/db';
 import type { EngineRegistry } from '@brot/engines';
 import { createAttachmentStorage, type AttachmentStorage } from './attachments';
+import { createBackupService, type BackupService } from './backup';
 import { createHostBrowserService } from './browser';
 import { createBrowserTools } from './browser/tools';
 import type { HostBrowserService } from './browser/types';
@@ -91,6 +92,8 @@ export interface Services {
   browser: HostBrowserService;
   /** Attachment bytes under `<home>/attachments`, reached by id only. */
   attachments: AttachmentStorage;
+  /** Backup settings, history and the create/list/prune operations behind /api/backups. */
+  backups: BackupService;
   /** The notification inbox: records approvals/finished runs/failures as the bus reports them. */
   notifications: NotificationsService;
   /** The providers the model relay knows, listed by GET /api/providers. */
@@ -122,6 +125,7 @@ export async function createServices(
   await notifications.prune();
   const vault = createVault({ dir: config.home });
   const attachments = createAttachmentStorage({ home: config.home });
+  const backups = createBackupService({ repos, home: config.home });
   const computers = extras.computers ?? {};
 
   // The harness needs the MCP server, the MCP server needs the team tools, and the team tools need the
@@ -235,6 +239,7 @@ export async function createServices(
     desktop,
     browser,
     attachments,
+    backups,
     notifications,
     providers,
     llm,
