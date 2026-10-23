@@ -533,6 +533,23 @@ mapped in `docs/MAUSBOT-PARITY.md` (34 bots / 7 teams, 33 bots with a browser an
   and room summary were correct; a per-run inactivity watchdog is the follow-up).
 - Suite: 2507 tests (263 files), typecheck 12/12, lint clean. Eval leftovers (3 rooms, 12 archived eval
   bots) cleaned from the live DB.
+## Wave 37: relay stall guard, eval hygiene, live A evals (2026-10-23)
+
+- **Relay guard.** Every relayed provider call now has a headers timeout (120 s), a total deadline (15 min) and
+  a stream stall guard (120 s between chunks). A silent or stalled provider aborts the upstream and errors
+  the engine request with a clear message instead of hanging the run; partial usage parsed before a stall
+  is still reported. Timers are cleared on every path and unref'd in production, and logs carry only the
+  provider id and reason. All three limits are overridable through ServiceExtras.llm.
+- **Eval hygiene.** The eval context tracks rooms and MCP servers; the runner always deletes them after
+  evidence collection and deletes the bots outright when a case ends in error/timeout/cost-stop (pass/fail
+  still archives bots). A live B1 timeout used to leave rooms and bots behind; forced-timeout verification
+  now leaves none. C2's cost read was made robust to the late usage report.
+- **Live eval results this round:** C2 + C7 pass ($0.0027); A3 (bounded research with links), A10 (inbox
+  triage) and A13 (status watcher routine) pass live at $0.27 total, A3/A10 flagged for human review but all
+  structural checks green. Report: apps/evals/results/2026-10-23T03-50-18-552Z/REPORT-lead30.md. Leftovers
+  cleaned (only Capy/Teste remain, no rooms, no containers).
+- Suite: 2522 tests (263 files), typecheck 12/12, lint clean (two known browser/desktop flakes passed on
+  rerun and isolated).
 ## Next
 
 1. Re-run the eval suite on a live model once OpenCode Go has quota (`apps/evals`, `--base` to the server), including B8 and C; the 2026-10-20 results predate the read auto-allow and the fixes above.
