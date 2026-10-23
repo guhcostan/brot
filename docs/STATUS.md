@@ -571,6 +571,21 @@ mapped in `docs/MAUSBOT-PARITY.md` (34 bots / 7 teams, 33 bots with a browser an
   approval, x.com blocked) all pass, $0.0658 total.
 - Suite: 2573 tests (271 files), typecheck 12/12 (fixed a desktop-only typecheck error in the relay's
   stream reader), lint clean.
+## Wave 39: memory journal, chain fix, robustness evals (2026-10-23)
+
+- **Memory journal with undo.** Every memory write (bot API, workspace API, remember tool) appends a
+  memory_journal row in the same transaction with action/kind/scope/bot and before/after content; GET
+  /api/memories/journal lists newest first with bot/scope/limit filters, and POST /api/memories/journal/:id/undo
+  removes a created memory, restores an updated one, recreates a deleted one, and 409s when the memory
+  changed since. Migration 0022. The bot Memory tab and Settings About me gain a History dialog with action
+  badges, before→after snippets, undo with confirmation, conflict handling and refresh. en/pt-BR/es.
+- **Chain bug found by eval B4 and fixed.** Two delegations from the same lead run were landing in two
+  chains, so chain task limits and the team budget did not span the exchange; planDelegation now returns the
+  caller/parent chain and delegate passes it to the task row. Re-ran B4 live: it passes with one chain.
+- **Robustness evals live:** C3 (kill a computer mid-run; only that run fails, files survive) passes, C4
+  (30-turn thread) passes, B4 passes after the fix. Total $0.126 across the three runs. Leftovers cleaned
+  (only Capy/Teste remain).
+- Suite: 2615 tests (275 files), typecheck 12/12, lint clean.
 ## Next
 
 1. Re-run the eval suite on a live model once OpenCode Go has quota (`apps/evals`, `--base` to the server), including B8 and C; the 2026-10-20 results predate the read auto-allow and the fixes above.
