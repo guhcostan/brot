@@ -699,6 +699,18 @@ mapped in `docs/MAUSBOT-PARITY.md` (34 bots / 7 teams, 33 bots with a browser an
   receipt once with amounts matching the source files and receiptsTotal reconciling to 592.30, but its
   matchedTotal said 560.2 versus a summed 440.3 - a model-quality issue, not a structural bug.
 - Suite: 2799 tests (300 files), typecheck 12/12, lint clean.
+## Wave 47: starter teams library (2026-10-23)
+
+- **Org library (starter teams).** Three built-in team packages ship with the server: Dev team, Content studio
+  and Ops desk, each with bots, a team, a room, a shared skill and a paused routine. GET
+  /api/team-packages/starters lists them with counts and
+  POST /api/team-packages/starters/:id/install runs the normal team package importer, so installed bots take
+  server defaults, routines arrive paused, and each install logs an admin activity entry; installing twice is
+  allowed and unknown ids are 404. Settings gains a Starter teams section with cards, counts, an Install
+  busy/success/error flow, loading/empty/retry states, and App refreshes bots/teams after install. en/pt-BR/es.
+- Verified live: installing Dev team twice created the expected bots, team, Build room, paused Daily repo check
+  and shared Unified diff skill, logged the install activity, and cleanup restored only Capy/Teste.
+- Suite: 2821 tests (304 files), typecheck 12/12, lint clean.
 ## Next
 
 1. Re-run the eval suite on a live model once OpenCode Go has quota (`apps/evals`, `--base` to the server), including B8 and C; the 2026-10-20 results predate the read auto-allow and the fixes above.
