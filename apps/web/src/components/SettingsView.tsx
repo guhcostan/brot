@@ -399,6 +399,18 @@ function PairingCard({ pairing, onDone }: { pairing: PairingStartResponse; onDon
     const timer = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(timer);
   }, []);
+  const [codeCopied, setCodeCopied] = useState(false);
+  const copyCode = () => {
+    const clipboard = typeof navigator === 'undefined' ? undefined : navigator.clipboard;
+    if (clipboard === undefined || typeof clipboard.writeText !== 'function') return;
+    void clipboard
+      .writeText(pairing.code)
+      .then(() => {
+        setCodeCopied(true);
+        setTimeout(() => setCodeCopied(false), 1500);
+      })
+      .catch(() => undefined);
+  };
   const left = Math.max(0, Math.round((Date.parse(pairing.expiresAt) - now) / 1000));
   const expired = left === 0;
   const clock = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
@@ -432,7 +444,12 @@ function PairingCard({ pairing, onDone }: { pairing: PairingStartResponse; onDon
         </ol>
         <div className="flex flex-col gap-1">
           <span className="text-xs text-ink-2">{t('settings.pairCode')}</span>
-          <span className="font-mono text-2xl font-semibold tracking-[0.2em] tabular-nums">{pairing.code}</span>
+          <span className="flex flex-wrap items-center gap-2">
+            <span className="font-mono text-2xl font-semibold tracking-[0.2em] tabular-nums">{pairing.code}</span>
+            <Button variant="ghost" size="sm" onClick={copyCode} aria-label={t('settings.pairCopyCode')} title={t('settings.pairCopyCode')}>
+              {codeCopied ? t('settings.pairCodeCopied') : t('settings.pairCopyCode')}
+            </Button>
+          </span>
         </div>
         <p className="m-0 text-xs text-ink-2" aria-live="polite">
           {expired ? t('settings.pairExpired') : t('settings.pairExpires', { time: clock })}
