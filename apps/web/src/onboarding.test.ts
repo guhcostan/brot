@@ -8,6 +8,7 @@ import {
   gettingStartedItems,
   readGettingStartedDismissed,
   shouldAutoOpenGettingStarted,
+  workspaceLoadKnown,
   workspaceLooksFresh,
   writeGettingStartedDismissed,
 } from './onboarding';
@@ -64,14 +65,41 @@ describe('local dismissal', () => {
 });
 
 describe('workspaceLooksFresh', () => {
-  it('is fresh with no rooms and only empty or unknown thread lists', () => {
-    expect(workspaceLooksFresh({ rooms: [], threadLists: {} })).toBe(true);
-    expect(workspaceLooksFresh({ rooms: [], threadLists: { bot_1: [], bot_2: [] } })).toBe(true);
+  const bareBot = { ...DEMO_BOTS[0]!, archived: false };
+
+  it('is fresh only when bots, rooms and every non-archived thread list are loaded and empty', () => {
+    expect(workspaceLooksFresh({ bots: [bareBot], rooms: [], threadLists: { [bareBot.id]: [] } })).toBe(true);
+    expect(workspaceLooksFresh({ bots: [], rooms: [], threadLists: {} })).toBe(true);
   });
 
-  it('is not fresh once there is a room or any thread', () => {
-    expect(workspaceLooksFresh({ rooms: DEMO_ROOMS, threadLists: {} })).toBe(false);
-    expect(workspaceLooksFresh({ rooms: [], threadLists: { bot_1: [thread('t1')] } })).toBe(false);
+  it('is not fresh while any piece is unknown', () => {
+    expect(workspaceLooksFresh({ bots: null, rooms: [], threadLists: {} })).toBe(false);
+    expect(workspaceLooksFresh({ bots: [bareBot], rooms: null, threadLists: {} })).toBe(false);
+    expect(workspaceLooksFresh({ bots: [bareBot], rooms: [], threadLists: {} })).toBe(false);
+    expect(workspaceLooksFresh({ bots: [bareBot], rooms: null, threadLists: { [bareBot.id]: [] } })).toBe(false);
+  });
+
+  it('is not fresh once a loaded thread list has a conversation', () => {
+    expect(workspaceLooksFresh({ bots: [bareBot], rooms: [], threadLists: { [bareBot.id]: [thread('t1')] } })).toBe(false);
+  });
+
+  it('is not fresh once rooms are loaded and non-empty', () => {
+    expect(workspaceLooksFresh({ bots: [bareBot], rooms: DEMO_ROOMS, threadLists: { [bareBot.id]: [] } })).toBe(false);
+  });
+
+  it('ignores archived bots and requires only non-archived lists', () => {
+    const archived = { ...bareBot, id: 'bot_archived', archived: true };
+    expect(workspaceLooksFresh({ bots: [bareBot, archived], rooms: [], threadLists: { [bareBot.id]: [] } })).toBe(true);
+  });
+});
+
+describe('workspaceLoadKnown', () => {
+  it('requires the bot and room lists plus every non-archived thread list', () => {
+    const bareBot = { ...DEMO_BOTS[0]!, archived: false };
+    expect(workspaceLoadKnown({ bots: [bareBot], rooms: [], threadLists: { [bareBot.id]: [] } })).toBe(true);
+    expect(workspaceLoadKnown({ bots: [bareBot], rooms: [], threadLists: {} })).toBe(false);
+    expect(workspaceLoadKnown({ bots: null, rooms: [], threadLists: {} })).toBe(false);
+    expect(workspaceLoadKnown({ bots: [bareBot], rooms: null, threadLists: { [bareBot.id]: [] } })).toBe(false);
   });
 });
 
