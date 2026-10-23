@@ -27,6 +27,14 @@ export function writeGettingStartedDismissed(dismissed = true): boolean {
   }
 }
 
+/**
+ * Clears the persisted dismissal so Getting started can open again (Help → Show getting started again).
+ * Returns false when storage is unavailable (SSR, privacy mode); the caller still opens the panel for this session.
+ */
+export function clearGettingStartedDismissed(): boolean {
+  return writeGettingStartedDismissed(false);
+}
+
 /** The loaded state freshness is judged from; null means "not known yet", which is never fresh. */
 export interface WorkspaceLoadState {
   bots: readonly Bot[] | null;

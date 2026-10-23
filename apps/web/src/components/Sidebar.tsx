@@ -5,7 +5,7 @@ import type { MessageSearchFilter, Room } from '../data/client';
 import { avatarOf } from '../format';
 import { t, type Locale } from '../i18n';
 import type { Selection } from '../state/store';
-import { Bell, Board, Chart, ChevronRight, Clock, Gear, Inbox, Pencil, Plus, Sparkle } from './icons';
+import { Bell, Board, Chart, ChevronRight, Clock, Gear, Help, Inbox, Pencil, Plus, Sparkle } from './icons';
 import { MessageSearchResults } from './MessageSearchResults';
 import { useLiveMood } from './mood';
 import { memberSummary } from './RoomView';
@@ -44,6 +44,8 @@ export interface SidebarProps {
   onSearchMessages: (filter: MessageSearchFilter) => Promise<SearchHit[]>;
   /** Reopens the Getting started panel. */
   onOpenGettingStarted?: (() => void) | undefined;
+  /** Opens the Help & shortcuts dialog. */
+  onOpenHelp?: (() => void) | undefined;
   /** Re-renders the sidebar's copy when the language changes. */
   locale: Locale;
   /** Bots whose thread rows start expanded. */
@@ -89,6 +91,7 @@ export function Sidebar({
   onEditTeam,
   onSearchMessages,
   onOpenGettingStarted,
+  onOpenHelp,
   defaultExpanded,
   className,
 }: SidebarProps): ReactElement {
@@ -466,6 +469,14 @@ export function Sidebar({
               <Sparkle size={15} />
             </span>
             <span className="flex-1 font-medium">{t('gettingStarted.open')}</span>
+          </button>
+        ) : null}
+        {onOpenHelp !== undefined ? (
+          <button type="button" onClick={onOpenHelp} className={cx(rowClass, 'py-1.5 text-sm text-ink-2 hover:text-ink')}>
+            <span className="flex size-8 flex-none items-center justify-center">
+              <Help size={15} />
+            </span>
+            <span className="flex-1 font-medium">{t('help.open')}</span>
           </button>
         ) : null}
         <button

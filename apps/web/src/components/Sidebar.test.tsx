@@ -64,7 +64,8 @@ function render(overrides: Partial<SidebarProps> = {}): string {
 }
 
 /** Server markup escapes quotes, so compare against the decoded text. */
-const textOf = (html: string): string => html.replaceAll('&#x27;', "'").replaceAll('&quot;', '"');
+const textOf = (html: string): string =>
+  html.replaceAll('&#x27;', "'").replaceAll('&quot;', '"').replaceAll('&lt;', '<').replaceAll('&gt;', '>').replaceAll('&amp;', '&');
 
 describe('sidebar threads', () => {
   it('renders a bot thread titles and a new-thread row once expanded', () => {
@@ -171,11 +172,18 @@ describe('sidebar teams', () => {
   });
 });
 
-describe('sidebar getting started action', () => {
-  it('shows the help action only when the app offers it', () => {
+describe('sidebar footer actions', () => {
+  it('shows the getting started action only when the app offers it', () => {
     expect(textOf(render())).not.toContain(t('gettingStarted.open'));
 
     const withAction = textOf(render({ onOpenGettingStarted: () => undefined }));
     expect(withAction).toContain(t('gettingStarted.open'));
+  });
+
+  it('shows the help & shortcuts action only when the app offers it', () => {
+    expect(textOf(render())).not.toContain(t('help.open'));
+
+    const withAction = textOf(render({ onOpenHelp: () => undefined }));
+    expect(withAction).toContain(t('help.open'));
   });
 });

@@ -228,6 +228,14 @@ export const Phone = ({ size }: { size?: number }) => (
   </Icon>
 );
 
+export const Help = ({ size }: { size?: number }) => (
+  <Icon size={size}>
+    <circle cx="10" cy="10" r="7.25" />
+    <path d="M8.1 7.9a1.9 1.9 0 1 1 2.9 1.64c-.65.4-.9.8-.9 1.66" />
+    <path d="M10 14.1h.01" />
+  </Icon>
+);
+
 export const Sparkle = ({ size }: { size?: number }) => (
   <Icon size={size}>
     <path d="M10 3.5c.5 3.2 1.8 4.5 5 5-3.2.5-4.5 1.8-5 5-.5-3.2-1.8-4.5-5-5 3.2-.5 4.5-1.8 5-5Z" />

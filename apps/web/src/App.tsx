@@ -25,7 +25,9 @@ import { inbox, membersOf, statusOfBot, statusOfRoom, taskList, threadStatusOf, 
 import { tasksForBot, tasksForRoom } from './state/tasks';
 import { emptyThread, pendingApprovals } from './state/thread';
 import { GettingStartedPanel } from './components/GettingStartedPanel';
+import { HelpShortcutsDialog } from './components/HelpShortcutsDialog';
 import {
+  clearGettingStartedDismissed,
   readGettingStartedDismissed,
   shouldAutoOpenGettingStarted,
   workspaceLoadKnown,
@@ -92,6 +94,7 @@ export function App(): ReactElement {
   }, [loadVoice]);
   const voice = useMemo<VoiceContext>(() => ({ status: voiceStatus, speak: client.speakText }), [voiceStatus, client]);
   const [gettingStartedOpen, setGettingStartedOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
   const [gettingStartedDismissed, setGettingStartedDismissed] = useState(false);
   const [gettingStartedRemindLater, setGettingStartedRemindLater] = useState(false);
   const [gettingStartedDismissalLoaded, setGettingStartedDismissalLoaded] = useState(false);
@@ -188,6 +191,13 @@ export function App(): ReactElement {
     writeGettingStartedDismissed();
     setGettingStartedDismissed(true);
     setGettingStartedOpen(false);
+  };
+  const showGettingStartedAgain = () => {
+    clearGettingStartedDismissed();
+    setGettingStartedDismissed(false);
+    setGettingStartedRemindLater(false);
+    setHelpOpen(false);
+    setGettingStartedOpen(true);
   };
   const gettingStartedSayHello = () => {
     closeGettingStarted();
@@ -515,6 +525,7 @@ export function App(): ReactElement {
             onEditTeam={(teamId) => setTeamDialog({ teamId })}
             onSearchMessages={client.searchMessages}
             onOpenGettingStarted={() => setGettingStartedOpen(true)}
+            onOpenHelp={() => setHelpOpen(true)}
             locale={locale}
             className={pane === 'bots' ? 'flex' : 'hidden md:flex'}
           />
@@ -550,7 +561,8 @@ export function App(): ReactElement {
         ) : null}
 
         <NewRoomDialog open={newRoomOpen} bots={state.bots.filter((entry) => !entry.archived)} onClose={() => setNewRoomOpen(false)} onCreate={createRoom} />
-        <GettingStartedPanel
+        <HelpShortcutsDialog open={helpOpen} onClose={() => setHelpOpen(false)} onShowGettingStarted={showGettingStartedAgain} />
+      <GettingStartedPanel
         open={gettingStartedOpen}
         bots={state.bots}
         rooms={state.rooms}

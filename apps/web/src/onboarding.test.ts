@@ -6,6 +6,7 @@ import { emptyThread } from './state/thread';
 import {
   GETTING_STARTED_DISMISSED_KEY,
   gettingStartedItems,
+  clearGettingStartedDismissed,
   readGettingStartedDismissed,
   shouldAutoOpenGettingStarted,
   workspaceLoadKnown,
@@ -44,6 +45,33 @@ describe('local dismissal', () => {
     expect(readGettingStartedDismissed()).toBe(true);
     expect(writeGettingStartedDismissed(false)).toBe(true);
     expect(readGettingStartedDismissed()).toBe(false);
+  });
+
+  it('clears a saved dismissal so Getting started can open again', () => {
+    const store = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: (key: string, value: string) => store.set(key, value),
+      removeItem: (key: string) => store.delete(key),
+    });
+    writeGettingStartedDismissed();
+
+    expect(readGettingStartedDismissed()).toBe(true);
+    expect(clearGettingStartedDismissed()).toBe(true);
+    expect(readGettingStartedDismissed()).toBe(false);
+    expect(store.has(GETTING_STARTED_DISMISSED_KEY)).toBe(false);
+  });
+
+  it('reports false when clearing without usable storage', () => {
+    vi.stubGlobal('localStorage', undefined);
+    expect(clearGettingStartedDismissed()).toBe(false);
+
+    vi.stubGlobal('localStorage', {
+      removeItem: () => {
+        throw new Error('denied');
+      },
+    });
+    expect(clearGettingStartedDismissed()).toBe(false);
   });
 
   it('survives a throwing storage implementation', () => {
