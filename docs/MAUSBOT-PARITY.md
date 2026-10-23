@@ -76,7 +76,7 @@ Legend: ✅ parity or better · 🟡 partial · ❌ absent · 🎯 current wave.
 | Custom MCP servers (stdio/HTTP, per-bot) | ✅ | ✅ stdio/HTTP servers with vault secrets, handshake test, Settings panel and per-bot grants | W5 done |
 | Approval levels per bot/thread + decision log | ✅ | ✅ per-bot ask/edits modes with a safety floor, decision log with CSV export, Activity view and boot-expired orphan cards | W6 done |
 | Routines: cron/weekday with timezone, receipts, recovery, calendar | ✅ | ✅ runs, receipts, catch-up, timezone, routines page; calendar next | W3 done |
-| Webhook triggers | ✅ | 🟡 receiver exists, no signed secret UX | W6 |
+| Webhook triggers | ✅ | ✅ receiver on its own port, real URL with copy and secret rotation | W6 done |
 | App-event triggers | ✅ | ❌ | W6 |
 | Memory: MEMORY.md + topics + recall + upkeep + journal/undo + About me | ✅ | ✅ recall, caps, editors, About-me facts, journal with undo and a deterministic upkeep merge | W4 done |
 | Skills: SKILL.md import/export, per-bot on/off, learned-skill approval | ✅ | ✅ SKILL.md import/export in the UI with prompt budgets; learned-skill review next | W4 |

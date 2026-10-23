@@ -730,6 +730,21 @@ mapped in `docs/MAUSBOT-PARITY.md` (34 bots / 7 teams, 33 bots with a browser an
   / 6.5M tokens in, so no checks were evaluated; the case is simply expensive and needs either a much larger
   cap or a trimmed fixture. The runner cleaned up all six bots and containers.
 - Suite: 2866 tests (312 files), typecheck 12/12, lint clean.
+## Wave 49: webhook UX with rotation (2026-10-23)
+
+- **Webhook triggers.** GET /api/webhooks reports the receiver's port (the bound one when configured as 0)
+  so the UI can show a routine's real trigger URL; POST /api/routines/:id/webhook/rotate gives a webhook
+  routine a new randomBytes(32) secret and persists it, so the old URL is refused immediately (the receiver
+  resolves secrets from the DB on every request), cron routines answer 409, unknown ids 404, and the
+  rotation is recorded in admin activity. Webhook routine creation is unchanged.
+- **UI.** Webhook rows in the routines list show a Webhook chip, the URL with a Copy action and a Rotate
+  secret action behind a danger confirmation; the routine dialog shows the same URL with a credential
+  warning and rotation that refreshes the displayed routine. Without a loaded port the UI shows the secret
+  plus a hint instead of a broken URL. en/pt-BR/es.
+- Verified live: trigger 202, rotation produced a new 43-char secret, old secret 404, new secret 202, cron
+  rotation 409, activity `Rotated webhook secret for routine "Hook routine"`, and cleanup removed the temp
+  bot/routines.
+- Suite: 2892 tests (316 files), typecheck 12/12, lint clean.
 ## Next
 
 1. Re-run the eval suite on a live model once OpenCode Go has quota (`apps/evals`, `--base` to the server), including B8 and C; the 2026-10-20 results predate the read auto-allow and the fixes above.
