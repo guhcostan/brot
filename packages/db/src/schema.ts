@@ -71,6 +71,10 @@ export const bots = sqliteTable('bots', {
     .notNull()
     .default(sql`'{"mode":"deny","allow":[]}'`),
   teamBudgetUsd: real('team_budget_usd'),
+  /** Maximum USD one run of this bot may spend. Null means no cap. */
+  runBudgetUsd: real('run_budget_usd'),
+  /** Maximum USD this bot may spend per UTC day. Null means no cap. */
+  dailyBudgetUsd: real('daily_budget_usd'),
   pinned: integer('pinned', { mode: 'boolean' }).notNull().default(false),
   archived: integer('archived', { mode: 'boolean' }).notNull().default(false),
   createdAt: text('created_at').notNull(),

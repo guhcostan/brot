@@ -1103,6 +1103,146 @@ function gatedEngine(): { engine: FakeEngine; started: string[]; release(input: 
   return { engine, started, release: (input) => gates.get(input)?.() };
 }
 
+describe('budget caps', () => {
+  /** Adds a finished run earlier today with the given cost, so the daily sum sees it. */
+  async function spendToday(ctx: TestContext, botId: string, threadId: string, costUsd: number): Promise<void> {
+    const run = await ctx.services.repos.runs.create({ threadId, botId, engine: 'mock' });
+    await ctx.services.repos.runs.update(run.id, { costUsd });
+  }
+
+  it('fails a run instantly when the daily budget is already spent, before any engine or computer', async () => {
+    const sandbox = fakeProvider('docker');
+    const engine = fakeEngine(replies);
+    const ctx = await contextWith({
+      engines: createEngineRegistry([engine.driver]),
+      computers: { sandbox: sandbox.provider },
+    });
+    const { bot, threadId } = await botAndThread(ctx, { computer: 'sandbox' });
+    await ctx.services.repos.bots.update(bot.id, { dailyBudgetUsd: 0.01 });
+    await spendToday(ctx, bot.id, threadId, 0.02);
+
+    const { runId, terminal } = await runToEnd(ctx, threadId);
+
+    expect(terminal.type).toBe('run.failed');
+    expect(terminal.type === 'run.failed' && terminal.error).toBe(
+      'Daily budget for "Ada" is exhausted: spent $0.02 of $0.01 today.',
+    );
+    expect(await ctx.services.repos.runs.get(runId)).toMatchObject({ status: 'failed' });
+    expect(engine.contexts).toEqual([]);
+    expect(sandbox.ensures).toEqual([]);
+  });
+
+  it('fails at exactly the daily cap, and starts just below it', async () => {
+    const engine = fakeEngine(replies);
+    const ctx = await contextWith({ engines: createEngineRegistry([engine.driver]) });
+
+    const atCap = await botAndThread(ctx, { computer: 'none' });
+    await ctx.services.repos.bots.update(atCap.bot.id, { dailyBudgetUsd: 0.01 });
+    await spendToday(ctx, atCap.bot.id, atCap.threadId, 0.01);
+    const failed = await runToEnd(ctx, atCap.threadId);
+    expect(failed.terminal.type).toBe('run.failed');
+    expect(engine.contexts).toEqual([]);
+
+    const below = await botAndThread(ctx, { computer: 'none' });
+    await ctx.services.repos.bots.update(below.bot.id, { dailyBudgetUsd: 0.01 });
+    await spendToday(ctx, below.bot.id, below.threadId, 0.005);
+    const completed = await runToEnd(ctx, below.threadId);
+    expect(completed.terminal.type).toBe('run.completed');
+    expect(engine.contexts).toHaveLength(1);
+  });
+
+  it('treats a daily budget of 0 as no spending allowed', async () => {
+    const engine = fakeEngine(replies);
+    const ctx = await contextWith({ engines: createEngineRegistry([engine.driver]) });
+    const { bot, threadId } = await botAndThread(ctx, { computer: 'none' });
+    await ctx.services.repos.bots.update(bot.id, { dailyBudgetUsd: 0 });
+
+    const { terminal } = await runToEnd(ctx, threadId);
+
+    expect(terminal.type).toBe('run.failed');
+    expect(terminal.type === 'run.failed' && terminal.error).toBe(
+      'Daily budget for "Ada" is exhausted: spent $0 of $0 today.',
+    );
+    expect(engine.contexts).toEqual([]);
+  });
+
+  it('aborts a run that crosses its run budget, keeping partial text and not cancelling it', async () => {
+    let ctx!: TestContext;
+    let engineCalls = 0;
+    const engine = fakeEngine(async function* (run) {
+      engineCalls += 1;
+      if (engineCalls > 1) throw new Error('a fallback must not be attempted after a budget abort');
+      yield { type: 'text.delta', delta: 'partial answer' };
+      const route = run.llm;
+      if (route === undefined) throw new Error('the run has no llm route');
+      const res = await ctx.services.llm.route.request(`${new URL(route.baseUrl).pathname}/chat/completions`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${route.token}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ model: route.model, messages: [] }),
+      });
+      // The relay reports usage when the body ends; give the harness time to settle the run.
+      await res.text();
+      for (let attempt = 0; attempt < 200; attempt += 1) {
+        if ((await ctx.services.repos.runs.get(run.runId))?.status === 'failed') break;
+        await new Promise((resolve) => setTimeout(resolve, 5));
+      }
+      yield { type: 'text.delta', delta: 'after budget' };
+    });
+    ctx = await contextWith({
+      engines: createEngineRegistry([engine.driver]),
+      llm: {
+        providers: [{ ...FAKE_PROVIDER, models: [{ id: 'model-1', cost: { input: 1, output: 2 } }] }],
+        fetch: async () => Response.json({ usage: { prompt_tokens: 10, completion_tokens: 5 } }),
+      },
+    });
+    const { bot, threadId } = await botAndThread(ctx, { computer: 'none' });
+    await ctx.services.repos.bots.update(bot.id, { runBudgetUsd: 0.00001, fallbackModels: ['fake/model-2'] });
+
+    const { runId, terminal, events } = await runToEnd(ctx, threadId);
+
+    const message = 'Run budget for "Ada" exceeded: spent $0.00002 of $0.00001.';
+    expect(terminal.type).toBe('run.failed');
+    expect(terminal.type === 'run.failed' && terminal.error).toBe(message);
+    expect(engineCalls).toBe(1);
+    expect(await ctx.services.repos.runs.get(runId)).toMatchObject({ status: 'failed', error: message });
+    const deltas = events.flatMap((event) => (event.type === 'message.delta' ? [event.delta] : []));
+    expect(deltas.join('')).toBe('partial answer');
+    expect(events.filter((event) => event.type === 'message.completed' && event.message.role === 'assistant')).toHaveLength(0);
+    expect(events.filter((event) => event.type === 'run.started')).toHaveLength(1);
+    const costs = events.filter((event) => event.type === 'cost.updated');
+    expect(costs.at(-1)).toMatchObject({ runId, costUsd: 0.00002 });
+  });
+
+  it('lets a run under its run budget finish', async () => {
+    let ctx!: TestContext;
+    const engine = fakeEngine(async function* (run) {
+      if (run.llm !== undefined) {
+        const route = run.llm;
+        const res = await ctx.services.llm.route.request(`${new URL(route.baseUrl).pathname}/chat/completions`, {
+          method: 'POST',
+          headers: { authorization: `Bearer ${route.token}`, 'content-type': 'application/json' },
+          body: JSON.stringify({ model: route.model, messages: [] }),
+        });
+        await res.text();
+      }
+      yield { type: 'text.delta', delta: 'done' };
+    });
+    ctx = await contextWith({
+      engines: createEngineRegistry([engine.driver]),
+      llm: {
+        providers: [{ ...FAKE_PROVIDER, models: [{ id: 'model-1', cost: { input: 1, output: 2 } }] }],
+        fetch: async () => Response.json({ usage: { prompt_tokens: 2, completion_tokens: 1 } }),
+      },
+    });
+    const { bot, threadId } = await botAndThread(ctx, { computer: 'none' });
+    await ctx.services.repos.bots.update(bot.id, { runBudgetUsd: 0.001 });
+
+    const { terminal } = await runToEnd(ctx, threadId);
+
+    expect(terminal.type).toBe('run.completed');
+  });
+});
+
 describe('run queue', () => {
   it('queues a second run for the same bot in the same thread until the first ends, and keeps their order', async () => {
     const gate = gatedEngine();

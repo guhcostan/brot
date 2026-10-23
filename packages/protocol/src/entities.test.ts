@@ -387,6 +387,19 @@ describe('rooms, messages, and team tasks', () => {
     expect(() => Message.parse({ ...message, mentions: 'bot_2' })).toThrow();
   });
 
+  it('round-trips run and daily budget caps, and leaves them absent when unset', () => {
+    const budgeted = { ...bot, runBudgetUsd: 0.25, dailyBudgetUsd: 5 };
+    expect(roundTrip(Bot, budgeted)).toEqual(budgeted);
+    expect(Bot.parse(bot).runBudgetUsd).toBeUndefined();
+    expect(Bot.parse(bot).dailyBudgetUsd).toBeUndefined();
+    expect(Bot.parse({ ...bot, runBudgetUsd: 0, dailyBudgetUsd: 0 })).toMatchObject({
+      runBudgetUsd: 0,
+      dailyBudgetUsd: 0,
+    });
+    expect(() => Bot.parse({ ...bot, runBudgetUsd: -1 })).toThrow();
+    expect(() => Bot.parse({ ...bot, dailyBudgetUsd: Number.POSITIVE_INFINITY })).toThrow();
+  });
+
   it('accepts a bot with a team budget and rejects a negative one', () => {
     const budgeted = {
       id: 'bot_1',

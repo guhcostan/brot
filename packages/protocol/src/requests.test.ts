@@ -363,6 +363,25 @@ describe('room, membership, and task requests', () => {
     expect(() => UpdateTask.parse({ status: 'paused' })).toThrow();
   });
 
+  it('accepts run and daily budget caps on a bot and lets an update clear them', () => {
+    expect(CreateBot.parse({ name: 'Ada', job: 'Researcher', runBudgetUsd: 0.5 }).runBudgetUsd).toBe(0.5);
+    expect(CreateBot.parse({ name: 'Ada', job: 'Researcher', dailyBudgetUsd: 5 }).dailyBudgetUsd).toBe(5);
+    expect(CreateBot.parse({ name: 'Ada', job: 'Researcher', runBudgetUsd: 0 }).runBudgetUsd).toBe(0);
+    expect(CreateBot.parse({ name: 'Ada', job: 'Researcher' }).runBudgetUsd).toBeUndefined();
+
+    expect(UpdateBot.parse({ runBudgetUsd: null })).toEqual({ runBudgetUsd: null });
+    expect(UpdateBot.parse({ dailyBudgetUsd: null })).toEqual({ dailyBudgetUsd: null });
+    expect(UpdateBot.parse({ runBudgetUsd: 1.5, dailyBudgetUsd: 10 })).toEqual({
+      runBudgetUsd: 1.5,
+      dailyBudgetUsd: 10,
+    });
+
+    expect(() => CreateBot.parse({ name: 'Ada', job: 'Researcher', runBudgetUsd: -0.01 })).toThrow();
+    expect(() => CreateBot.parse({ name: 'Ada', job: 'Researcher', dailyBudgetUsd: Number.NaN })).toThrow();
+    expect(() => UpdateBot.parse({ runBudgetUsd: Number.POSITIVE_INFINITY })).toThrow();
+    expect(() => UpdateBot.parse({ dailyBudgetUsd: '5' })).toThrow();
+  });
+
   it('accepts a team id on CreateBot and lets UpdateBot clear it with null', () => {
     expect(CreateBot.parse({ name: 'Onça', job: 'Lead', teamId: 'team_1' }).teamId).toBe('team_1');
     expect(CreateBot.parse({ name: 'Onça', job: 'Lead' }).teamId).toBeUndefined();

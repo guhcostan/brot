@@ -27,6 +27,8 @@ export function toBot(row: BotRow): Bot {
     ...(row.mcpServerIds === null ? {} : { mcpServerIds: row.mcpServerIds }),
     egress: row.egress,
     teamBudgetUsd: row.teamBudgetUsd ?? undefined,
+    runBudgetUsd: row.runBudgetUsd ?? undefined,
+    dailyBudgetUsd: row.dailyBudgetUsd ?? undefined,
     pinned: row.pinned,
     archived: row.archived,
     createdAt: row.createdAt,

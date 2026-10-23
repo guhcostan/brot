@@ -63,6 +63,21 @@ describe('bots', () => {
     expect((await repos.bots.update(off.id, { notifications: true }))?.notifications).toBeUndefined();
   });
 
+  it('stores the run and daily budget caps and leaves them unset when absent', async () => {
+    const plain = await repos.bots.create({ name: 'Ada', job: 'x' });
+    expect(plain.runBudgetUsd).toBeUndefined();
+    expect(plain.dailyBudgetUsd).toBeUndefined();
+
+    const budgeted = await repos.bots.create({ name: 'Bo', job: 'x', runBudgetUsd: 0.5, dailyBudgetUsd: 5 });
+    expect(budgeted).toMatchObject({ runBudgetUsd: 0.5, dailyBudgetUsd: 5 });
+    expect((await repos.bots.get(budgeted.id))?.dailyBudgetUsd).toBe(5);
+    expect((await repos.bots.list()).find((bot) => bot.id === budgeted.id)?.runBudgetUsd).toBe(0.5);
+
+    expect((await repos.bots.update(budgeted.id, { runBudgetUsd: 0 }))?.runBudgetUsd).toBe(0);
+    expect((await repos.bots.update(budgeted.id, { runBudgetUsd: null }))?.runBudgetUsd).toBeUndefined();
+    expect((await repos.bots.update(budgeted.id, { dailyBudgetUsd: null }))?.dailyBudgetUsd).toBeUndefined();
+  });
+
   it('stores the fallback chain, keeps its order, and clears it', async () => {
     const plain = await repos.bots.create({ name: 'Ada', job: 'x' });
     expect(plain).not.toHaveProperty('fallbackModels');
@@ -426,6 +441,40 @@ describe('threads', () => {
     expect((touched?.updatedAt ?? '') >= thread.updatedAt).toBe(true);
     expect(touched?.title).toBe(thread.title);
     expect(await repos.threads.touch('missing')).toBeUndefined();
+  });
+});
+
+describe('run cost since', () => {
+  it('sums only the bot\'s runs started at or after the given instant', async () => {
+    const bot = await repos.bots.create({ name: 'Ada', job: 'x' });
+    const other = await repos.bots.create({ name: 'Bo', job: 'x' });
+    const thread = await repos.threads.create(bot.id);
+    const otherThread = await repos.threads.create(other.id);
+    const today = new Date();
+    const dayStart = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
+    const yesterday = new Date(dayStart.getTime() - 24 * 60 * 60 * 1000).toISOString();
+
+    const earlyToday = await repos.runs.create({ threadId: thread.id, botId: bot.id, engine: 'mock' });
+    await repos.runs.update(earlyToday.id, { costUsd: 0.25 });
+    const laterToday = await repos.runs.create({ threadId: thread.id, botId: bot.id, engine: 'mock' });
+    await repos.runs.update(laterToday.id, { costUsd: 0.5 });
+    const yesterdayRun = await repos.runs.create({ threadId: thread.id, botId: bot.id, engine: 'mock' });
+    await repos.runs.update(yesterdayRun.id, { costUsd: 9 });
+    const otherBotRun = await repos.runs.create({ threadId: otherThread.id, botId: other.id, engine: 'mock' });
+    await repos.runs.update(otherBotRun.id, { costUsd: 7 });
+    for (const [id, startedAt] of [
+      [earlyToday.id, new Date(dayStart.getTime() + 1000).toISOString()],
+      [laterToday.id, new Date(dayStart.getTime() + 2000).toISOString()],
+      [yesterdayRun.id, yesterday],
+      [otherBotRun.id, new Date(dayStart.getTime() + 3000).toISOString()],
+    ] as const) {
+      await handle.client.execute({ sql: 'UPDATE runs SET started_at = ? WHERE id = ?', args: [startedAt, id] });
+    }
+
+    expect(await repos.runs.costSince(bot.id, dayStart.toISOString())).toBeCloseTo(0.75, 10);
+    expect(await repos.runs.costSince(bot.id, new Date(dayStart.getTime() + 1500).toISOString())).toBeCloseTo(0.5, 10);
+    expect(await repos.runs.costSince(other.id, dayStart.toISOString())).toBeCloseTo(7, 10);
+    expect(await repos.runs.costSince(bot.id, new Date(dayStart.getTime() + 86_400_000).toISOString())).toBe(0);
   });
 });
 

@@ -119,6 +119,10 @@ export const Bot = z.object({
    * When several bots in a chain set one, the smallest applies. Absent means no cap.
    */
   teamBudgetUsd: z.number().nonnegative().optional(),
+  /** Maximum USD one run of this bot may spend. 0 allows no spending; absent means no cap. */
+  runBudgetUsd: z.number().finite().nonnegative().optional(),
+  /** Maximum USD this bot may spend per UTC day. 0 allows no spending; absent means no cap. */
+  dailyBudgetUsd: z.number().finite().nonnegative().optional(),
   pinned: z.boolean(),
   archived: z.boolean(),
   createdAt: IsoDateTime,

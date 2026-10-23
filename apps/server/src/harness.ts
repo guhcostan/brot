@@ -136,6 +136,12 @@ interface ActiveRun {
   messageId: string;
   /** The model the run is currently using. It changes when a fallback takes over. */
   model?: string;
+  /** The bot's name at the time the run started, for budget messages. */
+  botName: string;
+  /** The bot's per-run USD cap at the time the run started. Absent means no cap. */
+  runBudgetUsd?: number;
+  /** Set when the run budget was crossed, so the abort can never be read as a user cancel. */
+  budgetViolation?: string;
   controller: AbortController;
   text: string;
   usage: { tokensIn: number; tokensOut: number; costUsd: number };
@@ -275,6 +281,8 @@ export function createHarness(deps: HarnessDeps): Harness {
       laneKey: key,
       messageId: crypto.randomUUID(),
       ...(model === undefined ? {} : { model }),
+      botName: bot.name,
+      ...(bot.runBudgetUsd === undefined ? {} : { runBudgetUsd: bot.runBudgetUsd }),
       controller: new AbortController(),
       text: '',
       usage: { tokensIn: 0, tokensOut: 0, costUsd: 0 },
@@ -342,6 +350,15 @@ export function createHarness(deps: HarnessDeps): Harness {
       const thread = await repos.threads.get(state.threadId);
       const bot = await repos.bots.get(state.botId);
       if (!thread || !bot) throw new Error(`Run ${state.runId} lost its thread or bot before it started`);
+      // The daily cap is checked before the engine or a computer starts: one cheap sum of the bot's runs today.
+      if (bot.dailyBudgetUsd !== undefined) {
+        const spent = await repos.runs.costSince(bot.id, utcDayStart());
+        if (spent >= bot.dailyBudgetUsd) {
+          throw new Error(
+            `Daily budget for "${bot.name}" is exhausted: spent $${spent} of $${bot.dailyBudgetUsd} today.`,
+          );
+        }
+      }
       const driver = await readyDriver(bot);
       const relayed = RELAYED_ENGINES.has(bot.engine);
       const models = relayed ? modelCandidatesFor(thread, bot) : [];
@@ -674,10 +691,28 @@ export function createHarness(deps: HarnessDeps): Harness {
     chains.recordUsage(runId, usage.costUsd);
     await repos.runs.update(runId, { ...state.usage });
     await bus.publish({ type: 'cost.updated', threadId, runId, ...state.usage });
+    enforceRunBudget(state);
+  }
+
+  /**
+   * Stops a run whose accumulated cost crossed its per-run cap. The violation flag is set before aborting, so the
+   * abort is never read as a user cancel; the run settles as failed and no fallback model is tried afterwards.
+   */
+  function enforceRunBudget(state: ActiveRun): void {
+    const budget = state.runBudgetUsd;
+    if (budget === undefined || state.settled || state.budgetViolation !== undefined) return;
+    if (state.usage.costUsd <= budget) return;
+    const message = `Run budget for "${state.botName}" exceeded: spent $${state.usage.costUsd} of $${budget}.`;
+    state.budgetViolation = message;
+    state.controller.abort();
+    void settle(state, 'failed', message).catch((error: unknown) => {
+      console.error(`run ${state.runId} could not be settled after its budget was exceeded`, error);
+    });
   }
 
   async function complete(state: ActiveRun): Promise<void> {
-    if (state.settled) return;
+    // A budget abort can settle the run while the engine is finishing; never mark that run completed.
+    if (state.settled || state.budgetViolation !== undefined) return;
     const message = await repos.messages.create({
       id: state.messageId,
       threadId: state.threadId,
@@ -804,6 +839,11 @@ function outcomeOf(state: ActiveRun): BotRunOutcome {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** Midnight UTC of `now`'s day, as ISO. The daily budget window is [this, now). */
+function utcDayStart(now = new Date()): string {
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())).toISOString();
 }
 
 /** A stable, opaque id for one bot's conversation in one thread. Providers see this, never the raw ids. */

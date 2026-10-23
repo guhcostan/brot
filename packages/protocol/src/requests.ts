@@ -41,6 +41,9 @@ const ModelRef = z.string().refine((ref) => {
   return slash > 0 && slash < ref.length - 1;
 }, 'model must be <provider>/<model>, for example opencode-go/deepseek-v4.1-flash');
 
+/** A USD budget: a finite, non-negative number. 0 allows no spending. */
+const BudgetUsd = z.number().finite().nonnegative();
+
 /** An ordered fallback chain: at most 3 refs, none repeated. */
 const FallbackModels = z
   .array(ModelRef)
@@ -69,6 +72,10 @@ export const CreateBot = z
     teamId: z.string().min(1).optional(),
     egress: EgressPolicy.default(defaultEgressPolicy),
     teamBudgetUsd: z.number().nonnegative().optional(),
+    /** Maximum USD one run may spend. */
+    runBudgetUsd: BudgetUsd.optional(),
+    /** Maximum USD the bot may spend per UTC day. */
+    dailyBudgetUsd: BudgetUsd.optional(),
     hostAcknowledged: z.boolean().optional(),
   })
   .superRefine(requireHostAcknowledgement);
@@ -101,6 +108,10 @@ export const UpdateBot = z
     egress: EgressPolicy.optional(),
     /** `null` removes the cap. */
     teamBudgetUsd: z.number().nonnegative().nullable().optional(),
+    /** `null` removes the per-run cap. */
+    runBudgetUsd: BudgetUsd.nullable().optional(),
+    /** `null` removes the per-day cap. */
+    dailyBudgetUsd: BudgetUsd.nullable().optional(),
     hostAcknowledged: z.boolean().optional(),
     pinned: z.boolean().optional(),
     archived: z.boolean().optional(),

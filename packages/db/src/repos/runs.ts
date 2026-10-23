@@ -1,4 +1,4 @@
-import { and, asc, eq, gte, lt } from 'drizzle-orm';
+import { and, asc, eq, gte, lt, sql } from 'drizzle-orm';
 import { RunStatus, type Run } from '@brot/protocol';
 import type { Db } from '../client';
 import { runs } from '../schema';
@@ -78,6 +78,19 @@ export function createRunRepo(db: Db) {
         )
         .orderBy(asc(runs.startedAt), asc(runs.id));
       return rows.map(toRun);
+    },
+
+    /**
+     * Total cost of a bot's runs that started at or after `sinceIso`. One query, cheap enough for the daily
+     * budget check at the start of every run; the bound is normalized to ISO to match the stored timestamps.
+     */
+    async costSince(botId: string, sinceIso: string): Promise<number> {
+      const since = new Date(sinceIso).toISOString();
+      const [row] = await db
+        .select({ total: sql<number>`coalesce(sum(${runs.costUsd}), 0)` })
+        .from(runs)
+        .where(and(eq(runs.botId, botId), gte(runs.startedAt, since)));
+      return Number(row?.total ?? 0);
     },
 
     async create(input: { threadId: string; botId: string; engine: string; model?: string }): Promise<Run> {
