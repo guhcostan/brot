@@ -19,6 +19,7 @@ import type {
   ResolveApproval,
   Routine,
   RoutineRun,
+  RoomDeciderSettings,
   RoutineRunStatus,
   SearchHit,
   Skill,
@@ -41,6 +42,7 @@ import {
   CreateSkill,
   CreateTeam,
   CreateThread,
+  UpdateRoomDeciderSettings,
   DecisionQuery,
   DESKTOP_HEIGHT,
   DESKTOP_WIDTH,
@@ -85,6 +87,7 @@ import {
   type TaskFilter,
   type VoiceInfo,
   type VoiceSettings,
+  providerSupportsDecider,
 } from './client';
 import { applyInput, navigate, newScreen, renderScreen, type FakeScreen } from './mockComputer';
 import {
@@ -118,6 +121,7 @@ import {
 import { findMentions } from '../mentions';
 import { skillFileFilename } from '../skillFileName';
 
+
 import { buildSearchSnippet } from '../search';
 import { DEFAULT_SYSTEM_VOICE, silentWavBlob, voiceTextAllowed } from '../voice';
 
@@ -139,6 +143,7 @@ export const DEMO_PROVIDERS: Provider[] = [
     label: 'OpenCode Go',
     configured: true,
     secretName: 'OPENCODE_API_KEY',
+    api: 'openai-completions',
     models: [
       { id: 'opencode-go/deepseek-v4.1-flash', label: 'DeepSeek V4.1 Flash' },
       { id: 'opencode-go/deepseek-v4.1', label: 'DeepSeek V4.1' },
@@ -149,6 +154,7 @@ export const DEMO_PROVIDERS: Provider[] = [
     label: 'DeepSeek',
     configured: false,
     secretName: 'DEEPSEEK_API_KEY',
+    api: 'openai-completions',
     models: [{ id: 'deepseek/deepseek-v4.1', label: 'DeepSeek V4.1' }],
   },
   {
@@ -156,6 +162,7 @@ export const DEMO_PROVIDERS: Provider[] = [
     label: 'Anthropic',
     configured: false,
     secretName: 'ANTHROPIC_API_KEY',
+    api: 'anthropic-messages',
     models: [
       { id: 'anthropic/claude-sonnet', label: 'Claude Sonnet' },
       { id: 'anthropic/claude-haiku', label: 'Claude Haiku' },
@@ -293,6 +300,7 @@ export function createMockClient(): BrotClient {
     }
   };
   const providers = DEMO_PROVIDERS.map((provider) => structuredClone(provider));
+  let roomDecider: RoomDeciderSettings = {};
 
   /** The server's fallback rules: at most 3 ordered refs, no repeats, each a known `<provider>/<model>`. */
   const validateFallbackModels = (models: readonly string[]): void => {
@@ -1440,6 +1448,27 @@ export function createMockClient(): BrotClient {
       histories.set(thread.id, []);
       record(thread.id, { ...base(thread.id), type: 'room.members', botIds: [...input.botIds] });
       return structuredClone(created);
+    },
+
+    getRoomDeciderSettings() {
+      return Promise.resolve(structuredClone(roomDecider));
+    },
+
+    async updateRoomDeciderSettings(input) {
+      const body = UpdateRoomDeciderSettings.parse(input);
+      if (typeof body.model === 'string') {
+        const ref = body.model;
+        const provider = providers.find((candidate) => ref.startsWith(`${candidate.id}/`));
+        if (provider === undefined || !provider.models.some((model) => model.id === ref)) {
+          throw new Error(`Unknown decider model: ${ref}`);
+        }
+        if (!providerSupportsDecider(provider)) throw new Error(`Provider ${provider.id} cannot be the room decider`);
+      }
+      roomDecider = {
+        ...(typeof body.model === 'string' ? { model: body.model } : {}),
+        updatedAt: now(),
+      };
+      return structuredClone(roomDecider);
     },
 
     async roomHistory(roomId) {

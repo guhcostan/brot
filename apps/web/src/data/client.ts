@@ -25,6 +25,7 @@ import type {
   PostMessage,
   ResolveApproval,
   ResponderMode,
+  RoomDeciderSettings,
   Routine,
   RoutineRun,
   RoutineRunStatus,
@@ -45,6 +46,7 @@ import type {
   UpdateBrowserProfile,
   UpdateMcpServer,
   UpdateMemory,
+  UpdateRoomDeciderSettings,
   UpdateRoomMembers,
   UpdateRoutine,
   UpdateSavedLogin,
@@ -184,6 +186,9 @@ export type { BotPreset, CreateBotPreset, CreatePresetFromBot, UpdateBotPreset }
 /** One resolved approval in the Activity audit trail. */
 export type { Decision } from '@brot/protocol';
 
+/** The optional model that picks which member answers in an auto room. */
+export type { RoomDeciderSettings, UpdateRoomDeciderSettings } from '@brot/protocol';
+
 /** The filters the Activity log sends; `from`/`to` bound `decidedAt`. */
 export interface DecisionFilter {
   from?: string;
@@ -231,9 +236,13 @@ export interface ProviderModel {
   label: string;
 }
 
+/** The Wire APIs a provider can speak; only `openai-completions` providers can decide auto rooms. */
+export type ProviderApi = 'openai-completions' | 'openai-responses' | 'anthropic-messages';
+
 /**
  * A model provider from `GET /api/providers`. `configured` means the vault holds `secretName`;
- * `models[].id` is the full `<provider>/<model>` ref the bot's `model` field expects.
+ * `models[].id` is the full `<provider>/<model>` ref the bot's `model` field expects. Servers may omit
+ * `api`; absent is treated as compatible so older servers keep the picker usable (the server still refuses).
  */
 export interface Provider {
   id: string;
@@ -241,6 +250,13 @@ export interface Provider {
   models: ProviderModel[];
   configured: boolean;
   secretName: string;
+  /** The Wire API the provider speaks, when the server reports it; only openai-completions can decide rooms. */
+  api?: ProviderApi;
+}
+
+/** Whether a provider can be the room decider. Providers that do not report their API are assumed compatible. */
+export function providerSupportsDecider(provider: { api?: ProviderApi }): boolean {
+  return provider.api === undefined || provider.api === 'openai-completions';
 }
 
 /** A bot's computer from `GET /api/bots/:id/computer` (docs/COMPUTER-USE.md). */
@@ -341,6 +357,10 @@ export interface BrotClient {
 
   listRooms(): Promise<Room[]>;
   createRoom(input: NewRoom): Promise<Room>;
+  /** The model that picks who answers in auto rooms; an empty object when unset. */
+  getRoomDeciderSettings(): Promise<RoomDeciderSettings>;
+  /** Sets the decider model (must be an openai-completions provider model) or clears it with null. */
+  updateRoomDeciderSettings(input: UpdateRoomDeciderSettings): Promise<RoomDeciderSettings>;
   roomHistory(roomId: string): Promise<CanonicalEvent[]>;
   postRoomMessage(roomId: string, input: RoomMessage): Promise<void>;
   /** Returns the member bot ids after the change. */

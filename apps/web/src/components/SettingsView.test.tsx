@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { createMockClient } from '../data/mockClient';
 import { DEMO_BOTS, DEMO_BOT_PRESETS, DEMO_BROWSER_PROFILES, DEMO_DECISIONS, DEMO_MCP_SERVERS, DEMO_SAVED_LOGINS, DEMO_TEAMS, DEMO_WORKSPACE_MEMORIES } from '../data/fixtures';
+import { DEMO_PROVIDERS } from '../data/mockClient';
 import { TEAM_PACKAGE_FORMAT, TEAM_PACKAGE_VERSION, formatTeamPackage, type TeamPackage } from '@brot/protocol';
 import type { VoiceInfo } from '../voice';
 import { t } from '../i18n';
@@ -43,6 +44,8 @@ function render(overrides: Partial<SettingsViewProps> = {}, bots = botsRecord): 
     initialWorkspaceMemories: DEMO_WORKSPACE_MEMORIES,
     initialBotPresets: DEMO_BOT_PRESETS,
     initialDecisions: DEMO_DECISIONS,
+    initialProviders: DEMO_PROVIDERS,
+    initialRoomDecider: {},
     ...overrides,
   };
   return renderToStaticMarkup(
@@ -317,5 +320,36 @@ describe('settings activity', () => {
     expect(text).toContain(t('settings.activityEmptyTitle'));
     expect(text).toContain(t('settings.activityEmptyBody'));
     expect(text).toContain(t('settings.activityDownload'));
+  });
+});
+
+describe('settings room routing', () => {
+  it('explains auto rooms and shows the unset state', () => {
+    const text = textOf(render());
+
+    expect(text).toContain(t('settings.roomRouting'));
+    expect(text).toContain(t('settings.roomRoutingBody'));
+    expect(text).toContain(t('settings.roomRoutingModel'));
+    expect(text).toContain(t('settings.roomRoutingUnset'));
+    expect(text).toContain(t('settings.roomRoutingUnsupported'));
+    expect(text).toContain('opencode-go/deepseek-v4.1-flash');
+    expect(text).toContain('anthropic/claude-sonnet');
+  });
+
+  it('shows the saved model and enables clear', () => {
+    const text = textOf(render({ initialRoomDecider: { model: 'opencode-go/deepseek-v4.1-flash', updatedAt: '2026-10-19T09:00:00.000Z' } }));
+
+    expect(text).toContain(t('settings.roomRoutingCurrent', { model: 'opencode-go/deepseek-v4.1-flash' }));
+    expect(text).not.toContain(t('settings.roomRoutingUnset'));
+    const clear = render({ initialRoomDecider: { model: 'opencode-go/deepseek-v4.1-flash' } }).match(/<button[^>]*>Clear<\/button>/)?.[0] ?? '';
+    expect(clear).not.toContain('disabled=""');
+  });
+
+  it('dims providers that cannot be the decider', () => {
+    const html = render();
+    const disabledAnthropic = html.match(/<input[^>]*value="anthropic\/claude-sonnet"[^>]*>/)?.[0] ?? '';
+
+    expect(disabledAnthropic).toContain('disabled=""');
+    expect(textOf(html)).toContain(t('settings.roomRoutingUnsupportedBody'));
   });
 });

@@ -350,7 +350,11 @@ function Members({ room, members, thread, onUpdate }: MembersProps): ReactElemen
         </p>
       ) : null}
       <p className="m-0 px-1 pt-1 text-xs text-ink-2">
-        {room.thread.responder === 'mention' ? t('room.ruleMention') : t('room.ruleLeadShort')}
+        {room.thread.responder === 'mention'
+          ? t('room.ruleMention')
+          : room.thread.responder === 'auto'
+            ? t('room.ruleAuto')
+            : t('room.ruleLeadShort')}
       </p>
     </div>
   );

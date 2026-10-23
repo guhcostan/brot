@@ -128,7 +128,7 @@ function NewRoomForm({ bots, onClose, onCreate }: Omit<NewRoomDialogProps, 'open
 
       <fieldset className="m-0 flex flex-col gap-1.5 border-0 p-0">
         <legend className="mb-1 p-0 text-sm font-medium">{t('newRoom.responder')}</legend>
-        {(['lead', 'mention'] as const).map((mode) => (
+        {(['lead', 'mention', 'auto'] as const).map((mode) => (
           <label key={mode} className="flex cursor-pointer items-start gap-2.5 rounded-md px-2 py-1.5 hover:bg-surface-2">
             <input
               type="radio"
@@ -139,8 +139,12 @@ function NewRoomForm({ bots, onClose, onCreate }: Omit<NewRoomDialogProps, 'open
               className="room-check mt-1"
             />
             <span className="flex flex-col">
-              <span className="text-sm font-medium">{t(mode === 'lead' ? 'newRoom.modeLead' : 'newRoom.modeMention')}</span>
-              <span className="text-xs text-ink-2">{t(mode === 'lead' ? 'newRoom.modeLeadHint' : 'newRoom.modeMentionHint')}</span>
+              <span className="text-sm font-medium">
+                {t(mode === 'lead' ? 'newRoom.modeLead' : mode === 'mention' ? 'newRoom.modeMention' : 'newRoom.modeAuto')}
+              </span>
+              <span className="text-xs text-ink-2">
+                {t(mode === 'lead' ? 'newRoom.modeLeadHint' : mode === 'mention' ? 'newRoom.modeMentionHint' : 'newRoom.modeAutoHint')}
+              </span>
             </span>
           </label>
         ))}

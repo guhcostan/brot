@@ -80,7 +80,9 @@ export function RoomView({
   const note =
     room.thread.responder === 'mention'
       ? t('room.ruleMention')
-      : t('room.ruleLead', { name: next?.name ?? t('team.unknownBot') });
+      : room.thread.responder === 'auto'
+        ? t('room.ruleAuto')
+        : t('room.ruleLead', { name: next?.name ?? t('team.unknownBot') });
 
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg">

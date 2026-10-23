@@ -178,6 +178,23 @@ describe('listProviders', () => {
 
     expect(parsed?.models).toEqual([{ id: 'openrouter/meta-llama/Llama-3', label: 'meta-llama/Llama-3' }]);
   });
+
+  it('keeps the provider api when the server reports it, and tolerates its absence', async () => {
+    const { fetch } = fakeFetch(() =>
+      json([
+        { ...provider('opencode-go', [{ id: 'deepseek-v4.1-flash' }]), api: 'openai-completions' },
+        { ...provider('anthropic', [{ id: 'claude-sonnet' }]), api: 'anthropic-messages' },
+        { ...provider('legacy', [{ id: 'old-model' }]), api: 'not-a-real-api' },
+      ]),
+    );
+    const client = createHttpClient({ fetch, EventSource: FakeEventSource });
+
+    const [supported, unsupported, legacy] = await client.listProviders();
+
+    expect(supported?.api).toBe('openai-completions');
+    expect(unsupported?.api).toBe('anthropic-messages');
+    expect(legacy?.api).toBeUndefined();
+  });
 });
 
 describe('threads', () => {

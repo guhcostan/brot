@@ -1,6 +1,7 @@
 import type { Bot, Memory, Skill } from '@brot/protocol';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
+import type { Room } from '../data/client';
 import { createMockClient } from '../data/mockClient';
 import { t } from '../i18n';
 import { emptyThread } from '../state/thread';
@@ -144,5 +145,26 @@ describe('context panel rooms', () => {
     expect(text).toContain(t('context.members'));
     expect(text).not.toContain(t('context.memory'));
     expect(text).not.toContain(t('context.skills'));
+  });
+});
+
+describe('context panel room routing', () => {
+  it('shows the auto decider rule for an auto room', () => {
+    const room: Room = {
+      thread: {
+        id: 'room_1',
+        botId: bot.id,
+        title: 'Acme renewal',
+        kind: 'room',
+        leadBotId: bot.id,
+        responder: 'auto',
+        createdAt: at,
+        updatedAt: at,
+      },
+      memberIds: [bot.id],
+    };
+    const html = render({ subject: { kind: 'room', room, members: [bot] } });
+
+    expect(textOf(html)).toContain(t('room.ruleAuto'));
   });
 });

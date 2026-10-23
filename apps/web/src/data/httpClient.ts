@@ -39,6 +39,7 @@ import {
   PairingStartResponse,
   PostMessage,
   ResolveApproval,
+  RoomDeciderSettings,
   RoomMember,
   Routine,
   RoutineRun,
@@ -55,6 +56,7 @@ import {
   UpdateBrowserProfile,
   UpdateMcpServer,
   UpdateMemory,
+  UpdateRoomDeciderSettings,
   UpdateRoomMembers,
   UpdateRoutine,
   UpdateBotPreset,
@@ -601,6 +603,17 @@ export function createHttpClient({
       return { thread, memberIds: [...body.botIds] };
     },
 
+    async getRoomDeciderSettings() {
+      const response = await request('/api/room-decider', { headers: { Accept: 'application/json' } });
+      return RoomDeciderSettings.parse(await response.json());
+    },
+
+    async updateRoomDeciderSettings(input) {
+      const body = UpdateRoomDeciderSettings.parse(input);
+      const response = await write('PUT', '/api/room-decider', body);
+      return RoomDeciderSettings.parse(await response.json());
+    },
+
     roomHistory(roomId) {
       roomIds.add(roomId);
       return threadEvents(roomId);
@@ -983,6 +996,7 @@ export function parseProviders(value: unknown): Provider[] {
       label: textField(entry.label, 'provider.label'),
       configured: entry.configured === true,
       secretName: textField(entry.secretName, 'provider.secretName'),
+      ...(entry.api === 'openai-completions' || entry.api === 'openai-responses' || entry.api === 'anthropic-messages' ? { api: entry.api } : {}),
       models: models.map((model) => {
         if (!isRecord(model)) throw new Error('A provider model is not an object');
         const modelId = textField(model.id, 'model.id');

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useMemo, useState, type FormEvent, type 
 import type { Device, PairingStartResponse } from '@brot/protocol';
 import { BotAvatar, Button, Skeleton, cx } from '@brot/ui';
 import type { BrowserProfile, Provider } from '../data/client';
+import type { RoomDeciderSettings } from '@brot/protocol';
 import type { McpServer, Memory, SavedLogin, Team } from '@brot/protocol';
 import type { BotPreset } from '@brot/protocol';
 import type { Decision } from '../data/client';
@@ -20,6 +21,7 @@ import { SavedLogins } from './SavedLogins';
 import { AboutMeSection } from './AboutMeSection';
 import { ActivitySection } from './ActivitySection';
 import { BotPresetsSection } from './BotPresetsSection';
+import { RoomRoutingSection } from './RoomRoutingSection';
 import { VoiceSection } from './VoiceSection';
 import { TeamPackages } from './TeamPackages';
 import { PaneHeader } from './ThreadView';
@@ -42,6 +44,10 @@ export interface SettingsViewProps {
   initialBotPresets?: BotPreset[];
   /** Approval decisions to render before the client load resolves, e.g. in an SSR render. */
   initialDecisions?: Decision[];
+  /** Providers for the room-decider picker before the client load resolves, e.g. in an SSR render. */
+  initialProviders?: Provider[];
+  /** Room routing settings before the client load resolves, e.g. in an SSR render. */
+  initialRoomDecider?: RoomDeciderSettings;
   /** Called after the voice settings change, so the app can refresh listen availability. */
   onVoiceChanged?: () => void;
   /** Teams for the export scope before the client load resolves, e.g. in an SSR render. */
@@ -60,7 +66,7 @@ const THEME_LABEL: Record<Theme, TranslationKey> = {
   dark: 'settings.theme.dark',
 };
 
-export function SettingsView({ locale, onLocaleChange, theme, onThemeChange, onOpenBots, initialBrowserProfiles, initialMcpServers, initialSavedLogins, initialVoice, initialSecretNames, initialWorkspaceMemories, initialBotPresets, initialDecisions, onVoiceChanged, initialTeams, initialTeamPackageContent }: SettingsViewProps): ReactElement {
+export function SettingsView({ locale, onLocaleChange, theme, onThemeChange, onOpenBots, initialBrowserProfiles, initialMcpServers, initialSavedLogins, initialVoice, initialSecretNames, initialWorkspaceMemories, initialBotPresets, initialDecisions, initialProviders, initialRoomDecider, onVoiceChanged, initialTeams, initialTeamPackageContent }: SettingsViewProps): ReactElement {
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg">
       <PaneHeader onOpenBots={onOpenBots}>
@@ -87,6 +93,9 @@ export function SettingsView({ locale, onLocaleChange, theme, onThemeChange, onO
           </Section>
           <Section title={t('settings.botPresets')} description={t('settings.botPresetsBody')}>
             <BotPresetsSection initialPresets={initialBotPresets} />
+          </Section>
+          <Section title={t('settings.roomRouting')} description={t('settings.roomRoutingBody')}>
+            <RoomRoutingSection initialProviders={initialProviders} initialSettings={initialRoomDecider} />
           </Section>
           <Section title={t('settings.activity')} description={t('settings.activityBody')}>
             <ActivitySection initialDecisions={initialDecisions} />

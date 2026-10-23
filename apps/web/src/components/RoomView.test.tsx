@@ -91,3 +91,13 @@ describe('RoomView room actions', () => {
     expect(text).not.toContain(t('room.actions'));
   });
 });
+
+describe('room rule copy', () => {
+  it('shows the auto decider rule instead of a lead name', () => {
+    const autoRoom: Room = { ...room, thread: { ...room.thread, responder: 'auto' } };
+    const text = textOf(render({ room: autoRoom }));
+
+    expect(text).toContain(t('room.ruleAuto'));
+    expect(text).not.toContain(t('room.ruleLead', { name: 'Capy' }));
+  });
+});
