@@ -1250,8 +1250,12 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
   app.post('/api/pairing/complete', async (c) => {
     const body = await parseBody(c, PairingComplete);
     if (!body.ok) return body.response;
+    const remoteAddress = c.env?.incoming?.socket?.remoteAddress;
     try {
-      return c.json(await pairing.complete(body.data), 201);
+      return c.json(
+        await pairing.complete(body.data, remoteAddress === undefined ? {} : { remoteAddress }),
+        201,
+      );
     } catch (error) {
       if (error instanceof PairingError) return c.json({ error: error.message }, error.status);
       throw error;

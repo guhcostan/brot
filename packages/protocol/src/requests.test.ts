@@ -261,8 +261,28 @@ describe('request schemas', () => {
     });
     expect(routine.enabled).toBe(true);
 
-    const pairing = PairingComplete.parse({ token: 't', deviceName: 'Phone', publicKey: 'pk' });
+    const pairing = PairingComplete.parse({ token: 't', code: '012345', deviceName: 'Phone', publicKey: 'pk' });
     expect(pairing.role).toBe('full');
+  });
+
+  it('requires a six-digit pairing code', () => {
+    const base = { token: 't', deviceName: 'Phone', publicKey: 'pk' };
+    expect(PairingComplete.parse({ ...base, code: '000000' }).code).toBe('000000');
+    expect(PairingComplete.parse({ ...base, code: '123456', role: 'viewer' })).toMatchObject({
+      code: '123456',
+      role: 'viewer',
+    });
+    expect(() => PairingComplete.parse(base)).toThrow();
+    for (const code of ['12345', '1234567', 'abcdef', '12 456', '']) {
+      expect(() => PairingComplete.parse({ ...base, code })).toThrow();
+    }
+  });
+
+  it('documents the v1 pairing QR payload', () => {
+    const payload = JSON.stringify({ v: 1, host: '127.0.0.1', port: 8799, token: 't', code: '012345' });
+    const start = { token: 't', code: '012345', expiresAt: '2026-10-22T20:00:00.000Z', qrPayload: payload };
+    expect(JSON.parse(payload)).toEqual({ v: 1, host: '127.0.0.1', port: 8799, token: 't', code: '012345' });
+    expect(start.qrPayload).toBe(payload);
   });
 
   it('defaults routine catch-up on and remember-last-run off, and accepts a timezone', () => {

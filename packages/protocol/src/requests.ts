@@ -345,12 +345,18 @@ export const PairingStartResponse = z.object({
   token: z.string(),
   code: z.string(),
   expiresAt: IsoDateTime,
+  /**
+   * The QR code's text: JSON `{ v: 1, host, port, token, code }`. `v` is the payload version; clients pair by
+   * posting `token` and `code` to POST /api/pairing/complete.
+   */
   qrPayload: z.string(),
 });
 export type PairingStartResponse = z.infer<typeof PairingStartResponse>;
 
 export const PairingComplete = z.object({
   token: z.string().min(1),
+  /** The six-digit code the desktop showed next to the QR code. */
+  code: z.string().regex(/^\d{6}$/, 'expected a six-digit code'),
   deviceName: z.string().min(1),
   publicKey: z.string().min(1),
   role: DeviceRole.default('full'),

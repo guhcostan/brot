@@ -61,10 +61,14 @@ describe('loopback host check', () => {
   });
 
   it('does not apply the loopback host check to paired devices', async () => {
-    const start = (await (await call(ctx.app, 'POST', '/api/pairing/start')).json()) as { token: string };
+    const start = (await (await call(ctx.app, 'POST', '/api/pairing/start')).json()) as {
+      token: string;
+      code: string;
+    };
     const paired = (await (
       await call(ctx.remote, 'POST', '/api/pairing/complete', {
         token: start.token,
+        code: start.code,
         deviceName: 'Phone',
         publicKey: 'pk',
         role: 'full',
