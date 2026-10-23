@@ -197,6 +197,9 @@ export type { Decision } from '@brot/protocol';
 /** The optional model that picks which member answers in an auto room. */
 export type { RoomDeciderSettings, UpdateRoomDeciderSettings } from '@brot/protocol';
 
+/** Server backups: settings, recent entries and the scheduled next run. */
+export type { BackupEntry, BackupSettings, BackupStatus, UpdateBackupSettings } from '../backups';
+
 /** Ready-made teams that can be installed from Settings. */
 export type { StarterTeamInstallCounts, StarterTeamSummary } from '../starterTeams';
 
@@ -489,6 +492,13 @@ export interface BrotClient {
 
   /** Workspace admin changes (bots, settings, logins, devices...), newest first; read-only. */
   listAdminActivity(filter?: AdminActivityFilter): Promise<import('@brot/protocol').AdminActivity[]>;
+
+  /** Server backups: settings, recent entries and the scheduled next run. */
+  getBackups(): Promise<import('../backups').BackupStatus>;
+  /** Saves backup settings; returns the saved settings. */
+  updateBackupSettings(patch: import('../backups').UpdateBackupSettings): Promise<import('../backups').BackupSettings>;
+  /** Creates a backup now (it includes the vault and stays on this machine) and returns the new entry. */
+  runBackupNow(): Promise<import('../backups').BackupEntry>;
 
   /** Ready-made teams that can be installed from Settings. */
   listStarterTeams(): Promise<import('../starterTeams').StarterTeamSummary[]>;

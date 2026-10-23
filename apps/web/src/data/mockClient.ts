@@ -135,6 +135,7 @@ import { skillFileFilename } from '../skillFileName';
 
 
 import { buildMemoryUpkeepReport } from './memoryUpkeepCompute';
+import { DEFAULT_BACKUP_SETTINGS, validateUpdateBackupSettings, type BackupEntry, type BackupSettings, type BackupStatus } from '../backups';
 import type { StarterTeamInstallCounts, StarterTeamSummary } from '../starterTeams';
 import { modelSupportsTranscription, validateUpdateTranscriptionSettings, type TranscriptionSettings, type TranscriptionStatus } from '../transcription';
 import { buildSearchSnippet } from '../search';
@@ -400,6 +401,41 @@ export function createMockClient(): BrotClient {
   ];
   const recordAdminActivity = (entry: Omit<AdminActivity, 'id' | 'at'>): void => {
     adminActivity.unshift({ id: nextId('activity'), at: now(), ...entry });
+  };
+  let backupSettings: BackupSettings = { ...DEFAULT_BACKUP_SETTINGS };
+  const backupEntries: BackupEntry[] = [
+    {
+      name: 'brot-backup-2026-10-21-030000',
+      createdAt: activityAt(2 * 24 * 60),
+      sizeBytes: 2_400_000,
+      includesSecrets: true,
+    },
+    {
+      name: 'brot-backup-2026-10-17-030000',
+      createdAt: activityAt(6 * 24 * 60),
+      sizeBytes: 2_100_000,
+      includesSecrets: true,
+    },
+  ];
+  const backupStatus = (): BackupStatus => {
+    const newest = [...backupEntries].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0];
+    const settings: BackupSettings = {
+      ...backupSettings,
+      ...(newest === undefined ? {} : { lastRunAt: newest.createdAt, lastBackupName: newest.name }),
+    };
+    if (settings.enabled) {
+      const base = newest === undefined ? Date.now() : Date.parse(newest.createdAt) + settings.intervalHours * 3_600_000;
+      const next = Math.max(base, Date.now() + 60_000);
+      return {
+        settings,
+        backups: [...backupEntries].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)).map((entry) => structuredClone(entry)),
+        nextRunAt: new Date(next).toISOString(),
+      };
+    }
+    return {
+      settings,
+      backups: [...backupEntries].sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)).map((entry) => structuredClone(entry)),
+    };
   };
   const teams = new Map<string, Team>(DEMO_TEAMS.map((team) => [team.id, structuredClone(team)]));
   const nameOf = (botId: string) => bots.get(botId)?.name ?? botId;
@@ -1336,6 +1372,32 @@ export function createMockClient(): BrotClient {
         routines: 1,
         skills: starter.skills.length,
       } satisfies StarterTeamInstallCounts;
+    },
+
+    async getBackups() {
+      return structuredClone(backupStatus());
+    },
+
+    async updateBackupSettings(patch) {
+      const body = validateUpdateBackupSettings(patch);
+      backupSettings = { ...backupSettings, ...body };
+      return structuredClone(backupStatus().settings);
+    },
+
+    async runBackupNow() {
+      const at = now();
+      const stamp = at.replace(/[-:T]/g, '').slice(0, 14);
+      const entry: BackupEntry = {
+        name: `brot-backup-${stamp.slice(0, 8)}-${stamp.slice(8, 14)}`,
+        createdAt: at,
+        sizeBytes: 2_500_000 + backupEntries.length * 1_024,
+        includesSecrets: true,
+      };
+      backupEntries.unshift(entry);
+      const keep = backupStatus().settings.keep;
+      if (backupEntries.length > keep) backupEntries.splice(keep);
+      recordAdminActivity({ action: 'created', targetType: 'backup', targetId: entry.name, summary: `Created backup ${entry.name}`, actor: 'local' });
+      return structuredClone(entry);
     },
 
     async listMemoryJournal(filter = {}) {

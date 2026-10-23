@@ -89,6 +89,7 @@ import {
 import { skillFileFallbackFromId } from '../skillFileName';
 import { parseTranscriptionStatus, validateUpdateTranscriptionSettings } from '../transcription';
 import { parseStarterTeamInstallCounts, parseStarterTeams } from '../starterTeams';
+import { parseBackupEntryValue, parseBackupStatus, validateUpdateBackupSettings } from '../backups';
 
 import { voiceTextAllowed } from '../voice';
 
@@ -812,6 +813,22 @@ export function createHttpClient({
       if (issue !== undefined) throw new Error(issue);
       const response = await write('PUT', '/api/my-chrome', body);
       return parseMyChromeStatus(await response.json());
+    },
+
+    async getBackups() {
+      const response = await request('/api/backups', { headers: { Accept: 'application/json' } });
+      return parseBackupStatus(await response.json());
+    },
+
+    async updateBackupSettings(patch) {
+      const body = validateUpdateBackupSettings(patch);
+      const response = await write('PUT', '/api/backups', body);
+      return parseBackupStatus({ settings: await response.json() }).settings;
+    },
+
+    async runBackupNow() {
+      const response = await write('POST', '/api/backups/run', {});
+      return parseBackupEntryValue(await response.json());
     },
 
     async listStarterTeams() {

@@ -7,7 +7,7 @@ import type { MyChromeStatus } from '../data/client';
 import type { TranscriptionStatus } from '../transcription';
 import type { McpServer, Memory, SavedLogin, Team } from '@brot/protocol';
 import type { BotPreset } from '@brot/protocol';
-import type { AdminActivity, Decision, StarterTeamSummary } from '../data/client';
+import type { AdminActivity, BackupStatus, Decision, StarterTeamSummary } from '../data/client';
 import type { VoiceInfo } from '../voice';
 import { desktopNotificationState, requestDesktopNotifications, type DesktopNotificationState } from '../desktopNotifications';
 import { formatTime } from '../format';
@@ -23,6 +23,7 @@ import { MyChromeSection } from './MyChromeSection';
 import { SavedLogins } from './SavedLogins';
 import { AboutMeSection } from './AboutMeSection';
 import { ActivitySection } from './ActivitySection';
+import { BackupsSection } from './BackupsSection';
 import { AdminActivitySection } from './AdminActivitySection';
 import { BotPresetsSection } from './BotPresetsSection';
 import { RoomRoutingSection } from './RoomRoutingSection';
@@ -54,6 +55,8 @@ export interface SettingsViewProps {
   initialAdminActivity?: AdminActivity[];
   /** Starter teams to render before the client load resolves, e.g. in an SSR render. */
   initialStarterTeams?: StarterTeamSummary[];
+  /** Backup status to render before the client load resolves, e.g. in an SSR render. */
+  initialBackups?: BackupStatus;
   /** Called after a starter team is installed, so the app refreshes bots and teams. */
   onStarterTeamInstalled?: () => Promise<unknown> | unknown;
   /** Providers for the room-decider picker before the client load resolves, e.g. in an SSR render. */
@@ -82,7 +85,7 @@ const THEME_LABEL: Record<Theme, TranslationKey> = {
   dark: 'settings.theme.dark',
 };
 
-export function SettingsView({ locale, onLocaleChange, theme, onThemeChange, onOpenBots, initialBrowserProfiles, initialMcpServers, initialSavedLogins, initialVoice, initialSecretNames, initialWorkspaceMemories, initialBotPresets, initialDecisions, initialAdminActivity, initialStarterTeams, onStarterTeamInstalled, initialProviders, initialRoomDecider, initialMyChrome, initialTranscription, onVoiceChanged, initialTeams, initialTeamPackageContent }: SettingsViewProps): ReactElement {
+export function SettingsView({ locale, onLocaleChange, theme, onThemeChange, onOpenBots, initialBrowserProfiles, initialMcpServers, initialSavedLogins, initialVoice, initialSecretNames, initialWorkspaceMemories, initialBotPresets, initialDecisions, initialAdminActivity, initialStarterTeams, onStarterTeamInstalled, initialBackups, initialProviders, initialRoomDecider, initialMyChrome, initialTranscription, onVoiceChanged, initialTeams, initialTeamPackageContent }: SettingsViewProps): ReactElement {
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg">
       <PaneHeader onOpenBots={onOpenBots}>
@@ -127,6 +130,9 @@ export function SettingsView({ locale, onLocaleChange, theme, onThemeChange, onO
           </Section>
           <Section title={t('settings.adminActivity')} description={t('settings.adminActivityBody')}>
             <AdminActivitySection initialEntries={initialAdminActivity} />
+          </Section>
+          <Section title={t('settings.backups')} description={t('settings.backupsBody')}>
+            <BackupsSection initialStatus={initialBackups} />
           </Section>
           <Section title={t('settings.mcpServers')} description={t('settings.mcpServersBody')}>
             <McpServers initialServers={initialMcpServers} />

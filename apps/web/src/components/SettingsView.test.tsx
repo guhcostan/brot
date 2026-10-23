@@ -46,6 +46,7 @@ function render(overrides: Partial<SettingsViewProps> = {}, bots = botsRecord): 
     initialDecisions: DEMO_DECISIONS,
     initialAdminActivity: [],
     initialStarterTeams: [],
+    initialBackups: { settings: { enabled: false, intervalHours: 24, keep: 5 }, backups: [] },
     initialProviders: DEMO_PROVIDERS,
     initialRoomDecider: {},
     ...overrides,
@@ -334,6 +335,17 @@ describe('settings starter teams', () => {
     expect(text).toContain(t('settings.starterTeams'));
     expect(text).toContain(t('settings.starterTeamsBody'));
     expect(text).toContain(t('settings.starterEmptyTitle'));
+  });
+});
+
+describe('settings backups', () => {
+  it('includes the Backups section with its explanation of secrets and machine locality', () => {
+    const text = textOf(render());
+
+    expect(text).toContain(t('settings.backups'));
+    expect(text).toContain(t('settings.backupsBody'));
+    expect(text).toContain(t('settings.backupEmptyTitle'));
+    expect(text).toContain(t('settings.backupRunNow'));
   });
 });
 
