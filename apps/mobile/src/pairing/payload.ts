@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { t } from '../i18n';
 
 /**
- * What the desktop's pairing QR encodes: `JSON.stringify({ v: 1, host, port, token })`, built by
+ * What the desktop's pairing QR encodes: `JSON.stringify({ v: 1, host, port, token, code })`, built by
  * apps/server/src/pairing.ts. Unknown extra fields are ignored so newer servers stay scannable.
  */
 export const PairingQr = z.object({
@@ -11,6 +11,8 @@ export const PairingQr = z.object({
   host: z.string().min(1),
   port: z.number().int().min(1).max(65_535),
   token: z.string().min(1),
+  /** The six-digit code the server also accepts in the pairing-complete body. */
+  code: z.string().regex(/^\d{6}$/),
 });
 export type PairingQr = z.infer<typeof PairingQr>;
 
@@ -20,6 +22,8 @@ export interface PairingTarget {
   serverUrl: string | undefined;
   /** Port from the QR, used to prefill a manually typed address. */
   port: number;
+  /** The six-digit code from a scanned QR; absent when the user pasted a raw token. */
+  code?: string;
 }
 
 export type ParseResult<T> = { ok: true; value: T } | { ok: false; error: string };
@@ -61,10 +65,10 @@ export function parsePairingCode(raw: string): ParseResult<PairingTarget> {
       }
       return { ok: false, error: t('pair.error.notBrot') };
     }
-    const { host, port, token } = parsed.data;
+    const { host, port, token, code } = parsed.data;
     return {
       ok: true,
-      value: { token, port, serverUrl: isLocalOnlyHost(host) ? undefined : serverUrlFrom(host, port) },
+      value: { token, port, serverUrl: isLocalOnlyHost(host) ? undefined : serverUrlFrom(host, port), code },
     };
   }
 

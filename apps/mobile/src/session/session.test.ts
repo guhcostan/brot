@@ -11,7 +11,7 @@ describe('pairDevice', () => {
       'POST /api/pairing/complete': () => json({ deviceId: 'd1', deviceToken: 'tok' }, 201),
     });
     const session = await pairDevice(
-      { serverUrl: 'http://mac.local:8799/', token: 'pair', deviceName: 'Ana’s phone', role: 'approver' },
+      { serverUrl: 'http://mac.local:8799/', token: 'pair', code: '654321', deviceName: 'Ana’s phone', role: 'approver' },
       { storage, randomBytes: random, fetch, now: () => new Date(T0) },
     );
     expect(session).toEqual({
@@ -25,6 +25,7 @@ describe('pairDevice', () => {
     const body = JSON.parse(String(calls[0]?.init?.body));
     const keys = JSON.parse(storage.map.get(DEVICE_KEY)!);
     expect(body.publicKey).toBe(keys.publicKey);
+    expect(body.code).toBe('654321');
     expect(body).not.toHaveProperty('secretKey');
     expect(await loadSession(storage)).toEqual(session);
   });
@@ -33,7 +34,7 @@ describe('pairDevice', () => {
     const storage = memoryStorage();
     const { fetch } = fakeFetch({ 'POST /api/pairing/complete': () => json({ error: 'expired' }, 401) });
     await expect(
-      pairDevice({ serverUrl: 'http://h:1', token: 'x', deviceName: 'P', role: 'full' }, { storage, randomBytes: random, fetch }),
+      pairDevice({ serverUrl: 'http://h:1', token: 'x', code: '654321', deviceName: 'P', role: 'full' }, { storage, randomBytes: random, fetch }),
     ).rejects.toMatchObject({ status: 401 });
     expect(storage.map.has(SESSION_KEY)).toBe(false);
   });

@@ -83,11 +83,11 @@ describe('completePairing', () => {
     const { fetch, calls } = fakeFetch({
       'POST /api/pairing/complete': () => json({ deviceId: 'd1', deviceToken: 'secret' }, 201),
     });
-    const result = await completePairing(BASE, { token: 'p', deviceName: 'Phone', publicKey: 'pk', role: 'approver' }, fetch);
+    const result = await completePairing(BASE, { token: 'p', code: '654321', deviceName: 'Phone', publicKey: 'pk', role: 'approver' }, fetch);
     expect(result).toEqual({ deviceId: 'd1', deviceToken: 'secret' });
     const headers = calls[0]?.init?.headers as Record<string, string>;
     expect(headers.Authorization).toBeUndefined();
-    expect(JSON.parse(String(calls[0]?.init?.body))).toMatchObject({ role: 'approver', publicKey: 'pk' });
+    expect(JSON.parse(String(calls[0]?.init?.body))).toMatchObject({ role: 'approver', publicKey: 'pk', code: '654321' });
   });
 
   it('maps an expired token to a 401 ApiError', async () => {
@@ -95,7 +95,7 @@ describe('completePairing', () => {
       'POST /api/pairing/complete': () => json({ error: 'Pairing token is invalid or expired' }, 401),
     });
     await expect(
-      completePairing(BASE, { token: 'p', deviceName: 'Phone', publicKey: 'pk', role: 'full' }, fetch),
+      completePairing(BASE, { token: 'p', code: '654321', deviceName: 'Phone', publicKey: 'pk', role: 'full' }, fetch),
     ).rejects.toMatchObject({ status: 401 });
   });
 });

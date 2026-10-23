@@ -108,6 +108,8 @@ export default function PairScreen(): ReactElement {
   const [code, setCode] = useState('');
   const [address, setAddress] = useState('');
   const [addressError, setAddressError] = useState<string>();
+  const [confirmCode, setConfirmCode] = useState('');
+  const [codeError, setCodeError] = useState<string>();
   const [deviceName, setDeviceName] = useState(Device.deviceName ?? Device.modelName ?? t('pair.defaultName'));
   const [role, setRole] = useState<DeviceRole>('full');
   const [busy, setBusy] = useState(false);
@@ -123,6 +125,8 @@ export default function PairScreen(): ReactElement {
     setScanError(undefined);
     setFailure(undefined);
     setAddress(parsed.value.serverUrl ?? '');
+    setConfirmCode(parsed.value.code ?? '');
+    setCodeError(undefined);
     setStep({ kind: 'confirm', target: parsed.value });
   };
 
@@ -132,11 +136,17 @@ export default function PairScreen(): ReactElement {
       setAddressError(url.error);
       return;
     }
+    const pairingCode = target.code ?? confirmCode.trim();
+    if (!/^\d{6}$/.test(pairingCode)) {
+      setCodeError(t('pair.manualCodeError'));
+      return;
+    }
     setAddressError(undefined);
+    setCodeError(undefined);
     setFailure(undefined);
     setBusy(true);
     try {
-      await pair({ serverUrl: url.value, token: target.token, deviceName: deviceName.trim() || t('pair.defaultName'), role });
+      await pair({ serverUrl: url.value, token: target.token, code: pairingCode, deviceName: deviceName.trim() || t('pair.defaultName'), role });
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (cause) {
       const message = describeError(cause);
@@ -211,6 +221,28 @@ export default function PairScreen(): ReactElement {
                   error={addressError}
                 />
                 <Field label={t('pair.nameLabel')} value={deviceName} onChangeText={setDeviceName} hint={t('pair.nameHint')} />
+                {step.target.code !== undefined ? (
+                  <View style={{ gap: theme.space[1] }}>
+                    <Text variant="label">{t('pair.codeFromQr')}</Text>
+                    <Text variant="mono" accessibilityLabel={t('pair.codeFromQr')}>
+                      {step.target.code}
+                    </Text>
+                  </View>
+                ) : (
+                  <Field
+                    label={t('pair.manualCodeLabel')}
+                    hint={t('pair.manualCodeHint')}
+                    value={confirmCode}
+                    onChangeText={(value) => {
+                      setConfirmCode(value);
+                      setCodeError(undefined);
+                    }}
+                    keyboardType="number-pad"
+                    maxLength={6}
+                    mono
+                    error={codeError}
+                  />
+                )}
               </View>
               <View style={{ gap: theme.space[2] }} accessibilityRole="radiogroup" accessibilityLabel={t('pair.roleLabel')}>
                 <Text variant="label">{t('pair.roleLabel')}</Text>

@@ -62,6 +62,8 @@ export async function deviceKeys(storage: SecretStorage, randomBytes: (length: n
 export interface PairInput {
   serverUrl: string;
   token: string;
+  /** The six-digit code shown on the computer; the server refuses a pairing without it. */
+  code: string;
   deviceName: string;
   role: DeviceRole;
 }
@@ -77,7 +79,7 @@ export async function pairDevice(input: PairInput, deps: PairDeps): Promise<Stor
   const keys = await deviceKeys(deps.storage, deps.randomBytes);
   const result = await completePairing(
     input.serverUrl,
-    { token: input.token, deviceName: input.deviceName, publicKey: keys.publicKey, role: input.role },
+    { token: input.token, code: input.code, deviceName: input.deviceName, publicKey: keys.publicKey, role: input.role },
     deps.fetch,
   );
   const session: StoredSession = {
