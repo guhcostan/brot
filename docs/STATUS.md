@@ -431,6 +431,23 @@ mapped in `docs/MAUSBOT-PARITY.md` (34 bots / 7 teams, 33 bots with a browser an
 - Verified live: a browser_key approval denied with a reply appeared in the log and the deny filter, the CSV
   had the BOM and expected header, and an invalid decision was a 400.
 - Suite: 2365 tests (244 files), typecheck 12/12, lint clean.
+## Wave 31: desktop app smoke, onboarding (2026-10-22)
+
+- **Desktop app verified.** Rebuilt the web bundle and the desktop main bundle, then launched the real
+  Electron app with an isolated `BROT_HOME` and `BROT_DESKTOP_PORT=8898`: the gateway served the Brot UI
+  (`<title>Brot</title>`), the embedded server answered `/api/health`, `/api/bots` (seeded Capy) and
+  `/api/providers`, and a fresh home applied all 21 migrations. Closed and cleaned up afterwards.
+  Caveat found: an environment that exports `ELECTRON_RUN_AS_NODE=1` makes `electron .` run as Node and the
+  app crashes at startup with `Cannot read properties of undefined (reading 'getPath')` — unset that
+  variable when launching. This was verified to be the only cause; without it the app starts normally.
+- **Getting started onboarding.** A calm dialog auto-opens for a fresh workspace (no conversations/rooms and
+  not dismissed) and reopens from a sidebar action: five checklist rows (model key, say hello, browser or
+  computer optional, schedule a routine, pair a phone optional) with done/pending states, actions into the
+  existing flows, skeleton + retry for the cheap checks, and remind-later vs persisted don't-show-again.
+  en/pt-BR/es.
+- Suite: 2379 tests (246 files), typecheck 12/12, lint clean; full `pnpm build` green.
+- Known flakes (seen under full-suite load, always green isolated/rerun): desktop takeover timing, browser
+  viewer screen capture, tasks chain-max route.
 ## Next
 
 1. Re-run the eval suite on a live model once OpenCode Go has quota (`apps/evals`, `--base` to the server), including B8 and C; the 2026-10-20 results predate the read auto-allow and the fixes above.

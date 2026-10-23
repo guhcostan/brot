@@ -84,6 +84,7 @@ Legend: ✅ parity or better · 🟡 partial · ❌ absent · 🎯 current wave.
 | Message search across threads | ✅ | ✅ GET /api/search and the sidebar Messages section | W8 done |
 | Attachments: images/screenshots/files in transcript, quota | ✅ | ✅ composer, transcript gallery, storage, text-in-prompt and orphan sweep | W6 done |
 | Notifications: in-app/desktop, per-bot, exact-thread routing | ✅ | ✅ inbox, unread badge, native banners, per-bot toggle | W6 done |
+| Onboarding: first useful run in under 3 minutes | ✅ | 🟡 Getting started checklist with auto-open and dismiss | W10 |
 | Analytics: usage ledger, decision log, admin activity, Today page | ✅ | ✅ Insights page, usage ledger/CSV, decision log/CSV and Activity; admin activity and org library next | W8 |
 | Team sharing: `.md`/package import-export, presets, org library | ✅ | 🟡 Markdown package export/import and bot presets are live; org library next | W9 |
 | Remote access: pairing, browser client, phone PWA, companions | ✅ | 🟡 mobile app + relay, loopback trust only | W10 |
