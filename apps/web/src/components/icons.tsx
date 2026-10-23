@@ -228,6 +228,14 @@ export const Phone = ({ size }: { size?: number }) => (
   </Icon>
 );
 
+/** Two overlapping sheets: copy to the clipboard. */
+export const Copy = ({ size }: { size?: number }) => (
+  <Icon size={size}>
+    <rect x="7" y="7" width="9" height="10" rx="1.75" />
+    <path d="M13 4.25H5.75A1.75 1.75 0 0 0 4 6v7.25" />
+  </Icon>
+);
+
 export const Help = ({ size }: { size?: number }) => (
   <Icon size={size}>
     <circle cx="10" cy="10" r="7.25" />

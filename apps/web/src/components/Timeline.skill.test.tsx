@@ -83,3 +83,31 @@ describe('Timeline save as a skill', () => {
     expect(mixed).not.toContain(`aria-label="${t('timeline.saveAsSkill')}"`);
   });
 });
+
+describe('Timeline message copy', () => {
+  const bubble = (id: string, role: 'user' | 'assistant' | 'system', content: string, streaming = false) => ({
+    kind: 'message' as const,
+    id,
+    role,
+    content,
+    streaming,
+    at,
+  });
+
+  it('offers copy on completed user and assistant messages only', () => {
+    const assistantHtml = render(threadWith([assistant('m1', 'Done, the report is ready.')]), () => undefined);
+    expect(assistantHtml).toContain(`aria-label="${t('copy.copyMessage')}"`);
+
+    const user = render(threadWith([bubble('u1', 'user', 'Hello')]));
+    expect(user).toContain(`aria-label="${t('copy.copyMessage')}"`);
+
+    const system = render(threadWith([bubble('s1', 'system', 'Rate limited')]));
+    expect(system).not.toContain(`aria-label="${t('copy.copyMessage')}"`);
+
+    const streaming = render(threadWith([bubble('m2', 'assistant', 'Typing…', true)]), () => undefined);
+    expect(streaming).not.toContain(`aria-label="${t('copy.copyMessage')}"`);
+
+    const empty = render(threadWith([assistant('m3', '   ')]), () => undefined);
+    expect(empty).not.toContain(`aria-label="${t('copy.copyMessage')}"`);
+  });
+});

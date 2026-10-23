@@ -4,7 +4,7 @@ import type { VoiceContext } from '../voice';
 import { ApprovalCard, Button, MessageBubble, StatusDot, TaskStatusLabel, ToolTimeline, TypingIndicator, cx, type MessageBubbleProps } from '@brot/ui';
 import { formatTime } from '../format';
 import { t } from '../i18n';
-import { splitMentions, type Mentionable } from '../mentions';
+import type { Mentionable } from '../mentions';
 import {
   botActivity,
   gazeTargets,
@@ -21,6 +21,9 @@ import { ApprovalStatusBadge } from './approvalStatus';
 import { timelineLabels, toStep } from './toolLabels';
 import { taskStatusLabel } from './taskLabels';
 import { ArrowRight, Baton, Bookmark } from './icons';
+import { CopyButton } from './CopyButton';
+import { MarkdownText } from './MarkdownText';
+import { MentionText } from './MentionText';
 import { MessageAttachments } from './MessageAttachments';
 import { VoiceListenButton } from './VoiceListenButton';
 import { TeamAvatar, moodOf, useBotName, useTeam } from './team';
@@ -108,7 +111,9 @@ function AttachedMessage({ attachments, ...bubble }: { attachments?: Attachment[
 }
 
 export function Timeline({ thread, mode, defaultBotId, members, onDecide, voice, onSaveAsSkill }: TimelineProps): ReactElement {
-  const renderText = (text: string): ReactNode => <MentionText text={text} members={members} />;
+  const renderText = (text: string): ReactNode => (
+    <MarkdownText text={text} renderTextPart={(part) => <MentionText text={part} members={members} />} />
+  );
   const gazes = gazeTargets(thread);
   const stepLabels = timelineLabels();
   const cardLabels = approvalLabels();
@@ -122,19 +127,27 @@ export function Timeline({ thread, mode, defaultBotId, members, onDecide, voice,
         if (block.kind === 'tools') return <ToolTimeline key={key} steps={block.items.map(toStep)} labels={stepLabels} />;
         const { item } = block;
         switch (item.kind) {
-          case 'message':
+          case 'message': {
             if (item.viaBotId !== undefined) return <ViaRow key={key} item={item} renderText={renderText} />;
+            const copyable = !item.streaming && item.content.trim() !== '' && (item.role === 'user' || item.role === 'assistant');
             return (
-              <AttachedMessage
-                key={key}
-                attachments={item.attachments}
-                role={item.role}
-                content={item.content}
-                streaming={item.streaming}
-                time={item.role === 'system' ? undefined : formatTime(item.at)}
-                renderText={renderText}
-              />
+              <div key={key} className="flex flex-col gap-1">
+                <AttachedMessage
+                  attachments={item.attachments}
+                  role={item.role}
+                  content={item.content}
+                  streaming={item.streaming}
+                  time={item.role === 'system' ? undefined : formatTime(item.at)}
+                  renderText={renderText}
+                />
+                {copyable ? (
+                  <div className={cx('flex', item.role === 'user' && 'justify-end')}>
+                    <CopyButton text={item.content} label={t('copy.copyMessage')} iconOnly />
+                  </div>
+                ) : null}
+              </div>
             );
+          }
           case 'tool':
             return <ToolTimeline key={key} steps={[toStep(item)]} labels={stepLabels} />;
           case 'approval': {
@@ -162,23 +175,6 @@ export function Timeline({ thread, mode, defaultBotId, members, onDecide, voice,
             return <TaskRow key={key} item={item} />;
         }
       })}
-    </>
-  );
-}
-
-/** `@Name` mentions of members as quiet chips: weight and a neutral fill, no color. */
-export function MentionText({ text, members }: { text: string; members: readonly Mentionable[] }): ReactElement {
-  return (
-    <>
-      {splitMentions(text, members).map((part, index) =>
-        part.kind === 'mention' ? (
-          <span key={index} className="mention-chip">
-            {part.text}
-          </span>
-        ) : (
-          part.text
-        ),
-      )}
     </>
   );
 }
@@ -212,6 +208,7 @@ function BotTurn({ botId, messages, mode, thread, renderText, voice, onSaveAsSki
             />
             {message.role === 'assistant' && !message.streaming && message.content.trim() !== '' ? (
               <div className="flex items-center gap-1">
+                <CopyButton text={message.content} label={t('copy.copyMessage')} iconOnly />
                 {voice !== undefined ? <VoiceListenButton text={message.content} voice={voice} /> : null}
                 {onSaveAsSkill !== undefined ? (
                   <Button
@@ -250,6 +247,7 @@ function BotTurn({ botId, messages, mode, thread, renderText, voice, onSaveAsSki
             />
             {message.role === 'assistant' && !message.streaming && message.content.trim() !== '' ? (
               <div className="flex items-center gap-1">
+                <CopyButton text={message.content} label={t('copy.copyMessage')} iconOnly />
                 {voice !== undefined ? <VoiceListenButton text={message.content} voice={voice} /> : null}
                 {onSaveAsSkill !== undefined ? (
                   <Button
