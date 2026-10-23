@@ -31,6 +31,8 @@ import {
   ImportTeamPackage,
   MarkNotificationsRead,
   McpServer,
+  MemoryJournalEntry as MemoryJournalEntrySchema,
+  MemoryJournalQuery,
   McpServerTestResult,
   Message,
   SavedLogin,
@@ -55,6 +57,7 @@ import {
   TodaySummary,
   UpdateBot,
   UpdateBrowserProfile,
+  UndoMemoryResult,
   UpdateMcpServer,
   UpdateMemory,
   UpdateMyChromeSettings,
@@ -439,6 +442,22 @@ export function createHttpClient({
 
     async deleteMemory(memoryId) {
       await request(`/api/memories/${encodeURIComponent(memoryId)}`, { method: 'DELETE' });
+    },
+
+    async listMemoryJournal(filter = {}) {
+      const query = MemoryJournalQuery.parse(filter);
+      const suffix = querySuffix({
+        botId: query.botId,
+        scope: query.scope,
+        limit: String(query.limit),
+      });
+      const response = await request(`/api/memories/journal${suffix}`, { headers: { Accept: 'application/json' } });
+      return MemoryJournalEntrySchema.array().parse(await response.json());
+    },
+
+    async undoMemoryJournal(entryId) {
+      const response = await write('POST', `/api/memories/journal/${encodeURIComponent(entryId)}/undo`, {});
+      return UndoMemoryResult.parse(await response.json());
     },
 
     listSkills(botId) {

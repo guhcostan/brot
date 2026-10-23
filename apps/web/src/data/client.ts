@@ -20,6 +20,9 @@ import type {
   McpServer,
   McpServerTestResult,
   Memory,
+  MemoryJournalEntry,
+  MemoryScope,
+  UndoMemoryResult,
   MyChromeSettings,
   Notification,
   PairingStartResponse,
@@ -192,6 +195,16 @@ export type { Decision } from '@brot/protocol';
 /** The optional model that picks which member answers in an auto room. */
 export type { RoomDeciderSettings, UpdateRoomDeciderSettings } from '@brot/protocol';
 
+/** Recorded memory changes (Settings About me and a bot's Memory tab History). */
+export type { MemoryAction, MemoryJournalEntry, UndoMemoryResult } from '@brot/protocol';
+
+/** The filters the memory journal accepts; `limit` defaults to 50 on the server. */
+export interface MemoryJournalFilter {
+  botId?: string;
+  scope?: MemoryScope;
+  limit?: number;
+}
+
 /** The person's own Chrome as a browser source for host-browser bots. */
 export type { BrowserMode, MyChromeSettings, UpdateMyChromeSettings } from '@brot/protocol';
 
@@ -348,6 +361,10 @@ export interface BrotClient {
   /** Updates a memory of either scope; the returned record carries its scope when the server sends one. */
   updateMemory(memoryId: string, patch: UpdateMemory): Promise<Memory>;
   deleteMemory(memoryId: string): Promise<void>;
+  /** Recorded memory changes, newest first; the shared History dialog for bot and workspace memories. */
+  listMemoryJournal(filter?: MemoryJournalFilter): Promise<MemoryJournalEntry[]>;
+  /** Undoes one journal entry; 409 when the memory changed since, 404 when the entry is gone. */
+  undoMemoryJournal(entryId: string): Promise<UndoMemoryResult>;
 
   /** A bot's skills plus the shared ones, by name. Without a bot, every skill. */
   listSkills(botId?: string): Promise<Skill[]>;

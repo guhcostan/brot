@@ -246,6 +246,7 @@ describe('settings about me', () => {
     expect(text).toContain(t('settings.aboutMeBody'));
     expect(text).toContain(t('settings.aboutMeCount', { count: '3' }));
     expect(text).toContain(t('settings.aboutMeNew'));
+    expect(text).toContain(t('memory.history'));
     expect(text).toContain(t('memory.kind.preference'));
     expect(text).toContain('Prefers Portuguese (pt-BR) in conversation; writes English with customers.');
   });

@@ -100,6 +100,7 @@ describe('context panel memory tab', () => {
     expect(text).toContain(t('memory.new'));
     expect(text).toContain(t('memory.edit'));
     expect(render()).toContain(`aria-label="${t('memory.delete')}"`);
+    expect(textOf(render())).toContain(t('memory.history'));
   });
 
   it('explains what memory is when a bot has none', () => {

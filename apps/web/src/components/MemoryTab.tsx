@@ -5,7 +5,7 @@ import { t } from '../i18n';
 import { Dialog, ConfirmDialog } from './Dialog';
 import { MemoryForm } from './MemoryForm';
 import { MEMORY_KIND_KEY, memorySavedOnFormat } from './memoryShared';
-import { Plus, Trash } from './icons';
+import { Clock, Plus, Trash } from './icons';
 
 export interface MemoryTabProps {
   botName: string;
@@ -15,10 +15,12 @@ export interface MemoryTabProps {
   onCreate: (input: CreateMemory) => Promise<unknown>;
   onUpdate: (memoryId: string, patch: UpdateMemory) => Promise<unknown>;
   onDelete: (memoryId: string) => Promise<unknown>;
+  /** Opens the memory journal; absent hides the History action. */
+  onOpenHistory?: () => void;
 }
 
 /** What a bot remembers: every entry is editable, and every run recalls only the most relevant ones. */
-export function MemoryTab({ botName, memories, error, onCreate, onUpdate, onDelete }: MemoryTabProps): ReactElement {
+export function MemoryTab({ botName, memories, error, onCreate, onUpdate, onDelete, onOpenHistory }: MemoryTabProps): ReactElement {
   const [dialog, setDialog] = useState<{ memory?: Memory } | null>(null);
   const [deleting, setDeleting] = useState<Memory | null>(null);
 
@@ -26,10 +28,18 @@ export function MemoryTab({ botName, memories, error, onCreate, onUpdate, onDele
     <div className="flex flex-col gap-3">
       <div className="flex items-center justify-between gap-2">
         <h3 className="m-0 text-sm font-medium text-ink-2">{t('memory.count', { count: String(memories?.length ?? 0) })}</h3>
-        <Button variant="secondary" size="sm" onClick={() => setDialog({})}>
-          <Plus size={14} />
-          {t('memory.new')}
-        </Button>
+        <span className="flex items-center gap-2">
+          {onOpenHistory !== undefined ? (
+            <Button variant="ghost" size="sm" onClick={onOpenHistory}>
+              <Clock size={14} />
+              {t('memory.history')}
+            </Button>
+          ) : null}
+          <Button variant="secondary" size="sm" onClick={() => setDialog({})}>
+            <Plus size={14} />
+            {t('memory.new')}
+          </Button>
+        </span>
       </div>
 
       {error ? (

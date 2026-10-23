@@ -15,6 +15,7 @@ import type {
   McpServer,
   Message,
   MyChromeSettings,
+  MemoryJournalEntry,
   Notification,
   PostMessage,
   ResolveApproval,
@@ -43,6 +44,7 @@ import {
   CreateSkill,
   CreateTeam,
   CreateThread,
+  MemoryJournalQuery,
   UpdateRoomDeciderSettings,
   DecisionQuery,
   DESKTOP_HEIGHT,
@@ -382,6 +384,12 @@ export function createMockClient(): BrotClient {
     DEMO_WORKSPACE_MEMORIES.map((memory) => [memory.id, structuredClone(memory)]),
   );
   const memories = new Map<string, Memory>(DEMO_MEMORIES.map((memory) => [memory.id, structuredClone(memory)]));
+  /** Memory changes, newest first; seeded memories predate the journal. */
+  const memoryJournal: MemoryJournalEntry[] = [];
+  const journalMemory = (entry: Omit<MemoryJournalEntry, 'id' | 'at'>, at = now()): void => {
+    memoryJournal.unshift({ id: nextId('memjournal'), at, ...entry });
+  };
+  const conflictError = () => new Error('This memory changed since that entry; refresh and try again.');
   const notifications = new Map<string, Notification>(
     DEMO_NOTIFICATIONS.map((notification) => [notification.id, structuredClone(notification)]),
   );
@@ -1044,6 +1052,7 @@ export function createMockClient(): BrotClient {
       const at = now();
       const created: Memory = { id: nextId('mem'), botId, scope: 'bot', kind: data.kind, content: data.content, createdAt: at, updatedAt: at };
       memories.set(created.id, created);
+      journalMemory({ memoryId: created.id, botId, scope: 'bot', kind: created.kind, action: 'created', contentAfter: created.content });
       return structuredClone(created);
     },
 
@@ -1058,6 +1067,7 @@ export function createMockClient(): BrotClient {
           updatedAt: now(),
         };
         memories.set(memoryId, next);
+        journalMemory({ memoryId, ...(current.botId === undefined ? {} : { botId: current.botId }), scope: 'bot', kind: next.kind, action: 'updated', contentBefore: current.content, contentAfter: next.content });
         return structuredClone(next);
       }
       const workspace = workspaceMemories.get(memoryId);
@@ -1069,13 +1079,68 @@ export function createMockClient(): BrotClient {
         updatedAt: now(),
       };
       workspaceMemories.set(memoryId, next);
+      journalMemory({ memoryId, scope: 'workspace', kind: next.kind, action: 'updated', contentBefore: workspace.content, contentAfter: next.content });
       return structuredClone(next);
     },
 
     async deleteMemory(memoryId) {
-      if (memories.delete(memoryId)) return;
-      if (workspaceMemories.delete(memoryId)) return;
+      const botMemory = memories.get(memoryId);
+      if (botMemory !== undefined) {
+        memories.delete(memoryId);
+        journalMemory({ memoryId, ...(botMemory.botId === undefined ? {} : { botId: botMemory.botId }), scope: 'bot', kind: botMemory.kind, action: 'deleted', contentBefore: botMemory.content });
+        return;
+      }
+      const workspaceMemory = workspaceMemories.get(memoryId);
+      if (workspaceMemory !== undefined) {
+        workspaceMemories.delete(memoryId);
+        journalMemory({ memoryId, scope: 'workspace', kind: workspaceMemory.kind, action: 'deleted', contentBefore: workspaceMemory.content });
+        return;
+      }
       throw new Error(`Unknown memory: ${memoryId}`);
+    },
+
+    async listMemoryJournal(filter = {}) {
+      const query = MemoryJournalQuery.parse(filter);
+      return memoryJournal
+        .filter((entry) => (query.botId === undefined || entry.botId === query.botId) && (query.scope === undefined || entry.scope === query.scope))
+        .sort((a, b) => Date.parse(b.at) - Date.parse(a.at) || b.id.localeCompare(a.id))
+        .slice(0, query.limit)
+        .map((entry) => structuredClone(entry));
+    },
+
+    async undoMemoryJournal(entryId) {
+      const entry = memoryJournal.find((candidate) => candidate.id === entryId);
+      if (entry === undefined) throw new Error(`Unknown journal entry: ${entryId}`);
+      const current = entry.memoryId === undefined ? undefined : memories.get(entry.memoryId) ?? workspaceMemories.get(entry.memoryId);
+      if (entry.action === 'created') {
+        if (current === undefined || current.kind !== entry.kind || (entry.contentAfter !== undefined && current.content !== entry.contentAfter)) throw conflictError();
+        if (current.scope === 'workspace') workspaceMemories.delete(current.id);
+        else memories.delete(current.id);
+        journalMemory({ memoryId: current.id, ...(current.botId === undefined ? {} : { botId: current.botId }), scope: current.scope, kind: current.kind, action: 'deleted', contentBefore: current.content });
+        return { result: 'removed' as const };
+      }
+      if (entry.action === 'updated') {
+        if (current === undefined || (entry.contentAfter !== undefined && current.content !== entry.contentAfter)) throw conflictError();
+        const restored: Memory = { ...current, content: entry.contentBefore ?? current.content, updatedAt: now() };
+        if (restored.scope === 'workspace') workspaceMemories.set(restored.id, restored);
+        else memories.set(restored.id, restored);
+        journalMemory({ memoryId: restored.id, ...(restored.botId === undefined ? {} : { botId: restored.botId }), scope: restored.scope, kind: restored.kind, action: 'updated', contentBefore: current.content, contentAfter: restored.content });
+        return { result: 'restored' as const, memory: structuredClone(restored) };
+      }
+      if (current !== undefined) throw conflictError();
+      const restored: Memory = {
+        id: entry.memoryId ?? nextId('mem'),
+        ...(entry.botId === undefined ? {} : { botId: entry.botId }),
+        scope: entry.scope,
+        kind: entry.kind,
+        content: entry.contentBefore ?? '',
+        createdAt: now(),
+        updatedAt: now(),
+      };
+      if (restored.scope === 'workspace') workspaceMemories.set(restored.id, restored);
+      else memories.set(restored.id, restored);
+      journalMemory({ memoryId: restored.id, ...(restored.botId === undefined ? {} : { botId: restored.botId }), scope: restored.scope, kind: restored.kind, action: 'created', contentAfter: restored.content });
+      return { result: 'restored' as const, memory: structuredClone(restored) };
     },
 
     async listDecisions(filter = {}) {
@@ -1184,6 +1249,7 @@ export function createMockClient(): BrotClient {
         updatedAt: at,
       };
       workspaceMemories.set(created.id, created);
+      journalMemory({ memoryId: created.id, scope: 'workspace', kind: created.kind, action: 'created', contentAfter: created.content });
       return structuredClone(created);
     },
 

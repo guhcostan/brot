@@ -5,8 +5,9 @@ import { t } from '../i18n';
 import { useClient } from './client';
 import { ConfirmDialog, Dialog } from './Dialog';
 import { MemoryForm } from './MemoryForm';
+import { MemoryJournalDialog } from './MemoryJournalDialog';
 import { MEMORY_KIND_KEY, memorySavedOnFormat } from './memoryShared';
-import { Plus, Trash } from './icons';
+import { Clock, Plus, Trash } from './icons';
 
 export interface AboutMeSectionProps {
   /** Workspace facts to render before the client load resolves, e.g. in an SSR render. */
@@ -25,6 +26,7 @@ export function AboutMeSection({ initialMemories }: AboutMeSectionProps): ReactE
   const [error, setError] = useState<string | null>(null);
   const [dialog, setDialog] = useState<{ memory?: Memory } | null>(null);
   const [deleting, setDeleting] = useState<Memory | null>(null);
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -54,10 +56,16 @@ export function AboutMeSection({ initialMemories }: AboutMeSectionProps): ReactE
     <div className="flex flex-col gap-3">
       <div className="flex items-center justify-between gap-2">
         <h3 className="m-0 text-sm font-medium text-ink-2">{t('settings.aboutMeCount', { count: String(memories?.length ?? 0) })}</h3>
-        <Button variant="secondary" size="sm" onClick={() => setDialog({})}>
-          <Plus size={14} />
-          {t('settings.aboutMeNew')}
-        </Button>
+        <span className="flex items-center gap-2">
+          <Button variant="ghost" size="sm" onClick={() => setHistoryOpen(true)}>
+            <Clock size={14} />
+            {t('memory.history')}
+          </Button>
+          <Button variant="secondary" size="sm" onClick={() => setDialog({})}>
+            <Plus size={14} />
+            {t('settings.aboutMeNew')}
+          </Button>
+        </span>
       </div>
 
       {error !== null ? (
@@ -127,6 +135,7 @@ export function AboutMeSection({ initialMemories }: AboutMeSectionProps): ReactE
         }}
         onClose={() => setDeleting(null)}
       />
+      <MemoryJournalDialog open={historyOpen} scope="workspace" onClose={() => setHistoryOpen(false)} onChanged={load} />
     </div>
   );
 }
