@@ -664,6 +664,24 @@ mapped in `docs/MAUSBOT-PARITY.md` (34 bots / 7 teams, 33 bots with a browser an
   approval) and A15 (product idea stress test with the cheapest next experiment) passed at $0.0867 total,
   flagged for human review only on answer quality.
 - Suite: 2718 tests (288 files), typecheck 12/12, lint clean. Eval leftovers cleaned (only Capy/Teste).
+## Wave 45: voice notes and opt-in transcription (2026-10-23)
+
+- **Audio attachments and STT.** AttachmentKind gains audio (eight-type allowlist). providers.json model entries
+  accept `transcription: true`; GET/PUT /api/transcription store the choice and report availability cheaply,
+  and the new audio module posts the bytes as multipart to the provider's /audio/transcriptions with the
+  vault key resolved at call time, a 60 s timeout and reason-only logs. The harness transcribes at most two
+  audio attachments from the current trigger message (each up to the 20 MiB cap) and the prompt renders
+  `- name (transcript): text` capped at 4000 chars; with no model configured no bytes are read and only
+  name/mime/size appear. Mock engine ignores transcripts. docs/ARCHITECTURE documents it.
+- **Web voice notes.** A Record voice note button in the composer (MediaRecorder feature-detected at click
+  time) shows a live timer with stop/cancel, creates a named audio file through the normal attachment path,
+  and surfaces unsupported/denied permissions inline; audio attachments play in a native player with a
+  download link and fall back to a file chip on error. Settings → Transcription offers a provider-grouped
+  list limited to transcription-capable models with Save/Clear and an availability reason. en/pt-BR/es.
+- Verified live: a real TTS WAV (92 KB) uploaded as an audio attachment rode a message, and headless Chrome
+  rendered the audio player with the file name; no STT provider exists on this machine, so transcription
+  itself is covered by injected-fetch tests.
+- Suite: 2761 tests (294 files), typecheck 12/12, lint clean. Temporary bot/attachment cleaned up.
 ## Next
 
 1. Re-run the eval suite on a live model once OpenCode Go has quota (`apps/evals`, `--base` to the server), including B8 and C; the 2026-10-20 results predate the read auto-allow and the fixes above.
