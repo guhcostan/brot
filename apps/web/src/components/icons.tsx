@@ -93,6 +93,13 @@ export const Download = ({ size }: { size?: number }) => (
   </Icon>
 );
 
+/** A bookmark: save this conversation as a skill. */
+export const Bookmark = ({ size }: { size?: number }) => (
+  <Icon size={size}>
+    <path d="M5.5 3.5h9v13l-4.5-3-4.5 3z" />
+  </Icon>
+);
+
 /** A microphone: dictate into the composer. */
 export const Mic = ({ size }: { size?: number }) => (
   <Icon size={size}>

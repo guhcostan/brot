@@ -6,12 +6,14 @@ import type { VoiceContext } from '../voice';
 import { avatarOf } from '../format';
 import { t } from '../i18n';
 import type { ThreadState } from '../state/thread';
+import { buildSkillDraft, type SkillDraft, type SkillTranscriptEntry } from '../saveSkill';
 import { Composer } from './Composer';
 import { botStatusLabel } from './taskLabels';
 import { ChevronLeft, Pencil, Sparkle, SpeakerOff } from './icons';
 import { ThreadModelPicker } from './ThreadModelPicker';
 import { useAutoSpeak } from './useAutoSpeak';
 import { useLiveMood } from './mood';
+import { SaveSkillDialog } from './SaveSkillDialog';
 import { Timeline } from './Timeline';
 
 export interface ThreadViewProps {
@@ -28,6 +30,8 @@ export interface ThreadViewProps {
   voice?: VoiceContext;
   /** Runs a recognized composer slash command; resolves to an inline message or null. */
   onCommand?: (name: string, args: string) => Promise<string | null>;
+  /** Creates a skill from the conversation; enables "Save as a skill" on completed assistant messages. */
+  onCreateSkill?: (draft: SkillDraft) => Promise<void>;
   thread: ThreadState;
   /** False until the bot's history has loaded. */
   loaded: boolean;
@@ -55,8 +59,9 @@ export function useStickToBottom(deps: readonly unknown[]) {
   return ref;
 }
 
-export function ThreadView({ bot, title, threadMeta, loadProviders, onPickThreadModel, voice, onCommand, thread, loaded, status, onSend, uploadAttachment, discardAttachment, onEdit, onDecide, onOpenBots, onOpenContext }: ThreadViewProps): ReactElement {
+export function ThreadView({ bot, title, threadMeta, loadProviders, onPickThreadModel, voice, onCommand, onCreateSkill, thread, loaded, status, onSend, uploadAttachment, discardAttachment, onEdit, onDecide, onOpenBots, onOpenContext }: ThreadViewProps): ReactElement {
   const [modelOpen, setModelOpen] = useState(false);
+  const [saveSkillOpen, setSaveSkillOpen] = useState(false);
   const autoSpeak = useAutoSpeak({ thread, voice, defaultBotId: bot.id, speaks: () => bot.speakReplies === true });
   const effectiveModel = threadMeta?.model ?? bot.model;
   const lastItem = thread.items.at(-1);
@@ -66,6 +71,15 @@ export function ThreadView({ bot, title, threadMeta, loadProviders, onPickThread
 
   const avatar = avatarOf(bot);
   const mood = useLiveMood(status);
+  const skillEntries: SkillTranscriptEntry[] = thread.items.flatMap((item): SkillTranscriptEntry[] => {
+    if (item.kind === 'message') {
+      const author = item.role === 'assistant' ? bot.name : item.role === 'user' ? t('skills.transcriptYou') : t('skills.transcriptSystem');
+      return [{ kind: 'message', role: item.role, content: item.content, author }];
+    }
+    if (item.kind === 'tool') return [{ kind: 'tool', tool: item.tool }];
+    return [];
+  });
+  const skillDraft = buildSkillDraft(skillEntries, { title, fallbackName: t('skills.untitled') });
 
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg">
@@ -124,7 +138,14 @@ export function ThreadView({ bot, title, threadMeta, loadProviders, onPickThread
               />
             </div>
           ) : (
-            <Timeline thread={thread} mode="dm" defaultBotId={bot.id} members={[bot]} onDecide={onDecide} />
+            <Timeline
+              thread={thread}
+              mode="dm"
+              defaultBotId={bot.id}
+              members={[bot]}
+              onDecide={onDecide}
+              {...(onCreateSkill === undefined ? {} : { onSaveAsSkill: () => setSaveSkillOpen(true) })}
+            />
           )}
           {typing ? <TypingIndicator label={`${bot.name}: ${t('status.working')}`} className="-mt-2" /> : null}
         </div>
@@ -137,6 +158,16 @@ export function ThreadView({ bot, title, threadMeta, loadProviders, onPickThread
         onSend={(content, _mentions, attachmentIds) => onSend(content, attachmentIds)}
         {...(onCommand === undefined ? {} : { onCommand })}
       />
+      {saveSkillOpen && onCreateSkill !== undefined ? (
+        <SaveSkillDialog
+          open
+          initialDraft={skillDraft}
+          onClose={() => setSaveSkillOpen(false)}
+          onSave={async (draft) => {
+            await onCreateSkill(draft);
+          }}
+        />
+      ) : null}
     </section>
   );
 }

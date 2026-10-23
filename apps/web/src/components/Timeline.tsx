@@ -1,7 +1,7 @@
 import type { ReactElement, ReactNode } from 'react';
 import type { ApprovalDecision, Attachment } from '@brot/protocol';
 import type { VoiceContext } from '../voice';
-import { ApprovalCard, MessageBubble, StatusDot, TaskStatusLabel, ToolTimeline, TypingIndicator, cx, type MessageBubbleProps } from '@brot/ui';
+import { ApprovalCard, Button, MessageBubble, StatusDot, TaskStatusLabel, ToolTimeline, TypingIndicator, cx, type MessageBubbleProps } from '@brot/ui';
 import { formatTime } from '../format';
 import { t } from '../i18n';
 import { splitMentions, type Mentionable } from '../mentions';
@@ -19,7 +19,7 @@ import {
 import { approvalLabels } from './approvalLabels';
 import { timelineLabels, toStep } from './toolLabels';
 import { taskStatusLabel } from './taskLabels';
-import { ArrowRight, Baton } from './icons';
+import { ArrowRight, Baton, Bookmark } from './icons';
 import { MessageAttachments } from './MessageAttachments';
 import { VoiceListenButton } from './VoiceListenButton';
 import { TeamAvatar, moodOf, useBotName, useTeam } from './team';
@@ -35,6 +35,8 @@ export interface TimelineProps {
   onDecide: (approvalId: string, decision: ApprovalDecision, reply?: string) => Promise<void>;
   /** Voice availability and the speak call; when absent no Listen buttons render. */
   voice?: VoiceContext;
+  /** Opens "Save as a skill" from a completed assistant message; absent for conversations that cannot save. */
+  onSaveAsSkill?: () => void;
 }
 
 type Block =
@@ -104,7 +106,7 @@ function AttachedMessage({ attachments, ...bubble }: { attachments?: Attachment[
   );
 }
 
-export function Timeline({ thread, mode, defaultBotId, members, onDecide, voice }: TimelineProps): ReactElement {
+export function Timeline({ thread, mode, defaultBotId, members, onDecide, voice, onSaveAsSkill }: TimelineProps): ReactElement {
   const renderText = (text: string): ReactNode => <MentionText text={text} members={members} />;
   const gazes = gazeTargets(thread);
   const stepLabels = timelineLabels();
@@ -114,7 +116,7 @@ export function Timeline({ thread, mode, defaultBotId, members, onDecide, voice 
       {toBlocks(thread.items, defaultBotId).map((block) => {
         const key = blockKey(block);
         if (block.kind === 'turn') {
-          return <BotTurn key={key} botId={block.botId} messages={block.messages} mode={mode} renderText={renderText} thread={thread} voice={voice} />;
+          return <BotTurn key={key} botId={block.botId} messages={block.messages} mode={mode} renderText={renderText} thread={thread} voice={voice} {...(onSaveAsSkill === undefined ? {} : { onSaveAsSkill })} />;
         }
         if (block.kind === 'tools') return <ToolTimeline key={key} steps={block.items.map(toStep)} labels={stepLabels} />;
         const { item } = block;
@@ -181,9 +183,10 @@ interface BotTurnProps {
   thread: ThreadState;
   renderText: (text: string) => ReactNode;
   voice?: VoiceContext;
+  onSaveAsSkill?: () => void;
 }
 
-function BotTurn({ botId, messages, mode, thread, renderText, voice }: BotTurnProps): ReactElement {
+function BotTurn({ botId, messages, mode, thread, renderText, voice, onSaveAsSkill }: BotTurnProps): ReactElement {
   const nameOf = useBotName();
   const name = nameOf(botId);
   if (mode === 'dm' || botId === undefined) {
@@ -200,8 +203,21 @@ function BotTurn({ botId, messages, mode, thread, renderText, voice }: BotTurnPr
               streaming={message.streaming}
               renderText={renderText}
             />
-            {message.role === 'assistant' && !message.streaming && message.content.trim() !== '' && voice !== undefined ? (
-              <VoiceListenButton text={message.content} voice={voice} />
+            {message.role === 'assistant' && !message.streaming && message.content.trim() !== '' ? (
+              <div className="flex items-center gap-1">
+                {voice !== undefined ? <VoiceListenButton text={message.content} voice={voice} /> : null}
+                {onSaveAsSkill !== undefined ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={onSaveAsSkill}
+                    aria-label={t('timeline.saveAsSkill')}
+                    title={t('timeline.saveAsSkill')}
+                  >
+                    <Bookmark size={14} />
+                  </Button>
+                ) : null}
+              </div>
             ) : null}
           </div>
         ))}
@@ -225,8 +241,21 @@ function BotTurn({ botId, messages, mode, thread, renderText, voice }: BotTurnPr
               streaming={message.streaming}
               renderText={renderText}
             />
-            {message.role === 'assistant' && !message.streaming && message.content.trim() !== '' && voice !== undefined ? (
-              <VoiceListenButton text={message.content} voice={voice} />
+            {message.role === 'assistant' && !message.streaming && message.content.trim() !== '' ? (
+              <div className="flex items-center gap-1">
+                {voice !== undefined ? <VoiceListenButton text={message.content} voice={voice} /> : null}
+                {onSaveAsSkill !== undefined ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={onSaveAsSkill}
+                    aria-label={t('timeline.saveAsSkill')}
+                    title={t('timeline.saveAsSkill')}
+                  >
+                    <Bookmark size={14} />
+                  </Button>
+                ) : null}
+              </div>
             ) : null}
           </div>
         ))}

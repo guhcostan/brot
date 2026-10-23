@@ -435,6 +435,9 @@ export function App(): ReactElement {
         onPickThreadModel={(model) => chat.updateThread(selectedThreadId, { model })}
         voice={voice}
         onCommand={(name, args) => runSlashCommand({ room: false, botId: bot.id, threadId: selectedThreadId, name, args })}
+        onCreateSkill={async (draft) => {
+          await client.createSkill({ ...draft, botId: bot.id });
+        }}
         thread={state.threads[selectedThreadId] ?? emptyThread}
         loaded={state.threads[selectedThreadId] !== undefined}
         status={statusOfBot(state, bot.id)}
