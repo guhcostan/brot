@@ -603,6 +603,21 @@ mapped in `docs/MAUSBOT-PARITY.md` (34 bots / 7 teams, 33 bots with a browser an
 - Verified memory upkeep live: three textual variants of one preference plus a unique note merged to the
   newest two, the journal showed the two deletions, and the follow-up report was clean.
 - Suite: 2650 tests (280 files), typecheck 12/12, lint clean. Eval leftovers cleaned (only Capy/Teste).
+## Wave 41: expired approvals, B8 cost note (2026-10-23)
+
+- **Orphan approvals expire at boot.** An interrupted run was failed at boot but its approval stayed pending
+  forever (the C6 review note). Approval status gains `expired` (resolvedAt + interruption reply, never a
+  decision); the repo lists pending approvals and expires one only while still pending (a concurrent decision
+  wins). After recoverInterruptedRuns, boot expires every pending approval whose run is missing or no longer
+  running/waiting, publishes approval.resolved and logs the count; best effort, no-op when clean. Pending
+  lists drop the card, the decision log stays allowed/denied only, and the web shows a muted Expired badge
+  with exhaustive status maps. en/pt-BR/es.
+- **Verified live:** a real send approval sat pending, the dev server was restarted, and the approval came
+  back expired with the restart reply while pending emptied and the decision log stayed empty.
+- **Eval B8 (content production + weekly routine) hit its per-case budget cap** at $0.4015 after 28 runs /
+  923 s (7 bots, 2.1M tokens in); the runner stopped it cleanly and deleted the bots, rooms and containers.
+  The case is simply expensive: future runs need a higher cap or a trimmed fixture.
+- Suite: 2669 tests (283 files), typecheck 12/12, lint clean.
 ## Next
 
 1. Re-run the eval suite on a live model once OpenCode Go has quota (`apps/evals`, `--base` to the server), including B8 and C; the 2026-10-20 results predate the read auto-allow and the fixes above.

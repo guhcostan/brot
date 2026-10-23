@@ -74,7 +74,7 @@ Legend: ✅ parity or better · 🟡 partial · ❌ absent · 🎯 current wave.
 | Saved logins vault + `fill_login` | ✅ | ✅ vault-backed logins with a Settings UI, host-gated fill_login with TOTP | W7 done |
 | Connected apps (Composio marketplace) + per-bot tool grants | ✅ | ❌ | W3 |
 | Custom MCP servers (stdio/HTTP, per-bot) | ✅ | ✅ stdio/HTTP servers with vault secrets, handshake test, Settings panel and per-bot grants | W5 done |
-| Approval levels per bot/thread + decision log | ✅ | ✅ per-bot ask/edits modes with a safety floor, decision log with CSV export and an Activity view | W6 done |
+| Approval levels per bot/thread + decision log | ✅ | ✅ per-bot ask/edits modes with a safety floor, decision log with CSV export, Activity view and boot-expired orphan cards | W6 done |
 | Routines: cron/weekday with timezone, receipts, recovery, calendar | ✅ | ✅ runs, receipts, catch-up, timezone, routines page; calendar next | W3 done |
 | Webhook triggers | ✅ | 🟡 receiver exists, no signed secret UX | W6 |
 | App-event triggers | ✅ | ❌ | W6 |
