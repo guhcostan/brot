@@ -53,20 +53,27 @@ export function costOf(model: ProviderModel | undefined, tokensIn: number, token
 }
 
 /**
- * Passes a provider response through unchanged and reports its final usage once the body ends. Server-sent
- * events are parsed line by line as they arrive, so a chunk is forwarded before it is parsed. Usage that
- * arrives in more than one event (Anthropic's `message_start` and `message_delta`) is merged field by field,
- * so the last value seen for each count wins.
+ * Incremental usage parser for one provider response. Feed it each body chunk; `finish()` reports the usage seen
+ * so far (at most once). This is the same parsing the tap below performs, exposed so a caller that wraps the body
+ * (for stall timeouts) can report partial usage when the stream is aborted instead of ending normally.
  */
-export function createUsageTap(
-  contentType: string | null,
-  report: (usage: TokenCounts) => void,
-): TransformStream<Uint8Array, Uint8Array> {
+export interface UsageSink {
+  push(chunk: Uint8Array): void;
+  finish(): void;
+}
+
+/**
+ * Builds the usage sink. Server-sent events are parsed line by line as they arrive, so a chunk is forwarded before
+ * it is parsed. Usage that arrives in more than one event (Anthropic's `message_start` and `message_delta`) is
+ * merged field by field, so the last value seen for each count wins.
+ */
+export function createUsageSink(contentType: string | null, report: (usage: TokenCounts) => void): UsageSink {
   const streaming = /text\/event-stream/i.test(contentType ?? '');
   const decoder = new TextDecoder();
   const seen: Partial<TokenCounts> = {};
   let pending = '';
   let overflow = false;
+  let finished = false;
 
   const absorb = (value: unknown): void => {
     const usage = usageOf(value);
@@ -84,10 +91,9 @@ export function createUsageTap(
     }
   };
 
-  return new TransformStream<Uint8Array, Uint8Array>({
-    transform(chunk, controller) {
-      controller.enqueue(chunk);
-      if (overflow) return;
+  return {
+    push(chunk) {
+      if (finished || overflow) return;
       pending += decoder.decode(chunk, { stream: true });
       if (streaming) {
         const lines = pending.split('\n');
@@ -99,7 +105,10 @@ export function createUsageTap(
         pending = '';
       }
     },
-    flush() {
+
+    finish() {
+      if (finished) return;
+      finished = true;
       pending += decoder.decode();
       if (!overflow) {
         if (streaming) {
@@ -115,6 +124,23 @@ export function createUsageTap(
       if (seen.tokensIn !== undefined || seen.tokensOut !== undefined) {
         report({ tokensIn: seen.tokensIn ?? 0, tokensOut: seen.tokensOut ?? 0 });
       }
+    },
+  };
+}
+
+/** Passes a provider response through unchanged and reports its final usage once the body ends. */
+export function createUsageTap(
+  contentType: string | null,
+  report: (usage: TokenCounts) => void,
+): TransformStream<Uint8Array, Uint8Array> {
+  const sink = createUsageSink(contentType, report);
+  return new TransformStream<Uint8Array, Uint8Array>({
+    transform(chunk, controller) {
+      controller.enqueue(chunk);
+      sink.push(chunk);
+    },
+    flush() {
+      sink.finish();
     },
   });
 }

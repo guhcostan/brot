@@ -2,10 +2,34 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { Hono } from 'hono';
 import type { Vault } from '../vault';
 import { parseModelRef, type ProviderApi, type ProviderRegistry, type ProviderSpec } from './providers';
-import { costOf, createUsageTap, type TokenCounts } from './usage';
+import { costOf, createUsageSink, type TokenCounts, type UsageSink } from './usage';
 
 /** Largest request body the relay forwards. Longer bodies are refused before they reach the provider. */
 export const MAX_REQUEST_BYTES = 8 * 1024 * 1024;
+
+/** How long the provider gets to answer with response headers before the relay gives up. */
+export const DEFAULT_RESPONSE_TIMEOUT_MS = 120_000;
+/** Longest gap allowed between response body chunks once the provider is streaming. */
+export const DEFAULT_STREAM_STALL_TIMEOUT_MS = 120_000;
+/** Longest one relayed provider request may take end to end. */
+export const DEFAULT_REQUEST_DEADLINE_MS = 15 * 60_000;
+
+/** Timer seam so tests can count outstanding timers. Production timers are unref'd and never keep Brot alive. */
+export interface RelayTimers {
+  setTimeout(callback: () => void, ms: number): unknown;
+  clearTimeout(handle: unknown): void;
+}
+
+const REAL_TIMERS: RelayTimers = {
+  setTimeout(callback, ms) {
+    const timer = setTimeout(callback, ms);
+    timer.unref();
+    return timer;
+  },
+  clearTimeout(handle) {
+    clearTimeout(handle as ReturnType<typeof setTimeout>);
+  },
+};
 
 /**
  * Paths each wire protocol may reach, with the one method each accepts. Everything else is refused, so a run
@@ -62,6 +86,14 @@ export interface LlmRelayOptions {
   fetch?: FetchLike;
   /** Overrides `MAX_REQUEST_BYTES`. */
   maxRequestBytes?: number;
+  /** Milliseconds until response headers must arrive. Defaults to `DEFAULT_RESPONSE_TIMEOUT_MS`. */
+  responseTimeoutMs?: number;
+  /** Milliseconds allowed between response body chunks. Defaults to `DEFAULT_STREAM_STALL_TIMEOUT_MS`. */
+  streamStallTimeoutMs?: number;
+  /** Milliseconds one relayed request may take in total. Defaults to `DEFAULT_REQUEST_DEADLINE_MS`. */
+  requestDeadlineMs?: number;
+  /** Timer seam. Tests inject counting timers; production uses real unref'd timers. */
+  timers?: RelayTimers;
 }
 
 export interface LlmRelay {
@@ -93,6 +125,10 @@ export function createLlmRelay(options: LlmRelayOptions): LlmRelay {
   const { vault, providers } = options;
   const fetchUpstream: FetchLike = options.fetch ?? ((input, init) => fetch(input, init));
   const maxBytes = options.maxRequestBytes ?? MAX_REQUEST_BYTES;
+  const responseTimeoutMs = options.responseTimeoutMs ?? DEFAULT_RESPONSE_TIMEOUT_MS;
+  const streamStallTimeoutMs = options.streamStallTimeoutMs ?? DEFAULT_STREAM_STALL_TIMEOUT_MS;
+  const requestDeadlineMs = options.requestDeadlineMs ?? DEFAULT_REQUEST_DEADLINE_MS;
+  const timers = options.timers ?? REAL_TIMERS;
   const runs = new Map<string, RunEntry>();
   const listeners = new Set<UsageListener>();
 
@@ -167,6 +203,43 @@ export function createLlmRelay(options: LlmRelayOptions): LlmRelay {
     else headers.set('authorization', `Bearer ${key}`);
 
     const target = `${route.provider.baseUrl.replace(/\/+$/, '')}/${endpoint}${url.search}`;
+    const id = route.provider.id;
+    const incoming = request.signal;
+    const controller = new AbortController();
+    let abortReason: 'headers' | 'deadline' | undefined;
+    let headersTimer: unknown;
+    let deadlineTimer: unknown;
+
+    const clearHeadersTimer = (): void => {
+      if (headersTimer === undefined) return;
+      timers.clearTimeout(headersTimer);
+      headersTimer = undefined;
+    };
+    const clearDeadlineTimer = (): void => {
+      if (deadlineTimer === undefined) return;
+      timers.clearTimeout(deadlineTimer);
+      deadlineTimer = undefined;
+    };
+    const detach = (): void => {
+      clearHeadersTimer();
+      clearDeadlineTimer();
+      incoming.removeEventListener('abort', onIncomingAbort);
+    };
+    const abortFor = (reason: 'headers' | 'deadline'): void => {
+      if (abortReason !== undefined || controller.signal.aborted) return;
+      abortReason = reason;
+      if (reason === 'deadline') console.error(`llm relay: provider ${id} took too long`);
+      controller.abort();
+    };
+    function onIncomingAbort(): void {
+      if (!controller.signal.aborted) controller.abort();
+    }
+
+    if (incoming.aborted) controller.abort();
+    else incoming.addEventListener('abort', onIncomingAbort, { once: true });
+    headersTimer = timers.setTimeout(() => abortFor('headers'), responseTimeoutMs);
+    deadlineTimer = timers.setTimeout(() => abortFor('deadline'), requestDeadlineMs);
+
     let upstream: Response;
     try {
       upstream = await fetchUpstream(target, {
@@ -175,22 +248,56 @@ export function createLlmRelay(options: LlmRelayOptions): LlmRelay {
         body,
         // A redirect would send the key to another host, so the caller gets the redirect and nothing follows it.
         redirect: 'manual',
-        signal: request.signal,
+        signal: controller.signal,
       });
     } catch (error) {
-      console.error(`llm relay: provider ${route.provider.id} is unreachable`, errorCode(error));
-      return json({ error: `Provider ${route.provider.id} is unreachable` }, 502);
+      detach();
+      if (abortReason === 'headers') {
+        console.error(`llm relay: provider ${id} did not respond in time`);
+        return json({ error: `Provider ${id} did not respond in time` }, 502);
+      }
+      if (abortReason === 'deadline') return json({ error: `Provider ${id} took too long` }, 502);
+      if (incoming.aborted) {
+        console.error(`llm relay: provider ${id} request was cancelled`);
+        return json({ error: `Provider ${id} request was cancelled` }, 502);
+      }
+      console.error(`llm relay: provider ${id} is unreachable`, errorCode(error));
+      return json({ error: `Provider ${id} is unreachable` }, 502);
     }
+    clearHeadersTimer();
 
     const responseHeaders = new Headers();
     upstream.headers.forEach((value, name) => {
       if (!RESPONSE_DROPPED.has(name)) responseHeaders.set(name, value);
     });
+    const contentType = upstream.headers.get('content-type');
+    const sink: UsageSink | undefined =
+      upstream.body !== null && allowed === 'POST' && upstream.ok
+        ? createUsageSink(contentType, (counts) => emit(runId, route, counts))
+        : undefined;
     let stream: ReadableStream<Uint8Array> | null = upstream.body;
-    if (stream && allowed === 'POST' && upstream.ok) {
-      stream = stream.pipeThrough(
-        createUsageTap(upstream.headers.get('content-type'), (counts) => emit(runId, route, counts)),
-      );
+    if (stream === null) {
+      detach();
+    } else {
+      stream = createGuardedBody({
+        body: stream,
+        signal: controller.signal,
+        stallTimeoutMs: streamStallTimeoutMs,
+        timers,
+        stalledMessage: `Provider ${id} stalled`,
+        convertError: (error) => {
+          if (abortReason === 'headers') return new Error(`Provider ${id} did not respond in time`);
+          if (abortReason === 'deadline') return new Error(`Provider ${id} took too long`);
+          if (incoming.aborted) return new Error(`Provider ${id} request was cancelled`);
+          return error instanceof Error ? error : new Error(`Provider ${id} stream failed`);
+        },
+        ...(sink === undefined ? {} : { sink }),
+        onStall: () => {
+          console.error(`llm relay: provider ${id} stalled`);
+          controller.abort();
+        },
+        onEnd: detach,
+      });
     }
     return new Response(stream, { status: upstream.status, headers: responseHeaders });
   }
@@ -238,6 +345,132 @@ export function createLlmRelay(options: LlmRelayOptions): LlmRelay {
       };
     },
   };
+}
+
+
+interface GuardedBodyOptions {
+  body: ReadableStream<Uint8Array>;
+  signal: AbortSignal;
+  stallTimeoutMs: number;
+  timers: RelayTimers;
+  stalledMessage: string;
+  /** Turns a read failure (deadline, incoming abort) into the error the client stream sees. */
+  convertError(error: unknown): Error;
+  /** Reports usage as chunks arrive; `finish()` is called on a normal end and on a stall. */
+  sink?: UsageSink;
+  /** Called once when the stall timer fires, before the stream is failed. */
+  onStall(): void;
+  /** Called once when the body ends, fails, stalls or is cancelled. */
+  onEnd(): void;
+}
+
+/**
+ * Wraps a provider response body so a silent provider cannot hang a run: each chunk resets a stall timer, and a gap
+ * longer than `stallTimeoutMs` aborts the upstream request and errors the client stream. Ends, failures and
+ * cancellation all clear the timer and call `onEnd`.
+ */
+function createGuardedBody(options: GuardedBodyOptions): ReadableStream<Uint8Array> {
+  const reader = options.body.getReader();
+  let streamController: ReadableStreamDefaultController<Uint8Array> | undefined;
+  let timer: unknown;
+  let settled = false;
+  let listening = false;
+  let stalled = false;
+
+  const clearStallTimer = (): void => {
+    if (timer === undefined) return;
+    options.timers.clearTimeout(timer);
+    timer = undefined;
+  };
+
+  function stopListening(): void {
+    if (!listening) return;
+    options.signal.removeEventListener('abort', onAbort);
+    listening = false;
+  }
+
+  function end(error?: Error, reportUsage = false): void {
+    if (settled) return;
+    settled = true;
+    clearStallTimer();
+    stopListening();
+    if (reportUsage) options.sink?.finish();
+    options.onEnd();
+    try {
+      if (error === undefined) streamController?.close();
+      else streamController?.error(error);
+    } catch {
+      // The consumer cancelled the stream before we could end it.
+    }
+  }
+
+  function onAbort(): void {
+    void reader.cancel().catch(() => undefined);
+    if (stalled) end(new Error(options.stalledMessage), true);
+    else end(options.convertError(options.signal.reason));
+  }
+
+  const arm = (): void => {
+    clearStallTimer();
+    timer = options.timers.setTimeout(() => {
+      timer = undefined;
+      if (settled) return;
+      stalled = true;
+      options.onStall();
+      // onStall aborts the signal, whose listener ends the stream; this covers a seam that does not abort.
+      if (!settled) {
+        void reader.cancel().catch(() => undefined);
+        end(new Error(options.stalledMessage), true);
+      }
+    }, options.stallTimeoutMs);
+  };
+
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      streamController = controller;
+      if (options.signal.aborted) {
+        onAbort();
+        return;
+      }
+      options.signal.addEventListener('abort', onAbort, { once: true });
+      listening = true;
+      void (async () => {
+        for (;;) {
+          if (settled) return;
+          arm();
+          let result: ReadableStreamReadResult<Uint8Array>;
+          try {
+            result = await reader.read();
+          } catch (error) {
+            end(options.convertError(error));
+            return;
+          }
+          if (settled) return;
+          clearStallTimer();
+          if (result.done) {
+            end(undefined, true);
+            return;
+          }
+          options.sink?.push(result.value);
+          try {
+            streamController?.enqueue(result.value);
+          } catch {
+            end();
+            return;
+          }
+        }
+      })();
+    },
+
+    cancel(reason) {
+      if (settled) return;
+      settled = true;
+      clearStallTimer();
+      stopListening();
+      options.onEnd();
+      void reader.cancel(reason).catch(() => undefined);
+    },
+  });
 }
 
 function json(body: unknown, status: number, headers: Record<string, string> = {}): Response {

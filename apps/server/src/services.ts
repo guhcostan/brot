@@ -49,6 +49,12 @@ export interface LlmOptions {
   providers?: ProviderSpec[];
   /** Outbound HTTP for the relay. Tests inject a fake upstream. */
   fetch?: FetchLike;
+  /** Milliseconds until the provider must answer with headers. Defaults to two minutes. */
+  responseTimeoutMs?: number;
+  /** Milliseconds allowed between response body chunks once streaming. Defaults to two minutes. */
+  streamStallTimeoutMs?: number;
+  /** Milliseconds one relayed request may take in total. Defaults to fifteen minutes. */
+  requestDeadlineMs?: number;
 }
 
 /** Optional contained-run services. Absent ones leave `computer: 'sandbox'` runs failing and `none` runs without MCP. */
@@ -135,6 +141,9 @@ export async function createServices(
     vault,
     providers: providerRegistry,
     ...(extras.llm?.fetch === undefined ? {} : { fetch: extras.llm.fetch }),
+    ...(extras.llm?.responseTimeoutMs === undefined ? {} : { responseTimeoutMs: extras.llm.responseTimeoutMs }),
+    ...(extras.llm?.streamStallTimeoutMs === undefined ? {} : { streamStallTimeoutMs: extras.llm.streamStallTimeoutMs }),
+    ...(extras.llm?.requestDeadlineMs === undefined ? {} : { requestDeadlineMs: extras.llm.requestDeadlineMs }),
   });
   const roomDecider = createRoomDecider({
     repos,
