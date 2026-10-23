@@ -464,12 +464,31 @@ mapped in `docs/MAUSBOT-PARITY.md` (34 bots / 7 teams, 33 bots with a browser an
   five failures then the correct code got the 429 lock message; device cleaned up.
 - Suite: 2390 tests (246 files), typecheck 12/12, lint clean (fixed a shadowing warning in the mobile pair
   screen during integration).
+## Wave 33: SSE resume, slash commands, dictation (2026-10-22)
+
+- **SSE resume.** GET /api/events honors the standard Last-Event-ID header when `after` is absent: the
+  cursor event is looked up and everything strictly after its (at, rowid) position is replayed in
+  deterministic order (no duplicate cursor, no same-timestamp gap) before going live; unknown ids replay
+  nothing but still stream live; blank/malformed headers are ignored and `after` still wins. New repo
+  helpers events.get/listAfterEvent. The web event client dedupes the last 1000 delivered ids so replay can
+  never double-apply frames. Verified live with curl resuming a thread from a mid cursor.
+- **Composer slash commands.** /help, /new, /rename, /model (<ref>|default) and /stop with a prefix
+  suggestion list, inline usage/unknown hints and room-unavailable copy; unknown commands are never sent.
+- **Dictation.** A mic button dictates through the Web Speech API, feature-detected at click time,
+  inserting final text at the cursor with idle/listening/error states. en/pt-BR/es.
+- **Onboarding fix.** Found in headless-Chrome testing: the Getting started dialog auto-opened on a
+  workspace with conversations because unknown thread lists counted as fresh. Freshness now requires known
+  state (bots + rooms loaded, every non-archived thread list present and empty), the decision runs once,
+  and manual reopen always works. Re-verified in the browser.
+- Verified UI in headless Chrome: suggestion list and /help panel render five commands, /nope shows the
+  unknown hint, /stop says no run is active, denied microphone shows the inline permission error.
+- Suite: 2425 tests (250 files) then 2434 web-relevant, typecheck 12/12, lint clean.
 ## Next
 
 1. Re-run the eval suite on a live model once OpenCode Go has quota (`apps/evals`, `--base` to the server), including B8 and C; the 2026-10-20 results predate the read auto-allow and the fixes above.
 2. A live run of a desktop bot doing a web task end to end (snapshot → click → takeover on sign-in).
 3. Signed desktop builds and a first GitHub release; the site's download links point to releases.
-4. SSE id cursor; persist the baton and takeover state; a per (thread, bot) relay URL.
+4. Persist the baton and takeover state; a per (thread, bot) relay URL.
 
 ## Decision: DeepSeek Harness is the only runtime (2026-10-19)
 
