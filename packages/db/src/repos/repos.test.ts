@@ -1976,3 +1976,120 @@ describe('bot presets', () => {
     await expect(repos.botPresets.update('missing', { name: 'X' })).resolves.toBeUndefined();
   });
 });
+
+describe('approval decision log', () => {
+  async function resolvedApproval(options: {
+    botId?: string;
+    threadId?: string;
+    runId?: string;
+    decision?: 'allow_once' | 'allow_always' | 'deny';
+    tool?: string;
+    resolvedAt?: string;
+  } = {}) {
+    const { bot, thread, run } = await seed();
+    const approval = await repos.approvals.create({
+      runId: options.runId ?? run.id,
+      threadId: options.threadId ?? thread.id,
+      botId: options.botId ?? bot.id,
+      kind: 'send',
+      tool: options.tool ?? 'send_email',
+      summary: 'Send the invoice',
+      args: { to: 'ada@example.com' },
+    });
+    await repos.approvals.resolve(approval.id, { decision: options.decision ?? 'allow_once' });
+    if (options.resolvedAt !== undefined) {
+      await handle.client.execute({
+        sql: 'UPDATE approvals SET resolved_at = ? WHERE id = ?',
+        args: [options.resolvedAt, approval.id],
+      });
+    }
+    return (await repos.approvals.get(approval.id))!;
+  }
+
+  it('returns only resolved decisions, newest first, with their args intact', async () => {
+    const pending = await repos.approvals.create({
+      runId: (await seed()).run.id,
+      threadId: (await seed()).thread.id,
+      botId: (await seed()).bot.id,
+      kind: 'send',
+      tool: 'send_email',
+      summary: 'Pending',
+      args: {},
+    });
+    const older = await resolvedApproval({ resolvedAt: '2026-10-20T10:00:00.000Z' });
+    const newer = await resolvedApproval({ resolvedAt: '2026-10-20T11:00:00.000Z', decision: 'deny' });
+
+    const decisions = await repos.approvals.listDecisions();
+    expect(decisions.map((row) => row.id)).toEqual([newer.id, older.id]);
+    expect(decisions.some((row) => row.id === pending.id)).toBe(false);
+    expect(decisions[1]?.args).toEqual({ to: 'ada@example.com' });
+    expect(decisions[1]?.decision).toBe('allow_once');
+    expect(decisions[0]?.decision).toBe('deny');
+  });
+
+  it('breaks ties on the same resolvedAt by insertion order, newest first', async () => {
+    const first = await resolvedApproval({ resolvedAt: '2026-10-20T10:00:00.000Z' });
+    const second = await resolvedApproval({ resolvedAt: '2026-10-20T10:00:00.000Z' });
+    expect((await repos.approvals.listDecisions()).map((row) => row.id)).toEqual([second.id, first.id]);
+  });
+
+  it('filters by the half-open range, bot and decision', async () => {
+    const before = await resolvedApproval({ resolvedAt: '2026-10-01T00:00:00.000Z' });
+    const inRange = await resolvedApproval({ resolvedAt: '2026-10-15T00:00:00.000Z', decision: 'deny' });
+    const after = await resolvedApproval({ resolvedAt: '2026-10-20T00:00:00.000Z' });
+
+    const ranged = await repos.approvals.listDecisions({
+      from: '2026-10-15T00:00:00.000Z',
+      to: '2026-10-20T00:00:00.000Z',
+    });
+    expect(ranged.map((row) => row.id)).toEqual([inRange.id]);
+    expect(ranged.some((row) => row.id === before.id || row.id === after.id)).toBe(false);
+
+    const denied = await repos.approvals.listDecisions({ decision: 'deny' });
+    expect(denied.map((row) => row.id)).toEqual([inRange.id]);
+
+    const other = await seed();
+    await resolvedApproval({ botId: other.bot.id, threadId: other.thread.id, runId: other.run.id });
+    expect((await repos.approvals.listDecisions({ botId: other.bot.id })).map((row) => row.botId)).toEqual([
+      other.bot.id,
+    ]);
+  });
+
+  it('applies the limit in SQL and ignores rows without a decision or a resolution time', async () => {
+    for (const day of ['01', '02', '03']) await resolvedApproval({ resolvedAt: `2026-10-${day}T00:00:00.000Z` });
+    expect(await repos.approvals.listDecisions({ limit: 2 })).toHaveLength(2);
+    expect(await repos.approvals.listDecisions()).toHaveLength(3);
+
+    const { bot, thread, run } = await seed();
+    const blank = await repos.approvals.create({
+      runId: run.id,
+      threadId: thread.id,
+      botId: bot.id,
+      kind: 'send',
+      tool: 'send_email',
+      summary: 'No decision',
+      args: {},
+    });
+    await handle.client.execute({
+      sql: "UPDATE approvals SET status = 'allowed', decision = NULL, resolved_at = ? WHERE id = ?",
+      args: ['2026-10-04T00:00:00.000Z', blank.id],
+    });
+    const unresolvable = await repos.approvals.create({
+      runId: run.id,
+      threadId: thread.id,
+      botId: bot.id,
+      kind: 'send',
+      tool: 'send_email',
+      summary: 'No time',
+      args: {},
+    });
+    await handle.client.execute({
+      sql: "UPDATE approvals SET status = 'allowed', decision = 'allow_once', resolved_at = NULL WHERE id = ?",
+      args: [unresolvable.id],
+    });
+
+    const decisions = await repos.approvals.listDecisions();
+    expect(decisions).toHaveLength(3);
+    expect(decisions.some((row) => row.id === blank.id || row.id === unresolvable.id)).toBe(false);
+  });
+});

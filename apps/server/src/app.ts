@@ -72,6 +72,7 @@ import { mountAttachmentRoutes, type AttachmentStorage } from './attachments';
 import { mountSearchRoutes } from './search';
 import { mountTeamPackageRoutes } from './team-packages';
 import { mountTodayRoutes } from './today';
+import { mountDecisionRoutes } from './decisions';
 import { mountUsageRoutes } from './usage';
 import { mountDesktopRoutes, type DesktopService } from './desktop';
 import { testMcpServer } from './mcp-servers';
@@ -1317,6 +1318,7 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
   mountAttachmentRoutes(app, { repos, storage: attachments });
 
   mountUsageRoutes(app, { repos, ...(deps.now === undefined ? {} : { now: deps.now }) });
+  mountDecisionRoutes(app, { repos, ...(deps.now === undefined ? {} : { now: deps.now }) });
 
   mountTeamPackageRoutes(app, { repos, ...(deps.now === undefined ? {} : { now: deps.now }) });
 

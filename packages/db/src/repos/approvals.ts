@@ -1,5 +1,5 @@
-import { and, desc, eq } from 'drizzle-orm';
-import { ResolveApproval, type Approval, type ApprovalStatus } from '@brot/protocol';
+import { and, desc, eq, gte, inArray, isNotNull, lt, sql } from 'drizzle-orm';
+import { ResolveApproval, type Approval, type ApprovalDecision, type ApprovalStatus } from '@brot/protocol';
 import type { Db } from '../client';
 import { approvals } from '../schema';
 import { newId, nowIso, required } from './common';
@@ -7,6 +7,22 @@ import { newId, nowIso, required } from './common';
 type ApprovalRow = typeof approvals.$inferSelect;
 
 export type CreateApprovalInput = Omit<Approval, 'id' | 'status' | 'createdAt'>;
+
+/** Statuses a decision has: an approval that was allowed or denied. */
+const RESOLVED_STATUSES: readonly ApprovalStatus[] = ['allowed', 'denied'];
+
+/** The most decisions one `listDecisions` call returns when it passes a limit. */
+export const DECISION_LIMIT_MAX = 200;
+
+/** A decision-log query: resolved approvals whose `resolvedAt` falls in [`from`, `to`). */
+export interface DecisionFilter {
+  from?: string;
+  to?: string;
+  botId?: string;
+  decision?: ApprovalDecision;
+  /** Rows to return, capped at `DECISION_LIMIT_MAX`. Omitted: every matching row (the CSV export reads all). */
+  limit?: number;
+}
 
 export function toApproval(row: ApprovalRow): Approval {
   return {
@@ -41,6 +57,32 @@ export function createApprovalRepo(db: Db) {
         .from(approvals)
         .where(options.status ? eq(approvals.status, options.status) : undefined)
         .orderBy(desc(approvals.createdAt));
+      return rows.map(toApproval);
+    },
+
+    /**
+     * The decision log: approvals that were allowed or denied, newest first by `resolvedAt`. Pending ones and
+     * rows without a decision or a resolution time are never returned. The limit is applied in SQL.
+     */
+    async listDecisions(filter: DecisionFilter = {}): Promise<Approval[]> {
+      const conditions = [
+        inArray(approvals.status, [...RESOLVED_STATUSES]),
+        isNotNull(approvals.decision),
+        isNotNull(approvals.resolvedAt),
+        ...(filter.from === undefined ? [] : [gte(approvals.resolvedAt, filter.from)]),
+        ...(filter.to === undefined ? [] : [lt(approvals.resolvedAt, filter.to)]),
+        ...(filter.botId === undefined ? [] : [eq(approvals.botId, filter.botId)]),
+        ...(filter.decision === undefined ? [] : [eq(approvals.decision, filter.decision)]),
+      ];
+      const query = db
+        .select()
+        .from(approvals)
+        .where(and(...conditions))
+        .orderBy(desc(approvals.resolvedAt), desc(sql`rowid`));
+      const rows =
+        filter.limit === undefined
+          ? await query
+          : await query.limit(Math.min(Math.max(1, filter.limit), DECISION_LIMIT_MAX));
       return rows.map(toApproval);
     },
 
