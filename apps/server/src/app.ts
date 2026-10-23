@@ -22,6 +22,7 @@ import {
   CreateTask,
   CreateTeam,
   CreateThread,
+  DEFAULT_WEBHOOK_PORT,
   ImportSkill,
   IsoDateTime,
   MarkNotificationsRead,
@@ -113,6 +114,7 @@ import { skillFileName } from './skills';
 import type { RoomService } from './rooms/service';
 import type { TaskService } from './rooms/tasks';
 import { normalizeBase32 } from './browser/totp';
+import { rotateRoutineWebhookSecret } from './routines/webhook';
 import { savedLoginSecretNames, SecretBody, SecretName, type Vault } from './vault';
 import {
   VoiceUnavailableError,
@@ -146,7 +148,7 @@ export interface AppDeps {
   engines: EngineRegistry;
   rooms: RoomService;
   tasks: TaskService;
-  config: { host: string; port: number; mode: 'desktop' | 'server' };
+  config: { host: string; port: number; mode: 'desktop' | 'server'; /** The webhook receiver's port, when the caller knows it. */ webhookPort?: number };
   /** Treat loopback callers as the local user. Tests pass false to simulate a remote caller. Defaults to true. */
   trustLoopback?: boolean;
   /** The Brot MCP server. Its route authenticates each run's own token and is mounted outside `/api/*`. */
@@ -1442,6 +1444,30 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     if (result.status === 'skipped') return c.json({ error: 'Routine is already running' }, 409);
     await record(c, { action: 'ran', targetType: 'routine', targetId: routine.id, summary: `Ran routine "${routine.name}"` });
     return c.json({ runId: result.runId }, 202);
+  });
+
+  /** Where the webhook receiver listens: the port a routine's webhook URL points at. Never a secret. */
+  app.get('/api/webhooks', (c) => c.json({ port: config.webhookPort ?? DEFAULT_WEBHOOK_PORT }));
+
+  /**
+   * Rotates a webhook routine's secret. The old URL stops resolving immediately, because the receiver looks the
+   * secret up in the database on every request. Only webhook routines have a secret; cron routines answer 409.
+   */
+  app.post('/api/routines/:id/webhook/rotate', async (c) => {
+    const routine = await repos.routines.get(c.req.param('id'));
+    if (!routine) return notFound(c, 'Routine');
+    if (routine.trigger.type !== 'webhook') {
+      return c.json({ error: 'Only webhook routines have a webhook secret to rotate.' }, 409);
+    }
+    const updated = await rotateRoutineWebhookSecret(repos, routine);
+    if (!updated) return notFound(c, 'Routine');
+    await record(c, {
+      action: 'updated',
+      targetType: 'routine',
+      targetId: routine.id,
+      summary: `Rotated webhook secret for routine "${routine.name}"`,
+    });
+    return c.json(updated);
   });
 
   /** A routine's run history, newest first. */

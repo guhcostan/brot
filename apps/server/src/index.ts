@@ -97,6 +97,8 @@ export async function startServer(options: StartOptions = {}): Promise<ServerHan
     await services.close();
     throw error;
   }
+  // GET /api/webhooks reports the receiver's actual port, which matters when webhookPort was 0.
+  config.webhookPort = hooks.port;
 
   // Scheduled backups: a 15-minute check while Brot runs. The timer is unref'd and every failure is contained.
   const backupScheduler = createBackupScheduler({
