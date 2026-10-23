@@ -682,6 +682,23 @@ mapped in `docs/MAUSBOT-PARITY.md` (34 bots / 7 teams, 33 bots with a browser an
   rendered the audio player with the file name; no STT provider exists on this machine, so transcription
   itself is covered by injected-fetch tests.
 - Suite: 2761 tests (294 files), typecheck 12/12, lint clean. Temporary bot/attachment cleaned up.
+## Wave 46: admin activity audit, digest eval (2026-10-23)
+
+- **Admin activity.** An admin_activity row records created/updated/deleted/revoked/ran actions with
+  target type/id, a human summary, the actor (local user or authenticated device name) and a timestamp,
+  written best-effort so logging can never fail a request. Wired on bots, teams, routines (+run-now), MCP
+  servers, presets, saved logins (name only; tests assert no username/password/totp appears), browser
+  profiles, device pairing/revoke and the voice, My Chrome, room-decider and transcription settings.
+  GET /api/activity lists newest first with a limit and is read-only. Migration 0023. Settings gains an
+  Admin activity section with action badges, summaries, actor, relative time, refresh, loading/empty/error
+  states and a latest-50 note. en/pt-BR/es.
+- Verified live: bot create/update/delete, a voice settings change and a saved login add/delete produced the
+  expected summaries with actor local and zero secret text in the log.
+- **Evals:** A6 (Chief of Staff digest: sourced items, decisions, Next steps, approved fake-API send) passes
+  at $0.0115. A9 (expense reconciliation) failed only on the model's own arithmetic: the artifact had every
+  receipt once with amounts matching the source files and receiptsTotal reconciling to 592.30, but its
+  matchedTotal said 560.2 versus a summed 440.3 - a model-quality issue, not a structural bug.
+- Suite: 2799 tests (300 files), typecheck 12/12, lint clean.
 ## Next
 
 1. Re-run the eval suite on a live model once OpenCode Go has quota (`apps/evals`, `--base` to the server), including B8 and C; the 2026-10-20 results predate the read auto-allow and the fixes above.
