@@ -198,6 +198,15 @@ export type { RoomDeciderSettings, UpdateRoomDeciderSettings } from '@brot/proto
 /** Recorded memory changes (Settings About me and a bot's Memory tab History). */
 export type { MemoryAction, MemoryJournalEntry, UndoMemoryResult } from '@brot/protocol';
 
+/** Duplicate memory groups and the upkeep report (the result envelope is web-local). */
+export type { ApplyMemoryUpkeep, MemoryUpkeepGroup, MemoryUpkeepReport } from '@brot/protocol';
+
+/** `POST /api/memories/upkeep` result: what a merge removed, and the scope's kept memories. */
+export interface MemoryUpkeepResult {
+  removed: Memory[];
+  kept: Memory[];
+}
+
 /** The filters the memory journal accepts; `limit` defaults to 50 on the server. */
 export interface MemoryJournalFilter {
   botId?: string;
@@ -363,6 +372,10 @@ export interface BrotClient {
   deleteMemory(memoryId: string): Promise<void>;
   /** Recorded memory changes, newest first; the shared History dialog for bot and workspace memories. */
   listMemoryJournal(filter?: MemoryJournalFilter): Promise<MemoryJournalEntry[]>;
+  /** Duplicate notes that can be merged in one scope; the newest of each group is kept. */
+  getMemoryUpkeep(input: import('@brot/protocol').MemoryUpkeepScopeInput): Promise<import('@brot/protocol').MemoryUpkeepReport>;
+  /** Removes the duplicate side of the report; the server refuses ids outside it (400, nothing removed). */
+  applyMemoryUpkeep(input: import('@brot/protocol').ApplyMemoryUpkeepInput): Promise<MemoryUpkeepResult>;
   /** Undoes one journal entry; 409 when the memory changed since, 404 when the entry is gone. */
   undoMemoryJournal(entryId: string): Promise<UndoMemoryResult>;
 

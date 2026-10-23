@@ -58,6 +58,9 @@ import {
   UpdateBot,
   UpdateBrowserProfile,
   UndoMemoryResult,
+  ApplyMemoryUpkeep,
+  MemoryUpkeepReport as MemoryUpkeepReportSchema,
+  MemoryUpkeepScope,
   UpdateMcpServer,
   UpdateMemory,
   UpdateMyChromeSettings,
@@ -80,6 +83,7 @@ import {
   DESKTOP_WIDTH,
   type CanonicalEventType,
 } from '@brot/protocol';
+
 import { skillFileFallbackFromId } from '../skillFileName';
 import { voiceTextAllowed } from '../voice';
 
@@ -458,6 +462,20 @@ export function createHttpClient({
     async undoMemoryJournal(entryId) {
       const response = await write('POST', `/api/memories/journal/${encodeURIComponent(entryId)}/undo`, {});
       return UndoMemoryResult.parse(await response.json());
+    },
+
+    async getMemoryUpkeep(input) {
+      const scope = MemoryUpkeepScope.parse(input);
+      const suffix = querySuffix({ scope: scope.scope, botId: scope.botId });
+      const response = await request(`/api/memories/upkeep${suffix}`, { headers: { Accept: 'application/json' } });
+      return MemoryUpkeepReportSchema.parse(await response.json());
+    },
+
+    async applyMemoryUpkeep(input) {
+      const body = ApplyMemoryUpkeep.parse(input);
+      const response = await write('POST', '/api/memories/upkeep', body);
+      const result = (await response.json()) as { removed?: unknown; kept?: unknown };
+      return { removed: Memory.array().parse(result.removed), kept: Memory.array().parse(result.kept) };
     },
 
     listSkills(botId) {

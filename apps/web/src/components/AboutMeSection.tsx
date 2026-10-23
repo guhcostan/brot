@@ -6,8 +6,9 @@ import { useClient } from './client';
 import { ConfirmDialog, Dialog } from './Dialog';
 import { MemoryForm } from './MemoryForm';
 import { MemoryJournalDialog } from './MemoryJournalDialog';
+import { MemoryUpkeepDialog } from './MemoryUpkeepDialog';
 import { MEMORY_KIND_KEY, memorySavedOnFormat } from './memoryShared';
-import { Clock, Plus, Trash } from './icons';
+import { Clock, Plus, Sparkle, Trash } from './icons';
 
 export interface AboutMeSectionProps {
   /** Workspace facts to render before the client load resolves, e.g. in an SSR render. */
@@ -27,6 +28,7 @@ export function AboutMeSection({ initialMemories }: AboutMeSectionProps): ReactE
   const [dialog, setDialog] = useState<{ memory?: Memory } | null>(null);
   const [deleting, setDeleting] = useState<Memory | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [tidyOpen, setTidyOpen] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -60,6 +62,10 @@ export function AboutMeSection({ initialMemories }: AboutMeSectionProps): ReactE
           <Button variant="ghost" size="sm" onClick={() => setHistoryOpen(true)}>
             <Clock size={14} />
             {t('memory.history')}
+          </Button>
+          <Button variant="ghost" size="sm" onClick={() => setTidyOpen(true)}>
+            <Sparkle size={14} />
+            {t('memory.tidyUp')}
           </Button>
           <Button variant="secondary" size="sm" onClick={() => setDialog({})}>
             <Plus size={14} />
@@ -136,6 +142,7 @@ export function AboutMeSection({ initialMemories }: AboutMeSectionProps): ReactE
         onClose={() => setDeleting(null)}
       />
       <MemoryJournalDialog open={historyOpen} scope="workspace" onClose={() => setHistoryOpen(false)} onChanged={load} />
+      <MemoryUpkeepDialog open={tidyOpen} scope="workspace" onClose={() => setTidyOpen(false)} onChanged={load} />
     </div>
   );
 }

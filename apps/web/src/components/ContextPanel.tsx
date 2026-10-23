@@ -9,6 +9,7 @@ import { useClient } from './client';
 import { ComputerSection } from './ComputerPanel';
 import { Close, Plus } from './icons';
 import { MemoryJournalDialog } from './MemoryJournalDialog';
+import { MemoryUpkeepDialog } from './MemoryUpkeepDialog';
 import { MemoryTab } from './MemoryTab';
 import { SkillsTab } from './SkillsTab';
 import { TaskList } from './Tasks';
@@ -75,6 +76,7 @@ export function ContextPanel({
   const [skills, setSkills] = useState<Skill[] | null>(initialSkills ?? null);
   const [memoryError, setMemoryError] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [tidyOpen, setTidyOpen] = useState(false);
   const [skillError, setSkillError] = useState<string | null>(null);
 
   const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
@@ -225,6 +227,7 @@ export function ContextPanel({
               onUpdate={updateMemory}
               onDelete={deleteMemory}
               onOpenHistory={() => setHistoryOpen(true)}
+              onOpenTidy={() => setTidyOpen(true)}
             />
           ) : subject.kind === 'bot' && tab === 'skills' ? (
             <SkillsTab
@@ -244,7 +247,16 @@ export function ContextPanel({
         </div>
       </div>
       {subject.kind === 'bot' ? (
-        <MemoryJournalDialog
+        <>
+          <MemoryUpkeepDialog
+            open={tidyOpen}
+            scope="bot"
+            botId={subject.bot.id}
+            botName={subject.bot.name}
+            onClose={() => setTidyOpen(false)}
+            onChanged={loadMemories}
+          />
+          <MemoryJournalDialog
           open={historyOpen}
           scope="bot"
           botId={subject.bot.id}
@@ -252,6 +264,7 @@ export function ContextPanel({
           onClose={() => setHistoryOpen(false)}
           onChanged={loadMemories}
         />
+        </>
       ) : null}
     </aside>
   );

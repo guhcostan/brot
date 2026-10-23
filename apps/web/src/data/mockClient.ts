@@ -45,6 +45,8 @@ import {
   CreateTeam,
   CreateThread,
   MemoryJournalQuery,
+  MemoryUpkeepScope,
+  ApplyMemoryUpkeep,
   UpdateRoomDeciderSettings,
   DecisionQuery,
   DESKTOP_HEIGHT,
@@ -129,6 +131,7 @@ import { skillFileFilename } from '../skillFileName';
 
 
 
+import { buildMemoryUpkeepReport } from './memoryUpkeepCompute';
 import { buildSearchSnippet } from '../search';
 import { DEFAULT_SYSTEM_VOICE, silentWavBlob, voiceTextAllowed } from '../voice';
 
@@ -1097,6 +1100,33 @@ export function createMockClient(): BrotClient {
         return;
       }
       throw new Error(`Unknown memory: ${memoryId}`);
+    },
+
+    async getMemoryUpkeep(input) {
+      const scope = MemoryUpkeepScope.parse(input);
+      const all = [...memories.values(), ...workspaceMemories.values()];
+      return structuredClone(buildMemoryUpkeepReport(scope.scope, scope.botId, all));
+    },
+
+    async applyMemoryUpkeep(input) {
+      const parsed = ApplyMemoryUpkeep.parse(input);
+      const all = [...memories.values(), ...workspaceMemories.values()];
+      const report = buildMemoryUpkeepReport(parsed.scope, parsed.botId, all);
+      const allowed = new Set(report.groups.flatMap((group) => group.remove.map((memory) => memory.id)));
+      if (parsed.removeIds.some((id) => !allowed.has(id))) throw new Error('Only duplicates can be removed by upkeep');
+      const removed: Memory[] = [];
+      for (const id of parsed.removeIds) {
+        const memory = memories.get(id) ?? workspaceMemories.get(id);
+        if (memory === undefined) continue;
+        if (memory.scope === 'workspace') workspaceMemories.delete(id);
+        else memories.delete(id);
+        removed.push(memory);
+        journalMemory({ memoryId: id, ...(memory.botId === undefined ? {} : { botId: memory.botId }), scope: memory.scope, kind: memory.kind, action: 'deleted', contentBefore: memory.content });
+      }
+      const kept = [...memories.values(), ...workspaceMemories.values()]
+        .filter((memory) => memory.scope === parsed.scope && (parsed.botId === undefined || memory.botId === parsed.botId))
+        .map((memory) => structuredClone(memory));
+      return { removed: removed.map((memory) => structuredClone(memory)), kept };
     },
 
     async listMemoryJournal(filter = {}) {

@@ -5,7 +5,7 @@ import { t } from '../i18n';
 import { Dialog, ConfirmDialog } from './Dialog';
 import { MemoryForm } from './MemoryForm';
 import { MEMORY_KIND_KEY, memorySavedOnFormat } from './memoryShared';
-import { Clock, Plus, Trash } from './icons';
+import { Clock, Plus, Sparkle, Trash } from './icons';
 
 export interface MemoryTabProps {
   botName: string;
@@ -17,10 +17,12 @@ export interface MemoryTabProps {
   onDelete: (memoryId: string) => Promise<unknown>;
   /** Opens the memory journal; absent hides the History action. */
   onOpenHistory?: () => void;
+  /** Opens the duplicate clean-up dialog; absent hides the Tidy up action. */
+  onOpenTidy?: () => void;
 }
 
 /** What a bot remembers: every entry is editable, and every run recalls only the most relevant ones. */
-export function MemoryTab({ botName, memories, error, onCreate, onUpdate, onDelete, onOpenHistory }: MemoryTabProps): ReactElement {
+export function MemoryTab({ botName, memories, error, onCreate, onUpdate, onDelete, onOpenHistory, onOpenTidy }: MemoryTabProps): ReactElement {
   const [dialog, setDialog] = useState<{ memory?: Memory } | null>(null);
   const [deleting, setDeleting] = useState<Memory | null>(null);
 
@@ -33,6 +35,12 @@ export function MemoryTab({ botName, memories, error, onCreate, onUpdate, onDele
             <Button variant="ghost" size="sm" onClick={onOpenHistory}>
               <Clock size={14} />
               {t('memory.history')}
+            </Button>
+          ) : null}
+          {onOpenTidy !== undefined ? (
+            <Button variant="ghost" size="sm" onClick={onOpenTidy}>
+              <Sparkle size={14} />
+              {t('memory.tidyUp')}
             </Button>
           ) : null}
           <Button variant="secondary" size="sm" onClick={() => setDialog({})}>
