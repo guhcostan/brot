@@ -516,13 +516,29 @@ mapped in `docs/MAUSBOT-PARITY.md` (34 bots / 7 teams, 33 bots with a browser an
 - Verified live: decider set to opencode-go, an auto room with Capy and Teste answered a mention-free
   message with one run started, then both the room and the setting were cleaned up.
 - Suite: 2485 tests (259 files), typecheck 12/12, lint clean.
+## Wave 36: persistent baton, orphan sweep, live evals (2026-10-23)
+
+- **Room baton persisted.** The baton now lives in a room_batons row (migration 0021): a restart keeps who
+  answers the next unmentioned message; mentions leave it, the holder's answer consumes it, handoffs
+  overwrite it, stale holders are ignored/cleared, and deleting a room cascades.
+- **Boot orphan sweep.** At startup a best-effort sweep removes only brot-computer-<botId>/brot-egress-<botId>
+  containers whose bot is gone or no longer sandbox. Fire-and-forget, docker-unavailable safe, and on by
+  default only for the canonical ~/.brot home so test homes cannot delete another install's containers.
+- **Evals un-gapped and live.** C7 (stdio MCP server granted per bot, egress deny, tool called, magic
+  returned, no tunnel/approval) and C2 (daily cap fails instantly at $0, run cap aborts on first usage,
+  uncapped bot completes with cost recorded) are real cases now. Ran live: C2+C7 pass, 4 runs, $0.0027,
+  no leftovers. A second live subset passed C5 (editable memory), B2 (mid-conversation mention) and B3
+  (baton handoff) at $0.03 total; B1 errored after the model asked the wrong teammates and looped until the
+  case timeout ($0.25) — a model-behavior failure, not a structural bug (checks show the delegation tasks
+  and room summary were correct; a per-run inactivity watchdog is the follow-up).
+- Suite: 2507 tests (263 files), typecheck 12/12, lint clean. Eval leftovers (3 rooms, 12 archived eval
+  bots) cleaned from the live DB.
 ## Next
 
 1. Re-run the eval suite on a live model once OpenCode Go has quota (`apps/evals`, `--base` to the server), including B8 and C; the 2026-10-20 results predate the read auto-allow and the fixes above.
 2. A live run of a desktop bot doing a web task end to end (snapshot → click → takeover on sign-in).
 3. Signed desktop builds and a first GitHub release; the site's download links point to releases.
-4. Persist the baton and takeover state; a per (thread, bot) relay URL; a boot-time sweep of orphaned
-   brot-computer-*/brot-egress-* containers.
+4. Persist the takeover state; a per (thread, bot) relay URL; a per-run inactivity watchdog (B1 stalled).
 
 ## Decision: DeepSeek Harness is the only runtime (2026-10-19)
 
