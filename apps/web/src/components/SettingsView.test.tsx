@@ -384,3 +384,43 @@ describe('settings my chrome', () => {
     expect(text).toContain(t('settings.myChromeUnavailableReason', { reason: 'Chrome is not listening on that endpoint.' }));
   });
 });
+
+describe('settings transcription', () => {
+  it('shows the unset state and dims models that cannot transcribe', () => {
+    const text = textOf(render({ initialTranscription: { settings: {}, available: false, reason: 'No transcription model is configured.' } }));
+
+    expect(text).toContain(t('settings.transcription'));
+    expect(text).toContain(t('settings.transcriptionBody'));
+    expect(text).toContain(t('settings.transcriptionUnset'));
+    expect(text).toContain(t('settings.transcriptionModel'));
+    expect(text).toContain(t('settings.transcriptionUnavailableReason', { reason: 'No transcription model is configured.' }));
+    expect(text).toContain(t('settings.transcriptionCannot'));
+    expect(text).toContain('opencode-go/deepseek-v4.1-flash');
+    expect(text).toContain('deepseek/deepseek-v4.1');
+  });
+
+  it('shows the configured model and availability', () => {
+    const text = textOf(
+      render({
+        initialTranscription: {
+          settings: { model: 'opencode-go/deepseek-v4.1-flash', updatedAt: '2026-10-19T09:00:00.000Z' },
+          available: true,
+        },
+      }),
+    );
+
+    expect(text).toContain(t('settings.transcriptionCurrent', { model: 'opencode-go/deepseek-v4.1-flash' }));
+    expect(text).toContain(t('settings.transcriptionAvailable'));
+    expect(text).not.toContain(t('settings.transcriptionUnset'));
+  });
+
+  it('shows the unavailable reason', () => {
+    const text = textOf(
+      render({
+        initialTranscription: { settings: {}, available: false, reason: 'The provider has no key.' },
+      }),
+    );
+
+    expect(text).toContain(t('settings.transcriptionUnavailableReason', { reason: 'The provider has no key.' }));
+  });
+});

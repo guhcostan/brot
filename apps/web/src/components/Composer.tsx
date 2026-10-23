@@ -31,8 +31,9 @@ import {
   type CommandSpec,
   type ParsedCommand,
 } from './composerCommands';
+import { canRecordVoice, formatRecordingDuration, getMediaRecorder, pickVoiceNoteMime, voiceNoteFileName } from '../voiceNotes';
 import { finalTranscript, getSpeechRecognition, speechLanguage, type SpeechRecognitionLike } from './dictation';
-import { Close, FileDoc, Mic, Paperclip } from './icons';
+import { Close, FileDoc, Mic, Paperclip, Record } from './icons';
 
 export interface ComposerProps {
   /** Who the message goes to, for the label and placeholder: a bot's name or a room's title. */
@@ -66,6 +67,10 @@ export interface ComposerProps {
   initialDictation?: 'idle' | 'listening' | 'unsupported';
   /** The object SpeechRecognition is looked up on; tests pass a fake scope. */
   speechScope?: unknown;
+  /** Voice-note state to render before any click, for SSR previews and tests. */
+  initialVoiceState?: 'idle' | 'recording' | 'unsupported';
+  /** Elapsed seconds to show with initialVoiceState="recording", for SSR previews and tests. */
+  initialRecordingSeconds?: number;
 }
 
 const MAX_HEIGHT = 200;
@@ -102,6 +107,8 @@ export function Composer({
   initialHelpOpen = false,
   initialDictation = 'idle',
   speechScope,
+  initialVoiceState = 'idle',
+  initialRecordingSeconds = 0,
 }: ComposerProps): ReactElement {
   const [draft, setDraft] = useState(initialDraft ?? '');
   const [caret, setCaret] = useState(0);
@@ -126,6 +133,14 @@ export function Composer({
   const [dictationError, setDictationError] = useState<string | null>(initialDictation === 'unsupported' ? t('composer.dictationUnsupported') : null);
   const [listening, setListening] = useState(initialDictation === 'listening');
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const [voiceState, setVoiceState] = useState<'idle' | 'recording'>(initialVoiceState === 'recording' ? 'recording' : 'idle');
+  const [recordingSeconds, setRecordingSeconds] = useState(initialRecordingSeconds);
+  const [recorderError, setRecorderError] = useState<string | null>(initialVoiceState === 'unsupported' ? t('composer.recordUnsupported') : null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const cancelRecordingRef = useRef(false);
+  const unmountedRef = useRef(false);
   const fieldRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const keyRef = useRef((initialFiles ?? []).length);
@@ -152,6 +167,24 @@ export function Composer({
     },
     [],
   );
+
+  useEffect(() => {
+    if (voiceState !== 'recording') return;
+    const timer = setInterval(() => setRecordingSeconds((current) => current + 1), 1000);
+    return () => clearInterval(timer);
+  }, [voiceState]);
+
+  useEffect(() => {
+    unmountedRef.current = false;
+    return () => {
+      unmountedRef.current = true;
+      cancelRecordingRef.current = true;
+      recorderRef.current?.stop();
+      recorderRef.current = null;
+      for (const track of streamRef.current?.getTracks() ?? []) track.stop();
+      streamRef.current = null;
+    };
+  }, []);
 
   const mention = members && members.length > 0 ? activeMention(draft, caret) : null;
   const options = useMemo(
@@ -284,6 +317,80 @@ export function Composer({
     }
   };
 
+  const releaseVoiceStream = () => {
+    for (const track of streamRef.current?.getTracks() ?? []) track.stop();
+    streamRef.current = null;
+  };
+
+  const startVoiceNote = async () => {
+    setRecorderError(null);
+    setCommandHint(null);
+    const Recorder = getMediaRecorder();
+    if (Recorder === undefined || !canRecordVoice()) {
+      setRecorderError(t('composer.recordUnsupported'));
+      return;
+    }
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch {
+      setRecorderError(t('composer.recordDenied'));
+      return;
+    }
+    const mimeType = pickVoiceNoteMime((candidate) => Recorder.isTypeSupported(candidate));
+    if (mimeType === null) {
+      for (const track of stream.getTracks()) track.stop();
+      setRecorderError(t('composer.recordUnsupported'));
+      return;
+    }
+    const recorder = new Recorder(stream, { mimeType });
+    streamRef.current = stream;
+    chunksRef.current = [];
+    cancelRecordingRef.current = false;
+    recorder.ondataavailable = (event) => {
+      if (event.data.size > 0) chunksRef.current.push(event.data);
+    };
+    recorder.onstop = () => {
+      const chunks = chunksRef.current;
+      chunksRef.current = [];
+      recorderRef.current = null;
+      releaseVoiceStream();
+      if (unmountedRef.current) return;
+      setVoiceState('idle');
+      setRecordingSeconds(0);
+      if (cancelRecordingRef.current) {
+        cancelRecordingRef.current = false;
+        return;
+      }
+      if (chunks.length === 0) {
+        setRecorderError(t('composer.recordFailed'));
+        return;
+      }
+      const blob = new Blob(chunks, { type: mimeType });
+      const file = new File([blob], voiceNoteFileName(new Date(), mimeType), { type: mimeType.split(';')[0] ?? mimeType });
+      addFiles([file]);
+    };
+    try {
+      recorder.start();
+    } catch {
+      releaseVoiceStream();
+      setRecorderError(t('composer.recordFailed'));
+      return;
+    }
+    recorderRef.current = recorder;
+    setVoiceState('recording');
+    setRecordingSeconds(0);
+  };
+
+  const stopVoiceNote = () => {
+    recorderRef.current?.stop();
+  };
+
+  const cancelVoiceNote = () => {
+    cancelRecordingRef.current = true;
+    recorderRef.current?.stop();
+  };
+
   const addFiles = (files: FileList | readonly File[] | null | undefined) => {
     if (!attachable || !files) return;
     const incoming = [...files];
@@ -348,6 +455,7 @@ export function Composer({
       setDraft('');
       setCaret(0);
       setPending([]);
+      if (recorderRef.current !== null) cancelVoiceNote();
     } catch (cause) {
       // The message never existed, so drop the bytes it would have carried.
       await discardUploads(uploaded);
@@ -587,13 +695,41 @@ export function Composer({
               variant="ghost"
               size="icon"
               onClick={() => fileRef.current?.click()}
-              disabled={busy || uploading}
+              disabled={busy || uploading || voiceState === 'recording'}
               aria-label={t('composer.attach')}
               title={t('composer.attach')}
               className="mb-0.5 !size-9 flex-none"
             >
               <Paperclip size={16} />
             </Button>
+          ) : null}
+          {attachable ? (
+            voiceState === 'recording' ? (
+              <span className="mb-0.5 flex flex-none items-center gap-1">
+                <span className="flex items-center gap-1 text-xs text-attention-text">
+                  <span aria-hidden="true" className="size-2 rounded-full bg-attention-text" />
+                  {t('composer.recording', { duration: formatRecordingDuration(recordingSeconds) })}
+                </span>
+                <Button variant="ghost" size="sm" onClick={stopVoiceNote} disabled={busy}>
+                  {t('composer.recordStop')}
+                </Button>
+                <Button variant="ghost" size="sm" onClick={cancelVoiceNote} disabled={busy} className="text-ink-3">
+                  {t('composer.recordCancel')}
+                </Button>
+              </span>
+            ) : (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => void startVoiceNote()}
+                disabled={busy || uploading || initialVoiceState === 'unsupported'}
+                aria-label={t(initialVoiceState === 'unsupported' ? 'composer.recordUnsupported' : 'composer.recordVoice')}
+                title={t(initialVoiceState === 'unsupported' ? 'composer.recordUnsupported' : 'composer.recordVoice')}
+                className="mb-0.5 !size-9 flex-none"
+              >
+                <Record size={16} />
+              </Button>
+            )
           ) : null}
           <Button
             variant="ghost"
@@ -651,9 +787,9 @@ export function Composer({
             <span id={errorId} role="alert" className="text-attention-text">
               {error}
             </span>
-          ) : commandHint !== null || dictationError !== null ? (
+          ) : commandHint !== null || dictationError !== null || recorderError !== null ? (
             <span role="alert" className="text-attention-text">
-              {commandHint ?? dictationError}
+              {commandHint ?? dictationError ?? recorderError}
             </span>
           ) : (
             <span className="text-ink-3" aria-live="polite">

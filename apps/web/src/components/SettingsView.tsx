@@ -4,6 +4,7 @@ import { BotAvatar, Button, Skeleton, cx } from '@brot/ui';
 import type { BrowserProfile, Provider } from '../data/client';
 import type { RoomDeciderSettings } from '@brot/protocol';
 import type { MyChromeStatus } from '../data/client';
+import type { TranscriptionStatus } from '../transcription';
 import type { McpServer, Memory, SavedLogin, Team } from '@brot/protocol';
 import type { BotPreset } from '@brot/protocol';
 import type { Decision } from '../data/client';
@@ -24,6 +25,7 @@ import { AboutMeSection } from './AboutMeSection';
 import { ActivitySection } from './ActivitySection';
 import { BotPresetsSection } from './BotPresetsSection';
 import { RoomRoutingSection } from './RoomRoutingSection';
+import { TranscriptionSection } from './TranscriptionSection';
 import { VoiceSection } from './VoiceSection';
 import { TeamPackages } from './TeamPackages';
 import { PaneHeader } from './ThreadView';
@@ -52,6 +54,8 @@ export interface SettingsViewProps {
   initialRoomDecider?: RoomDeciderSettings;
   /** My Chrome status before the client load resolves, e.g. in an SSR render. */
   initialMyChrome?: MyChromeStatus;
+  /** Transcription status before the client load resolves, e.g. in an SSR render. */
+  initialTranscription?: TranscriptionStatus;
   /** Called after the voice settings change, so the app can refresh listen availability. */
   onVoiceChanged?: () => void;
   /** Teams for the export scope before the client load resolves, e.g. in an SSR render. */
@@ -70,7 +74,7 @@ const THEME_LABEL: Record<Theme, TranslationKey> = {
   dark: 'settings.theme.dark',
 };
 
-export function SettingsView({ locale, onLocaleChange, theme, onThemeChange, onOpenBots, initialBrowserProfiles, initialMcpServers, initialSavedLogins, initialVoice, initialSecretNames, initialWorkspaceMemories, initialBotPresets, initialDecisions, initialProviders, initialRoomDecider, initialMyChrome, onVoiceChanged, initialTeams, initialTeamPackageContent }: SettingsViewProps): ReactElement {
+export function SettingsView({ locale, onLocaleChange, theme, onThemeChange, onOpenBots, initialBrowserProfiles, initialMcpServers, initialSavedLogins, initialVoice, initialSecretNames, initialWorkspaceMemories, initialBotPresets, initialDecisions, initialProviders, initialRoomDecider, initialMyChrome, initialTranscription, onVoiceChanged, initialTeams, initialTeamPackageContent }: SettingsViewProps): ReactElement {
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg">
       <PaneHeader onOpenBots={onOpenBots}>
@@ -94,6 +98,9 @@ export function SettingsView({ locale, onLocaleChange, theme, onThemeChange, onO
           </Section>
           <Section title={t('settings.voice')} description={t('settings.voiceBody')}>
             <VoiceSection initialStatus={initialVoice} initialSecretNames={initialSecretNames} onChanged={onVoiceChanged} />
+          </Section>
+          <Section title={t('settings.transcription')} description={t('settings.transcriptionBody')}>
+            <TranscriptionSection initialStatus={initialTranscription} initialProviders={initialProviders} />
           </Section>
           <Section title={t('settings.aboutMe')} description={t('settings.aboutMeBody')}>
             <AboutMeSection initialMemories={initialWorkspaceMemories} />

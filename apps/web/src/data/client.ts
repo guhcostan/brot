@@ -106,6 +106,7 @@ export type {
   UsageTotals,
 } from '@brot/protocol';
 import type { UpdateVoiceSettings, VoiceInfo, VoiceSettings } from '@brot/protocol';
+import type { TranscriptionSettings, TranscriptionStatus, UpdateTranscriptionSettings } from '../transcription';
 export type { UpdateVoiceSettings, VoiceInfo, VoiceProvider, VoiceSettings } from '@brot/protocol';
 export type { Team } from '@brot/protocol';
 
@@ -194,6 +195,9 @@ export type { Decision } from '@brot/protocol';
 
 /** The optional model that picks which member answers in an auto room. */
 export type { RoomDeciderSettings, UpdateRoomDeciderSettings } from '@brot/protocol';
+
+/** The optional model that transcribes audio attachments before a run. */
+export type { TranscriptionSettings, TranscriptionStatus, UpdateTranscriptionSettings };
 
 /** Recorded memory changes (Settings About me and a bot's Memory tab History). */
 export type { MemoryAction, MemoryJournalEntry, UndoMemoryResult } from '@brot/protocol';
@@ -286,6 +290,8 @@ export interface UsageFilter {
 export interface ProviderModel {
   id: string;
   label: string;
+  /** Whether the provider reports this model can transcribe audio; absent is treated as no. */
+  transcription?: boolean;
 }
 
 /** The Wire APIs a provider can speak; only `openai-completions` providers can decide auto rooms. */
@@ -463,6 +469,11 @@ export interface BrotClient {
   getMyChrome(): Promise<MyChromeStatus>;
   /** Saves the loopback CDP endpoint My Chrome should drive, then returns the fresh status. */
   updateMyChrome(input: UpdateMyChromeSettingsInput): Promise<MyChromeStatus>;
+
+  /** The transcription model settings plus whether that model is currently usable. */
+  getTranscriptionStatus(): Promise<TranscriptionStatus>;
+  /** Saves the transcription model (null clears it) and returns the fresh status. */
+  updateTranscriptionSettings(input: UpdateTranscriptionSettings): Promise<TranscriptionStatus>;
   /** Opens a headed window so the person can sign in; the bot keeps the profile afterwards. */
   startBrowserLogin(botId: string): Promise<BrowserStatus>;
   /** Closes the browser, saving its profile. Shared profiles close for every bot using them. */

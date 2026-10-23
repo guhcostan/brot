@@ -4,6 +4,7 @@ import { attachmentUrl } from '../data/client';
 import { formatBytes } from '../format';
 import { t } from '../i18n';
 import { FileDoc } from './icons';
+import { AudioAttachment } from './AudioAttachment';
 
 export interface MessageAttachmentsProps {
   attachments: readonly Attachment[];
@@ -17,7 +18,8 @@ export interface MessageAttachmentsProps {
 export function MessageAttachments({ attachments }: MessageAttachmentsProps): ReactElement | null {
   if (attachments.length === 0) return null;
   const images = attachments.filter((attachment) => attachment.kind === 'image');
-  const files = attachments.filter((attachment) => attachment.kind !== 'image');
+  const audio = attachments.filter((attachment) => attachment.kind === 'audio');
+  const files = attachments.filter((attachment) => attachment.kind === 'file');
   return (
     <div className="flex min-w-0 flex-col gap-2">
       {images.length > 0 ? (
@@ -25,6 +27,15 @@ export function MessageAttachments({ attachments }: MessageAttachmentsProps): Re
           {images.map((attachment) => (
             <li key={attachment.id}>
               <ImageThumbnail attachment={attachment} />
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {audio.length > 0 ? (
+        <ul aria-label={t('attachment.audio')} className="m-0 flex list-none flex-col gap-2 p-0">
+          {audio.map((attachment) => (
+            <li key={attachment.id}>
+              <AudioAttachment attachment={attachment} />
             </li>
           ))}
         </ul>
@@ -65,7 +76,7 @@ function ImageThumbnail({ attachment }: { attachment: Attachment }): ReactElemen
   );
 }
 
-function FileChip({ attachment }: { attachment: Attachment }): ReactElement {
+export function FileChip({ attachment }: { attachment: Attachment }): ReactElement {
   const url = attachmentUrl(attachment.id);
   return (
     <a

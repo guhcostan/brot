@@ -100,6 +100,13 @@ export const Bookmark = ({ size }: { size?: number }) => (
   </Icon>
 );
 
+/** A filled circle: start recording a voice note. */
+export const Record = ({ size }: { size?: number }) => (
+  <Icon size={size}>
+    <circle cx="10" cy="10" r="4.25" fill="currentColor" stroke="none" />
+  </Icon>
+);
+
 /** A microphone: dictate into the composer. */
 export const Mic = ({ size }: { size?: number }) => (
   <Icon size={size}>

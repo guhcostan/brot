@@ -130,3 +130,26 @@ describe('composer dictation', () => {
     expect(html).toContain('aria-pressed="true"');
   });
 });
+
+describe('composer voice notes', () => {
+  it('offers the record button when attachments are available', () => {
+    const html = render();
+    expect(html).toContain(`aria-label="${t('composer.recordVoice')}"`);
+  });
+
+  it('renders the unsupported state disabled with the reason', () => {
+    const html = render({ initialVoiceState: 'unsupported' });
+    const button = html.match(new RegExp(`<button[^>]*aria-label="${t('composer.recordUnsupported')}"[^>]*>`))?.[0] ?? '';
+
+    expect(button).toContain('disabled=""');
+    expect(textOf(html)).toContain(t('composer.recordUnsupported'));
+  });
+
+  it('shows the recording state with elapsed time, stop and cancel', () => {
+    const text = textOf(render({ initialVoiceState: 'recording', initialRecordingSeconds: 7 }));
+
+    expect(text).toContain(t('composer.recording', { duration: '0:07' }));
+    expect(text).toContain(t('composer.recordStop'));
+    expect(text).toContain(t('composer.recordCancel'));
+  });
+});

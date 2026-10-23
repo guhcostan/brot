@@ -132,6 +132,7 @@ import { skillFileFilename } from '../skillFileName';
 
 
 import { buildMemoryUpkeepReport } from './memoryUpkeepCompute';
+import { modelSupportsTranscription, validateUpdateTranscriptionSettings, type TranscriptionSettings, type TranscriptionStatus } from '../transcription';
 import { buildSearchSnippet } from '../search';
 import { DEFAULT_SYSTEM_VOICE, silentWavBlob, voiceTextAllowed } from '../voice';
 
@@ -165,7 +166,7 @@ export const DEMO_PROVIDERS: Provider[] = [
     secretName: 'OPENCODE_API_KEY',
     api: 'openai-completions',
     models: [
-      { id: 'opencode-go/deepseek-v4.1-flash', label: 'DeepSeek V4.1 Flash' },
+      { id: 'opencode-go/deepseek-v4.1-flash', label: 'DeepSeek V4.1 Flash', transcription: true },
       { id: 'opencode-go/deepseek-v4.1', label: 'DeepSeek V4.1' },
     ],
   },
@@ -322,6 +323,17 @@ export function createMockClient(): BrotClient {
   const providers = DEMO_PROVIDERS.map((provider) => structuredClone(provider));
   let roomDecider: RoomDeciderSettings = {};
   let myChrome: MyChromeSettings = { endpoint: MY_CHROME_DEFAULT_ENDPOINT };
+  let transcription: TranscriptionSettings = {};
+  const transcriptionStatus = (): TranscriptionStatus => {
+    const model = transcription.model;
+    if (model === undefined) return { settings: structuredClone(transcription), available: false, reason: 'No transcription model is configured.' };
+    const provider = providers.find((candidate) => model.startsWith(`${candidate.id}/`));
+    const entry = provider?.models.find((candidate) => candidate.id === model);
+    if (provider === undefined || entry === undefined) return { settings: structuredClone(transcription), available: false, reason: 'The configured transcription model is unknown.' };
+    if (!modelSupportsTranscription(entry)) return { settings: structuredClone(transcription), available: false, reason: 'That model cannot transcribe audio.' };
+    if (!provider.configured) return { settings: structuredClone(transcription), available: false, reason: `${provider.label} has no API key yet.` };
+    return { settings: structuredClone(transcription), available: true };
+  };
 
   /** The server's fallback rules: at most 3 ordered refs, no repeats, each a known `<provider>/<model>`. */
   const validateFallbackModels = (models: readonly string[]): void => {
@@ -1872,6 +1884,25 @@ export function createMockClient(): BrotClient {
 
     getMyChrome() {
       return Promise.resolve(myChromeStatus(myChrome));
+    },
+
+    getTranscriptionStatus() {
+      return Promise.resolve(transcriptionStatus());
+    },
+
+    async updateTranscriptionSettings(input) {
+      const body = validateUpdateTranscriptionSettings(input);
+      if (body.model !== null) {
+        const provider = providers.find((candidate) => body.model !== null && body.model.startsWith(`${candidate.id}/`));
+        const entry = provider?.models.find((model) => model.id === body.model);
+        if (provider === undefined || entry === undefined) throw new Error(`Unknown transcription model: ${body.model}`);
+        if (!modelSupportsTranscription(entry)) throw new Error(`Model ${body.model} cannot transcribe audio`);
+      }
+      transcription = {
+        ...(body.model === null ? {} : { model: body.model }),
+        updatedAt: now(),
+      };
+      return transcriptionStatus();
     },
 
     async updateMyChrome(input) {

@@ -85,6 +85,7 @@ import {
 } from '@brot/protocol';
 
 import { skillFileFallbackFromId } from '../skillFileName';
+import { parseTranscriptionStatus, validateUpdateTranscriptionSettings } from '../transcription';
 import { voiceTextAllowed } from '../voice';
 
 import {
@@ -809,6 +810,17 @@ export function createHttpClient({
       return parseMyChromeStatus(await response.json());
     },
 
+    async getTranscriptionStatus() {
+      const response = await request('/api/transcription', { headers: { Accept: 'application/json' } });
+      return parseTranscriptionStatus(await response.json());
+    },
+
+    async updateTranscriptionSettings(input) {
+      const body = validateUpdateTranscriptionSettings(input);
+      const response = await write('PUT', '/api/transcription', body);
+      return parseTranscriptionStatus(await response.json());
+    },
+
     async startBrowserLogin(botId) {
       const response = await write('POST', `${botPath(botId)}/browser/login`, {});
       return parseBrowserStatus(await response.json());
@@ -1054,7 +1066,11 @@ export function parseProviders(value: unknown): Provider[] {
       models: models.map((model) => {
         if (!isRecord(model)) throw new Error('A provider model is not an object');
         const modelId = textField(model.id, 'model.id');
-        return { id: `${id}/${modelId}`, label: textField(model.label ?? modelId, 'model.label') };
+        return {
+          id: `${id}/${modelId}`,
+          label: textField(model.label ?? modelId, 'model.label'),
+          ...(model.transcription === true ? { transcription: true } : {}),
+        };
       }),
     };
   });
