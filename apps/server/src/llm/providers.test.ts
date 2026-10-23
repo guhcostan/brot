@@ -77,6 +77,45 @@ describe('loadProviderFile', () => {
     expect(await loadProviderFile(join(dir, 'providers.json'))).toEqual([]);
   });
 
+  it('reads the vision opt-in on a model, defaulting to absent (text-only)', async () => {
+    const path = await write({
+      providers: [
+        {
+          id: 'local',
+          api: 'openai-completions',
+          baseUrl: 'http://127.0.0.1:11434/v1',
+          secretName: 'local',
+          models: [
+            { id: 'sees-images', vision: true },
+            { id: 'text-only' },
+            { id: 'explicit-off', vision: false },
+          ],
+        },
+      ],
+    });
+    const [provider] = await loadProviderFile(path);
+    expect(provider?.models?.map((model) => [model.id, model.vision])).toEqual([
+      ['sees-images', true],
+      ['text-only', undefined],
+      ['explicit-off', false],
+    ]);
+  });
+
+  it('rejects a model field that is not known', async () => {
+    const path = await write({
+      providers: [
+        {
+          id: 'local',
+          api: 'openai-completions',
+          baseUrl: 'http://127.0.0.1:11434/v1',
+          secretName: 'local',
+          models: [{ id: 'model', vision: true, images: true }],
+        },
+      ],
+    });
+    await expect(loadProviderFile(path)).rejects.toThrow(/Unrecognized key/);
+  });
+
   it('reads valid providers and trims the trailing slash of baseUrl', async () => {
     const path = await write({
       providers: [

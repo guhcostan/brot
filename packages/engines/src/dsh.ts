@@ -11,6 +11,7 @@ import {
   ndJsonStream,
   PROTOCOL_VERSION,
   type ClientConnection,
+  type ContentBlock,
   type McpServer as AcpMcpServer,
   type PromptResponse,
   type RequestPermissionRequest,
@@ -554,9 +555,17 @@ export function createDshEngine(opts: DshEngineOptions = {}): DshEngine {
       if (ctx.signal.aborted) return;
 
       const text = state.primed ? sessionInput(ctx) : buildPrompt(ctx);
+      // Images only travel on the first turn of a fresh session: a primed session already holds the earlier ones.
+      const promptContent: ContentBlock[] =
+        !state.primed && ctx.images !== undefined && ctx.images.length > 0
+          ? [
+              { type: 'text', text },
+              ...ctx.images.map((image) => ({ type: 'image' as const, data: image.data, mimeType: image.mimeType })),
+            ]
+          : [{ type: 'text', text }];
       const prompt = server.connection.agent.request(methods.agent.session.prompt, {
         sessionId,
-        prompt: [{ type: 'text', text }],
+        prompt: promptContent,
       });
       current.promptSent = true;
       void prompt.then(

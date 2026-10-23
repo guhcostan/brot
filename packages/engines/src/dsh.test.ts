@@ -24,6 +24,7 @@ import {
   type DshEngineOptions,
 } from './dsh';
 import { DIRECT_PROVIDER_ROWS, llmOverlay } from './dsh-llm';
+import { buildPrompt, sessionInput } from './prompt';
 import { collect, makeContext, type TestContextOptions } from './test-utils';
 
 const FAKE_AGENT = fileURLToPath(new URL('./test-fixtures/fake-acp-agent.mjs', import.meta.url));
@@ -369,6 +370,49 @@ const HTTP_ACP = {
   headers: [{ name: 'authorization', value: 'Bearer run-token' }],
 };
 const STDIO_ACP = { name: 'docs', command: 'node', args: ['docs.js'], env: [{ name: 'DOCS_HOME', value: '/data' }] };
+
+const IMAGE_BLOCKS = [
+  { mimeType: 'image/png', data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==' },
+  { mimeType: 'image/jpeg', data: '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAABAAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AKp//2Q==' },
+];
+
+/** The content blocks the fake ACP agent received for a `blocks` scenario. */
+function promptBlocks(events: EngineEvent[]): Array<{ type: string; text?: string; data?: string; mimeType?: string }> {
+  return JSON.parse(textOf(events)) as Array<{ type: string; text?: string; data?: string; mimeType?: string }>;
+}
+
+describe('image prompt blocks', () => {
+  it('sends the text block first and one image block per image on a fresh session', async () => {
+    const engine = engineFor();
+    const { ctx } = makeContext({ input: 'blocks', images: IMAGE_BLOCKS });
+    const blocks = promptBlocks(await collect(engine.run(ctx)));
+
+    expect(blocks.map((block) => block.type)).toEqual(['text', 'image', 'image']);
+    expect(blocks[0]?.text).toBe(buildPrompt(ctx));
+    expect(blocks.slice(1).map((block) => [block.mimeType, block.data])).toEqual(
+      IMAGE_BLOCKS.map((image) => [image.mimeType, image.data]),
+    );
+  });
+
+  it('keeps the single text block byte-identical when there are no images', async () => {
+    const engine = engineFor();
+    const { ctx } = makeContext({ input: 'blocks' });
+    const blocks = promptBlocks(await collect(engine.run(ctx)));
+
+    expect(blocks).toEqual([{ type: 'text', text: buildPrompt(ctx) }]);
+  });
+
+  it('does not send images on a primed session, whose earlier turns already hold them', async () => {
+    const engine = engineFor();
+    const first = await collect(engine.run(makeContext({ input: 'blocks' }).ctx));
+    const session = sessionOf(first);
+    const resumed = makeContext({ input: 'blocks', images: IMAGE_BLOCKS, engineSessionId: session });
+    const blocks = promptBlocks(await collect(engine.run(resumed.ctx)));
+
+    expect(blocks).toEqual([{ type: 'text', text: sessionInput(resumed.ctx) }]);
+    expect(blocks.some((block) => block.type === 'image')).toBe(false);
+  });
+});
 
 describe('dsh engine bots in one thread', () => {
   it('gives each bot its own server process and DSH session', async () => {

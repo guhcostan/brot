@@ -5,6 +5,7 @@ import type {
   McpServerSpec,
   Memory,
   Message,
+  RunContext,
   ToolDecision,
   ToolRequest,
 } from '@brot/protocol';
@@ -37,6 +38,7 @@ export interface TestContextOptions {
   computer?: ComputerHandle;
   mcpServers?: McpServerSpec[];
   llm?: LlmRoute;
+  images?: RunContext['images'];
   room?: PromptRoom;
   teamTools?: boolean;
 }
@@ -56,6 +58,7 @@ export function makeContext(opts: TestContextOptions = {}): { ctx: BrotRunContex
     computer: opts.computer,
     mcpServers: opts.mcpServers,
     llm: opts.llm,
+    images: opts.images,
     room: opts.room,
     teamTools: opts.teamTools,
     requestTool: async (req) => {

@@ -75,6 +75,15 @@ async function handlePrompt(id, params) {
     case 'echo':
       say(`session=${sessionId} pid=${process.pid} model=${session.model} prompt=${text.includes('Current message:') ? 'full' : 'input'} reminder=${text.startsWith('[You are ') ? 'yes' : 'no'}`);
       return respond(id, { stopReason: 'end_turn' });
+    case 'blocks': {
+      const blocks = params.prompt.map((block) =>
+        block.type === 'image'
+          ? { type: 'image', mimeType: block.mimeType, data: block.data }
+          : { type: 'text', text: block.text },
+      );
+      say(JSON.stringify(blocks));
+      return respond(id, { stopReason: 'end_turn' });
+    }
     case 'stream':
       for (const word of argument.split(' ')) say(`${word} `);
       return respond(id, { stopReason: 'end_turn' });

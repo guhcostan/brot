@@ -64,6 +64,8 @@ const RESPONSE_DROPPED = new Set([...HOP_BY_HOP, 'set-cookie', 'content-encoding
 export interface ResolvedRoute {
   provider: ProviderSpec;
   model: string;
+  /** The model's `vision` flag in the provider config. Only a vision route gets image prompt blocks. */
+  vision: boolean;
   /** Stable id of the conversation (thread and bot), sent in the provider's `sessionHeader`. */
   session?: string;
 }
@@ -325,7 +327,8 @@ export function createLlmRelay(options: LlmRelayOptions): LlmRelay {
           `Model provider "${provider.id}" needs the secret "${provider.secretName}" (secret://${provider.secretName}). Add it with PUT /api/secrets/${provider.secretName}.`,
         );
       }
-      return { provider, model: ref.model };
+      const vision = provider.models?.some((entry) => entry.id === ref.model && entry.vision === true) === true;
+      return { provider, model: ref.model, vision };
     },
 
     issue(runId, resolved) {

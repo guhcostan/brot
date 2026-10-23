@@ -32,6 +32,15 @@ const FAKE_PROVIDER_TWO: ProviderSpec = {
   secretName: 'fake-two',
 };
 
+/** A provider with one vision model and one text-only model, for the image prompt tests. */
+const VISION_PROVIDER: ProviderSpec = {
+  id: 'fake',
+  api: 'openai-completions',
+  baseUrl: 'https://fake.example/v1',
+  secretName: 'fake',
+  models: [{ id: 'vision-model', vision: true }, { id: 'text-model' }],
+};
+
 /** Tests that never reach a provider get this fetch, so an accidental call fails loudly. */
 async function refuseFetch(): Promise<Response> {
   throw new Error('the harness tests do not reach a provider');
@@ -1622,6 +1631,118 @@ describe('attachments in the run input', () => {
     expect(input).toContain('a'.repeat(8_000));
     expect(input).not.toContain('a'.repeat(8_001));
     expect(input).toContain('[truncated]');
+  });
+
+  it('passes no images to a text-only model, logging the attachment names once without bytes', async () => {
+    const engine = fakeEngine(replies);
+    const ctx = await contextWith({ engines: createEngineRegistry([engine.driver]), llm: { providers: [VISION_PROVIDER] } });
+    const { threadId } = await botAndThread(ctx, { model: 'fake/text-model' });
+    const bytes = new TextEncoder().encode('PNGDATA-not-an-image-really');
+    const attachment = await attach(ctx, threadId, bytes, { name: 'screen.png', mimeType: 'image/png' });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const { terminal } = await runToEnd(ctx, threadId, 'Look at this', [attachment.id]);
+      expect(terminal.type).toBe('run.completed');
+      expect(engine.contexts[0]?.images).toBeUndefined();
+      const logged = warn.mock.calls.map((call) => call.join(' ')).join('\n');
+      expect(logged).toContain('screen.png');
+      expect(logged).not.toContain(Buffer.from(bytes).toString('base64'));
+      expect(logged).not.toContain('PNGDATA');
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('attaches base64 image data only for a vision-capable route', async () => {
+    const engine = fakeEngine(replies);
+    const ctx = await contextWith({ engines: createEngineRegistry([engine.driver]), llm: { providers: [VISION_PROVIDER] } });
+    const { threadId } = await botAndThread(ctx, { model: 'fake/vision-model' });
+    const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0xff]);
+    const attachment = await attach(ctx, threadId, bytes, { name: 'chart.png', mimeType: 'image/png' });
+
+    const { terminal } = await runToEnd(ctx, threadId, 'Describe the chart', [attachment.id]);
+
+    expect(terminal.type).toBe('run.completed');
+    expect(engine.contexts[0]?.images).toEqual([
+      { mimeType: 'image/png', data: Buffer.from(bytes).toString('base64') },
+    ]);
+    // The prompt text still lists the attachment by name; the bytes travel only in ctx.images.
+    expect(engine.contexts[0]?.input).toContain('chart.png');
+  });
+
+  it('caps the images at four and skips larger or unsupported ones with name-only logs', async () => {
+    const engine = fakeEngine(replies);
+    const ctx = await contextWith({ engines: createEngineRegistry([engine.driver]), llm: { providers: [VISION_PROVIDER] } });
+    const { threadId } = await botAndThread(ctx, { model: 'fake/vision-model' });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const attachments: string[] = [];
+      for (let index = 0; index < 6; index += 1) {
+        const attachment = await attach(ctx, threadId, new Uint8Array([1, 2, 3, index]), {
+          name: `shot-${index}.png`,
+          mimeType: 'image/png',
+        });
+        attachments.push(attachment.id);
+      }
+      const oversized = await attach(ctx, threadId, new Uint8Array(5 * 1024 * 1024 + 1), {
+        name: 'too-big.png',
+        mimeType: 'image/png',
+      });
+      const pdf = await attach(ctx, threadId, new TextEncoder().encode('PDF'), { name: 'report.pdf', mimeType: 'application/pdf' });
+
+      const { terminal } = await runToEnd(ctx, threadId, 'Images', [...attachments, oversized.id, pdf.id]);
+
+      expect(terminal.type).toBe('run.completed');
+      expect(engine.contexts[0]?.images).toHaveLength(4);
+      const logged = warn.mock.calls.map((call) => call.join(' ')).join('\n');
+      expect(logged).toContain('shot-4.png');
+      expect(logged).toContain('at most 4 images');
+      expect(logged).toContain('too-big.png');
+      expect(logged).toContain('over the 5 MiB cap');
+      expect(logged).not.toContain('PDF');
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('rechecks the vision capability on a fallback attempt', async () => {
+    let calls = 0;
+    const engine = fakeEngine(async function* () {
+      calls += 1;
+      if (calls === 1) throw new Error('the vision route failed');
+      yield { type: 'text.delta', delta: 'fallback answer' };
+    });
+    const ctx = await contextWith({ engines: createEngineRegistry([engine.driver]), llm: { providers: [VISION_PROVIDER] } });
+    const bot = await ctx.services.repos.bots.create({
+      name: 'Ada',
+      job: 'Testing',
+      engine: 'dsh',
+      computer: 'none',
+      model: 'fake/vision-model',
+      fallbackModels: ['fake/text-model'],
+    });
+    const thread = await ctx.services.repos.threads.create(bot.id);
+    const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
+    const attachment = await attach(ctx, thread.id, bytes, { name: 'fallback.png', mimeType: 'image/png' });
+
+    const { terminal } = await runToEnd(ctx, thread.id, 'Look', [attachment.id]);
+
+    expect(terminal.type).toBe('run.completed');
+    expect(engine.contexts).toHaveLength(2);
+    expect(engine.contexts[0]?.images).toEqual([{ mimeType: 'image/png', data: Buffer.from(bytes).toString('base64') }]);
+    // The fallback model is text-only, so the same message yields no images on the second attempt.
+    expect(engine.contexts[1]?.images).toBeUndefined();
+  });
+
+  it('does not break the mock engine, which ignores ctx.images', async () => {
+    const ctx = await contextWith();
+    const { threadId } = await botAndThread(ctx, { engine: 'mock', model: null });
+    const bytes = new TextEncoder().encode('PNGDATA');
+    const attachment = await attach(ctx, threadId, bytes, { name: 'mock.png', mimeType: 'image/png' });
+
+    const { terminal } = await runToEnd(ctx, threadId, 'Look', [attachment.id]);
+
+    expect(terminal.type).toBe('run.completed');
   });
 
   it('notes an image and lists a binary without reading their content', async () => {

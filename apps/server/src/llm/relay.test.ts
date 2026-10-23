@@ -80,7 +80,7 @@ describe('model relay', () => {
     api: 'openai-completions',
     baseUrl: '',
     secretName: 'fake',
-    models: [{ id: 'model-1', cost: { input: 1, output: 2 } }],
+    models: [{ id: 'model-1', cost: { input: 1, output: 2 } }, { id: 'vision-model', vision: true }],
   };
   const anthropic: ProviderSpec = { id: 'claude', api: 'anthropic-messages', baseUrl: '', secretName: 'claude' };
 
@@ -161,10 +161,18 @@ describe('model relay', () => {
     });
 
     it('issues a 256-bit token and a new one for every issue', () => {
-      const first = relay.issue('a', { provider: openai, model: 'model-1' });
-      const second = relay.issue('a', { provider: openai, model: 'model-1' });
+      const first = relay.issue('a', { provider: openai, model: 'model-1', vision: false });
+      const second = relay.issue('a', { provider: openai, model: 'model-1', vision: false });
       expect(first.length).toBeGreaterThanOrEqual(43);
       expect(second).not.toBe(first);
+    });
+  });
+
+  describe('vision capability', () => {
+    it('reports the model vision flag on the resolved route', async () => {
+      expect((await relay.resolve('fake/model-1')).vision).toBe(false);
+      expect((await relay.resolve('fake/vision-model')).vision).toBe(true);
+      expect((await relay.resolve('fake/unlisted-model')).vision).toBe(false);
     });
   });
 
@@ -399,7 +407,7 @@ describe('model relay', () => {
 
   describe('resolve', () => {
     it('resolves a known provider whose secret is set', async () => {
-      await expect(relay.resolve('fake/model-1')).resolves.toEqual({ provider: openai, model: 'model-1' });
+      await expect(relay.resolve('fake/model-1')).resolves.toEqual({ provider: openai, model: 'model-1', vision: false });
     });
 
     it('refuses an unknown provider and names the providers it knows', async () => {

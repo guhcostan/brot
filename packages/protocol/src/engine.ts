@@ -90,6 +90,13 @@ export interface RunContext {
   bot: Bot;
   history: Message[];
   input: string;
+  /**
+   * Images from this run's trigger message, for a model that can see them. `data` is base64 (no `data:` prefix)
+   * and `mimeType` is one of image/png, image/jpeg, image/webp or image/gif. The server fills this only for a
+   * vision-capable route, caps it at 4 images of at most 5 MiB each, and never persists or logs the bytes. Engines
+   * without image support ignore it; a text model receives no images and sees only the attachment names.
+   */
+  images?: Array<{ mimeType: string; data: string }>;
   memories: Memory[];
   skills: Skill[];
   signal: AbortSignal;

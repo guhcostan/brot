@@ -19,10 +19,15 @@ const ModelCost = z
   })
   .strict();
 
+/**
+ * One model a provider offers. `vision` opts the model into image prompt blocks: the server attaches images from
+ * the current message only when this is true. It defaults to false, so a text-only model never receives bytes.
+ */
 const ProviderModelSchema = z
   .object({
     id: z.string().min(1).max(200),
     cost: ModelCost.optional(),
+    vision: z.boolean().optional(),
   })
   .strict();
 

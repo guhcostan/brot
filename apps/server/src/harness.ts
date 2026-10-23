@@ -322,6 +322,57 @@ export function createHarness(deps: HarnessDeps): Harness {
     return { runId: run.id, settled };
   }
 
+/** Image prompt blocks: at most this many images from one message. */
+const VISION_MAX_IMAGES = 4;
+/** The largest image the server sends to a model, in bytes. */
+const VISION_MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+/** The image types the prompt carries. Anything else is a normal attachment, listed by name only. */
+const VISION_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
+
+/**
+ * The images a run's first attempt may show: image attachments of the trigger message only, base64-encoded for an
+ * engine content block. A non-vision model, and every attempt after an image-less route, gets none. Skips are
+ * logged by attachment name and reason, never by content. Bytes stay in memory for this run.
+ */
+async function visionImagesFor(
+  attachments: AttachmentStorage,
+  trigger: Message,
+  vision: boolean,
+): Promise<BrotRunContext['images']> {
+  const images = (trigger.attachments ?? []).filter((attachment) => attachment.kind === 'image');
+  if (images.length === 0) return undefined;
+  if (!vision) {
+    console.warn(
+      `vision: the model cannot see images; sending attachment names only: ${images.map((image) => image.name).join(', ')}`,
+    );
+    return undefined;
+  }
+  const selected: NonNullable<BrotRunContext['images']> = [];
+  for (const attachment of images) {
+    if (!VISION_MIME_TYPES.has(attachment.mimeType)) {
+      console.warn(`vision: skipped image ${attachment.name}: ${attachment.mimeType} is not png, jpeg, webp or gif`);
+      continue;
+    }
+    const bytes = await attachments.read(attachment.id).catch(() => undefined);
+    if (bytes === undefined || bytes.byteLength === 0) {
+      console.warn(`vision: skipped image ${attachment.name}: its bytes are unavailable`);
+      continue;
+    }
+    if (bytes.byteLength > VISION_MAX_IMAGE_BYTES) {
+      console.warn(
+        `vision: skipped image ${attachment.name}: ${bytes.byteLength} bytes is over the ${VISION_MAX_IMAGE_BYTES / (1024 * 1024)} MiB cap`,
+      );
+      continue;
+    }
+    if (selected.length >= VISION_MAX_IMAGES) {
+      console.warn(`vision: skipped image ${attachment.name}: at most ${VISION_MAX_IMAGES} images per run`);
+      continue;
+    }
+    selected.push({ mimeType: attachment.mimeType, data: Buffer.from(bytes).toString('base64') });
+  }
+  return selected.length === 0 ? undefined : selected;
+}
+
   /** The model a run uses: a DM thread may override its bot's model; rooms never carry one. */
   function modelFor(thread: Thread, bot: Bot): string | undefined {
     return thread.model ?? bot.model;
@@ -401,6 +452,8 @@ export function createHarness(deps: HarnessDeps): Harness {
           ...(previousTriggerId === undefined ? {} : { previousTriggerId }),
         });
         const input = await appendAttachmentContext(attachmentStorage, turn.input, trigger.attachments);
+        // Capability is recomputed for every attempt: a fallback model may be text-only even when the first was not.
+        const images = relayed && route !== undefined ? await visionImagesFor(attachmentStorage, trigger, route.route.vision) : undefined;
         const [workspaceMemoryRows, ownMemoryRows] = await Promise.all([
           repos.memories.listWorkspace(),
           repos.memories.listByBot(bot.id),
@@ -428,6 +481,7 @@ export function createHarness(deps: HarnessDeps): Harness {
           memories,
           skills,
           signal: state.controller.signal,
+          ...(images === undefined ? {} : { images }),
           requestTool: (req) => requestTool(state, req),
           ...(engineSessionId === undefined ? {} : { engineSessionId }),
           ...(place.computer === undefined ? {} : { computer: place.computer }),
