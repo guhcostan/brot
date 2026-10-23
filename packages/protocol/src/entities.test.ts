@@ -3,6 +3,7 @@ import { TEAM_MAX_DEPTH } from './constants';
 import {
   Approval,
   ApprovalMode,
+  ApprovalStatus,
   Bot,
   BrowserProfile,
   BrowserTakeover,
@@ -179,6 +180,27 @@ describe('entity schemas', () => {
     expect(roundTrip(Policy, policy)).toEqual(policy);
     expect(roundTrip(Memory, memory)).toEqual(memory);
     expect(roundTrip(Skill, skill)).toEqual(skill);
+  });
+
+  it('accepts every approval status, including an expired approval with no decision', () => {
+    expect(ApprovalStatus.options).toEqual(['pending', 'allowed', 'denied', 'expired']);
+    const expired = {
+      id: 'a2',
+      runId: 'r1',
+      threadId: 't1',
+      botId: 'bot_1',
+      kind: 'shell',
+      tool: 'bash',
+      summary: 'ls -la',
+      args: {},
+      status: 'expired' as const,
+      reply: 'The run was interrupted by a server restart.',
+      createdAt: at,
+      resolvedAt: at,
+    };
+    expect(roundTrip(Approval, expired)).toEqual(expired);
+    expect(roundTrip(Approval, expired).decision).toBeUndefined();
+    expect(() => Approval.parse({ ...expired, status: 'cancelled' })).toThrow();
   });
 
   it('round-trips a memory journal entry and the undo result', () => {

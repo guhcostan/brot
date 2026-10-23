@@ -778,6 +778,50 @@ describe('approvals', () => {
     const denied = await repos.approvals.resolve(approval.id, { decision: 'deny' });
     expect(denied).toMatchObject({ status: 'denied', decision: 'deny' });
   });
+
+  it('lists pending approvals newest first and only pending ones', async () => {
+    const { bot, thread, run } = await seed();
+    const first = await repos.approvals.create(approvalInput(run.id, thread.id, bot.id));
+    const second = await repos.approvals.create(approvalInput(run.id, thread.id, bot.id));
+    await repos.approvals.resolve(second.id, { decision: 'deny' });
+    await handle.client.execute({
+      sql: 'UPDATE approvals SET created_at = ? WHERE id = ?',
+      args: ['2026-10-20T10:00:00.000Z', first.id],
+    });
+
+    expect((await repos.approvals.listPending()).map((approval) => approval.id)).toEqual([first.id]);
+  });
+
+  it('expires a pending approval without a decision, keeping an existing reply', async () => {
+    const { bot, thread, run } = await seed();
+    const approval = await repos.approvals.create(approvalInput(run.id, thread.id, bot.id));
+    const expired = await repos.approvals.expire(approval.id, 'The run was interrupted by a server restart.');
+    expect(expired).toMatchObject({
+      status: 'expired',
+      reply: 'The run was interrupted by a server restart.',
+    });
+    expect(expired?.resolvedAt).toBeDefined();
+    expect(expired?.decision).toBeUndefined();
+    expect((await repos.approvals.get(approval.id))?.status).toBe('expired');
+    expect(await repos.approvals.expire(approval.id)).toBeUndefined();
+    expect(await repos.approvals.expire('missing')).toBeUndefined();
+
+    const replied = await repos.approvals.create(approvalInput(run.id, thread.id, bot.id));
+    await handle.client.execute({ sql: 'UPDATE approvals SET reply = ? WHERE id = ?', args: ['Asked to wait', replied.id] });
+    const kept = await repos.approvals.expire(replied.id, 'The run was interrupted by a server restart.');
+    expect(kept?.reply).toBe('Asked to wait');
+  });
+
+  it('keeps expired approvals out of the decision log', async () => {
+    const { bot, thread, run } = await seed();
+    const expired = await repos.approvals.create(approvalInput(run.id, thread.id, bot.id));
+    await repos.approvals.expire(expired.id, 'The run was interrupted by a server restart.');
+    const allowed = await repos.approvals.create(approvalInput(run.id, thread.id, bot.id));
+    await repos.approvals.resolve(allowed.id, { decision: 'allow_once' });
+
+    expect((await repos.approvals.listDecisions()).map((approval) => approval.id)).toEqual([allowed.id]);
+    expect((await repos.approvals.list({ status: 'expired' })).map((approval) => approval.id)).toEqual([expired.id]);
+  });
 });
 
 describe('policies', () => {

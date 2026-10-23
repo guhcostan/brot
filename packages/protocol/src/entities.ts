@@ -451,7 +451,12 @@ export type ApprovalKind = z.infer<typeof ApprovalKind>;
 export const ApprovalDecision = z.enum(['allow_once', 'allow_always', 'deny']);
 export type ApprovalDecision = z.infer<typeof ApprovalDecision>;
 
-export const ApprovalStatus = z.enum(['pending', 'allowed', 'denied']);
+/**
+ * Where an approval stands. `expired` is not a person's decision: the run that asked was interrupted (a restart,
+ * or it failed/cancelled before anyone answered), so the approval can never be decided. It carries `resolvedAt` and
+ * usually a `reply`, but no `decision`.
+ */
+export const ApprovalStatus = z.enum(['pending', 'allowed', 'denied', 'expired']);
 export type ApprovalStatus = z.infer<typeof ApprovalStatus>;
 
 export const Approval = z.object({

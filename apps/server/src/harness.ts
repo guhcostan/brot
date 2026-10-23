@@ -850,3 +850,43 @@ function utcDayStart(now = new Date()): string {
 function conversationId(threadId: string, botId: string): string {
   return createHash('sha256').update(`${threadId}:${botId}`).digest('base64url').slice(0, 32);
 }
+
+/** The narrow dependencies of the boot-time approval expiry, so a test can fake the repos and the bus. */
+export interface ApprovalExpiryDeps {
+  approvals: Pick<Repos['approvals'], 'listPending' | 'expire'>;
+  runs: Pick<Repos['runs'], 'get'>;
+  bus: Pick<EventBus, 'publish'>;
+}
+
+/** The reply an approval gets when its run was interrupted, unless it already carries one. */
+export const ORPHANED_APPROVAL_REPLY = 'The run was interrupted by a server restart.';
+
+/**
+ * Expires approvals a restart left pending. An approval whose run is gone, or whose run is no longer `running` or
+ * `waiting_approval`, can never be decided: after `recoverInterruptedRuns` those runs are failed. Each such approval
+ * becomes `expired` (resolvedAt set, no decision), gets an explanatory reply when it has none, and publishes
+ * `approval.resolved`. Best effort: never throws, and returns how many approvals were expired.
+ */
+export async function expireOrphanedApprovals(deps: ApprovalExpiryDeps): Promise<number> {
+  try {
+    let expired = 0;
+    for (const approval of await deps.approvals.listPending()) {
+      const run = await deps.runs.get(approval.runId);
+      if (run !== undefined && (run.status === 'running' || run.status === 'waiting_approval')) continue;
+      const updated = await deps.approvals.expire(approval.id, ORPHANED_APPROVAL_REPLY);
+      if (updated === undefined) continue;
+      await deps.bus.publish({
+        type: 'approval.resolved',
+        threadId: updated.threadId,
+        runId: updated.runId,
+        approval: updated,
+      });
+      expired += 1;
+    }
+    if (expired > 0) console.warn(`expired ${expired} approval(s) left pending by an interrupted run`);
+    return expired;
+  } catch (error) {
+    console.error('could not expire orphaned approvals', error);
+    return 0;
+  }
+}

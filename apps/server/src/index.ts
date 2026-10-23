@@ -16,6 +16,7 @@ import { createBrotMcp } from './mcp';
 import { createTeamTools } from './team';
 import type { AppEnv, Bindings } from './auth';
 import { loadConfig, type ConfigOverrides } from './config';
+import { expireOrphanedApprovals } from './harness';
 import { createServices, type ServiceExtras, type Services } from './services';
 import { createWebhookApp } from './webhooks';
 export { createApp } from './app';
@@ -67,6 +68,11 @@ export async function startServer(options: StartOptions = {}): Promise<ServerHan
   await seedFirstBot(services.repos);
   const recovered = await services.harness.recoverInterruptedRuns();
   if (recovered > 0) console.warn(`marked ${recovered} interrupted run(s) as failed`);
+  await expireOrphanedApprovals({
+    approvals: services.repos.approvals,
+    runs: services.repos.runs,
+    bus: services.bus,
+  });
   await services.scheduler.sync();
   await sweepOrphanedAttachments(services);
   const sweep = orphanSweep ?? (isCanonicalHome(config.home) ? {} : false);
