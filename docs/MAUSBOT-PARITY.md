@@ -70,7 +70,7 @@ Legend: ✅ parity or better · 🟡 partial · ❌ absent · 🎯 current wave.
 | Per-team working folder (`bot.cwd`) | ✅ | 🟡 sandbox `/workspace` per bot; host computer has the real cwd | W2 |
 | Browser per bot, persistent login profiles | ✅ | ✅ per-bot and shared profiles, persistent logins, egress-gated | W1 done |
 | Live browser view and take-over | ✅ | ✅ JPEG live panel with click/scroll/type input and takeover for host browsers | W7 done |
-| Host browser (My Chrome) attach | ✅ | ❌ | W5 |
+| Host browser (My Chrome) attach | ✅ | ✅ per-bot own profile or attach to My Chrome over CDP (not proxied, clear safety copy) | W5 done |
 | Saved logins vault + `fill_login` | ✅ | ✅ vault-backed logins with a Settings UI, host-gated fill_login with TOTP | W7 done |
 | Connected apps (Composio marketplace) + per-bot tool grants | ✅ | ❌ | W3 |
 | Custom MCP servers (stdio/HTTP, per-bot) | ✅ | ✅ stdio/HTTP servers with vault secrets, handshake test, Settings panel and per-bot grants | W5 done |

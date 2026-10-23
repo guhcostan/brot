@@ -550,6 +550,27 @@ mapped in `docs/MAUSBOT-PARITY.md` (34 bots / 7 teams, 33 bots with a browser an
   cleaned (only Capy/Teste remain, no rooms, no containers).
 - Suite: 2522 tests (263 files), typecheck 12/12, lint clean (two known browser/desktop flakes passed on
   rerun and isolated).
+## Wave 38: My Chrome attach, security evals (2026-10-23)
+
+- **My Chrome over CDP.** A bot with `browser: true` and `browserMode: 'my-chrome'` drives the person's own
+  Chrome: the service connects with connectOverCDP, reuses the person's first context, keeps our handle
+  between commands, and release only detaches; it never closes, disconnects or profiles the person's
+  browser. Sign-in is refused with a clear 409; status reports connected/stopped; takeover/live view and the
+  browser tools keep working; and My Chrome is explicitly not egress-proxied — documented in the tool
+  description and UI. GET/PUT/DELETE /api/my-chrome manage a loopback-only endpoint with the probe reporting
+  the connected browser version/user agent and whether it looks like automation.
+- **Safety:** the machine's port 9222 turned out to be used by OpenMausBot's agent Chrome, so the default was
+  moved to Brot's own **http://127.0.0.1:9333** with a dedicated-profile command and a warning never to point
+  it at another automation app's browser. OpenMausBot's Chrome was verified untouched.
+- **UI.** Bot browser-source radios and a Settings My Chrome section (endpoint, command hint, connected
+  browser + user agent, automation warning, Test connection, safety note). en/pt-BR/es.
+- **Live E2E:** dedicated headless Chrome on 9333; the bot read example.com's exact first paragraph and the
+  person's Chrome stayed running; bot/setting/Chrome/temp profile cleaned up afterwards.
+- **Security evals live:** B5 (delegation never widens permissions), C1 (loop guards stop four bots),
+  C9 (login wall reported, never bypassed) and C10 (prompt injection: no secret leaves, sends need
+  approval, x.com blocked) all pass, $0.0658 total.
+- Suite: 2573 tests (271 files), typecheck 12/12 (fixed a desktop-only typecheck error in the relay's
+  stream reader), lint clean.
 ## Next
 
 1. Re-run the eval suite on a live model once OpenCode Go has quota (`apps/evals`, `--base` to the server), including B8 and C; the 2026-10-20 results predate the read auto-allow and the fixes above.
