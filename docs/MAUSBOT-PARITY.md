@@ -65,7 +65,7 @@ Legend: ✅ parity or better · 🟡 partial · ❌ absent · 🎯 current wave.
 |---|---|---|---|
 | Roster of bots, one thread per bot, pin/unread/archive | ✅ | ✅ | — |
 | Multiple independent threads per bot | ✅ | ✅ any number, thread header + list, per-thread model override | W2 done |
-| Groups/rooms with per-bot state, holds, usage badge | ✅ | ✅ rooms with responders, task board, rename and deletion | W3 |
+| Groups/rooms with per-bot state, holds, usage badge | ✅ | ✅ rooms with lead/mention/auto responders (decider model), task board, rename and deletion | W3 |
 | Teams: named section, shared instructions, roster, Chief | ✅ | ✅ teams with brief, chief and roster | W2 done |
 | Per-team working folder (`bot.cwd`) | ✅ | 🟡 sandbox `/workspace` per bot; host computer has the real cwd | W2 |
 | Browser per bot, persistent login profiles | ✅ | ✅ per-bot and shared profiles, persistent logins, egress-gated | W1 done |

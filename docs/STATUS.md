@@ -500,6 +500,22 @@ mapped in `docs/MAUSBOT-PARITY.md` (34 bots / 7 teams, 33 bots with a browser an
   dialog (thread title, first assistant paragraph, last ten messages as a Markdown transcript with tool
   lines), creating the skill for the thread's bot with inline success/errors. en/pt-BR/es.
 - Suite: 2447 tests (253 files), typecheck 12/12, lint clean.
+## Wave 35: room decider model (2026-10-22)
+
+- **Auto routing.** Rooms gain an `auto` responder: when a message mentions nobody, the workspace's decider
+  model picks one member to answer. GET/PUT /api/room-decider configure it (openai-completions providers
+  only; null clears); the decider calls the provider's chat completions endpoint with the vault key at call
+  time, a compact "id — name — job" roster, temperature 0, a 64-token cap and a timeout, accepting the id,
+  @id or name it returns. Any failure (no setting, bad provider, missing key, network, timeout, unknown
+  answer) falls back to the baton holder or lead, with a reason-only log. Mentions always win; lead/mention
+  rooms unchanged. GET /api/providers now reports each provider's api, the room prompt describes auto
+  routing, and team packages preserve an auto responder on import.
+- **UI.** New rooms can pick Auto (with a hint and the lead fallback), room headers/composer show the auto
+  rule, and Settings → Room routing picks/saves/clears the decider model from a provider-grouped list
+  (non-compatible providers dimmed). en/pt-BR/es.
+- Verified live: decider set to opencode-go, an auto room with Capy and Teste answered a mention-free
+  message with one run started, then both the room and the setting were cleaned up.
+- Suite: 2485 tests (259 files), typecheck 12/12, lint clean.
 ## Next
 
 1. Re-run the eval suite on a live model once OpenCode Go has quota (`apps/evals`, `--base` to the server), including B8 and C; the 2026-10-20 results predate the read auto-allow and the fixes above.
