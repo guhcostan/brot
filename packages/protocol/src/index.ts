@@ -17,3 +17,4 @@ export * from './today';
 export * from './search';
 export * from './presets';
 export * from './memory-upkeep';
+export * from './activity';

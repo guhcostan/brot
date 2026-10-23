@@ -45,6 +45,7 @@ describe('migrate', () => {
 
     expect(await tableNames(handle)).toEqual([
       '__drizzle_migrations',
+      'admin_activity',
       'approvals',
       'attachments',
       'bot_presets',
@@ -74,7 +75,24 @@ describe('migrate', () => {
     ]);
 
     const applied = await handle.client.execute('SELECT COUNT(*) AS count FROM __drizzle_migrations');
-    expect(Number(applied.rows[0]?.count)).toBe(23);
+    expect(Number(applied.rows[0]?.count)).toBe(24);
+  });
+
+  it('adds the admin activity log on a fresh database', async () => {
+    const { handle } = await tempDb();
+    await migrate(handle.db);
+
+    expect(await columnNames(handle, 'admin_activity')).toEqual([
+      'id',
+      'action',
+      'target_type',
+      'target_id',
+      'summary',
+      'actor',
+      'at',
+    ]);
+    const indexes = await handle.client.execute("PRAGMA index_list('admin_activity')");
+    expect(indexes.rows.some((row) => row.name === 'admin_activity_at_idx')).toBe(true);
   });
 
   it('adds bot presets on a fresh database', async () => {

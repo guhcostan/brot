@@ -2,6 +2,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import type { Repos, TaskFilter } from '@brot/db';
 import type { EngineRegistry } from '@brot/engines';
 import {
+  AdminActivityQuery,
   ApplyMemoryUpkeep,
   ApprovalStatus,
   BotPresetAvatar,
@@ -85,6 +86,7 @@ import { MemoryUpkeepConflictError, applyMemoryUpkeep, buildMemoryUpkeepReport }
 import { botBrowserKind } from './browser/tools';
 import { BrowserError } from './browser/service';
 import type { HostBrowserService } from './browser/types';
+import { activityActor, recordActivity, type RecordActivityEntry } from './activity/record';
 import { mountAttachmentRoutes, type AttachmentStorage } from './attachments';
 import { mountSearchRoutes } from './search';
 import { mountTeamPackageRoutes } from './team-packages';
@@ -385,6 +387,9 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
   const trustLoopback = deps.trustLoopback ?? true;
   const voiceDeps = { vault, ...(deps.voice ?? {}) };
   const app = new Hono<AppEnv>();
+  /** Records an admin write for GET /api/activity. Best effort: the request never fails because of it. */
+  const record = (c: Context<AppEnv>, entry: Omit<RecordActivityEntry, 'actor'>): Promise<void> =>
+    recordActivity({ repos }, { ...entry, actor: activityActor(c, trustLoopback) });
 
   app.use('/api/*', cors({ origin: ALLOWED_ORIGINS, allowHeaders: ['Authorization', 'Content-Type'] }));
   // Every state-changing call is JSON, which forces a CORS preflight; the attachment upload alone speaks multipart.
@@ -402,6 +407,14 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
   app.notFound((c) => c.json({ error: 'Not found' }, 404));
 
   app.get('/api/health', (c) => c.json({ ok: true, version: SERVER_VERSION, protocol: PROTOCOL_VERSION }));
+
+  /** The admin activity log, newest first. Read-only: nothing is recorded for reading it. */
+  app.get('/api/activity', async (c) => {
+    const limit = c.req.query('limit');
+    const parsed = AdminActivityQuery.safeParse(limit === undefined ? {} : { limit });
+    if (!parsed.success) return invalid(c, parsed.error);
+    return c.json(await repos.adminActivity.list({ limit: parsed.data.limit }));
+  });
 
   app.get('/api/engines', async (c) => {
     const result = await Promise.all(
@@ -443,6 +456,7 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
   /** Removes the stored endpoint, going back to the loopback default (http://127.0.0.1:9333). */
   app.delete('/api/my-chrome', async (c) => {
     await clearMyChromeSettings(repos);
+    await record(c, { action: 'deleted', targetType: 'settings', summary: 'Removed My Chrome endpoint' });
     return c.body(null, 204);
   });
 
@@ -452,7 +466,9 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     if (!body.ok) return body.response;
     const issues = myChromeEndpointIssues(body.data.endpoint);
     if (issues.length > 0) return c.json({ error: 'Invalid request', issues }, 400);
-    return c.json(await saveMyChromeSettings(repos, body.data));
+    const settings = await saveMyChromeSettings(repos, body.data);
+    await record(c, { action: 'updated', targetType: 'settings', summary: 'Updated My Chrome endpoint' });
+    return c.json(settings);
   });
 
   /** Shared browser profiles: one signed-in Chrome on the server machine that several bots can use. */
@@ -461,7 +477,14 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
   app.post('/api/browser/profiles', async (c) => {
     const body = await parseBody(c, CreateBrowserProfile);
     if (!body.ok) return body.response;
-    return c.json(await repos.browserProfiles.create(body.data), 201);
+    const profile = await repos.browserProfiles.create(body.data);
+    await record(c, {
+      action: 'created',
+      targetType: 'browser-profile',
+      targetId: profile.id,
+      summary: `Created browser profile "${profile.name}"`,
+    });
+    return c.json(profile, 201);
   });
 
   app.patch('/api/browser/profiles/:id', async (c) => {
@@ -470,7 +493,14 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     const body = await parseBody(c, UpdateBrowserProfile);
     if (!body.ok) return body.response;
     const profile = await repos.browserProfiles.update(id, body.data);
-    return profile === undefined ? notFound(c, 'Browser profile') : c.json(profile);
+    if (profile === undefined) return notFound(c, 'Browser profile');
+    await record(c, {
+      action: 'updated',
+      targetType: 'browser-profile',
+      targetId: id,
+      summary: `Updated browser profile "${profile.name}"`,
+    });
+    return c.json(profile);
   });
 
   /**
@@ -479,10 +509,17 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
    */
   app.delete('/api/browser/profiles/:id', async (c) => {
     const id = c.req.param('id');
-    if ((await repos.browserProfiles.get(id)) === undefined) return notFound(c, 'Browser profile');
+    const profile = await repos.browserProfiles.get(id);
+    if (profile === undefined) return notFound(c, 'Browser profile');
     await browser.closeProfile(id);
     await browser.deleteProfileDir(id);
     await repos.browserProfiles.remove(id);
+    await record(c, {
+      action: 'deleted',
+      targetType: 'browser-profile',
+      targetId: id,
+      summary: `Deleted browser profile "${profile.name}"`,
+    });
     return c.body(null, 204);
   });
 
@@ -501,7 +538,9 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     const { browserMode, ...create } = body.data;
     const bot = await repos.bots.create(create);
     if (browserMode !== undefined) await saveBotBrowserMode(repos, bot.id, browserMode);
-    return c.json(await withBrowserMode(repos, bot), 201);
+    const created = await withBrowserMode(repos, bot);
+    await record(c, { action: 'created', targetType: 'bot', targetId: bot.id, summary: `Created bot "${bot.name}"` });
+    return c.json(created, 201);
   });
 
   app.get('/api/bots/:id', async (c) => {
@@ -537,7 +576,9 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     if (before && bot.engine !== before.engine) await harness.resetEngineSessions(bot.id);
     // A bot that stops being a sandbox bot leaves its container behind unless it is stopped.
     if (before?.computer === 'sandbox' && bot.computer !== 'sandbox') await stopComputer(computers.sandbox, bot.id);
-    return c.json(await withBrowserMode(repos, bot));
+    const updated = await withBrowserMode(repos, bot);
+    await record(c, { action: 'updated', targetType: 'bot', targetId: bot.id, summary: `Updated bot "${bot.name}"` });
+    return c.json(updated);
   });
 
   app.delete('/api/bots/:id', async (c) => {
@@ -553,6 +594,7 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     await repos.bots.remove(id);
     await clearBotBrowserMode(repos, id);
     await scheduler.sync();
+    await record(c, { action: 'deleted', targetType: 'bot', targetId: id, summary: `Deleted bot "${bot.name}"` });
     return c.body(null, 204);
   });
 
@@ -769,7 +811,9 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
       const issues = roomDeciderModelIssues(deps.providers, model);
       if (issues.length > 0) return c.json({ error: 'Invalid request', issues }, 400);
     }
-    return c.json(await writeRoomDeciderSettings(repos, model));
+    const saved = await writeRoomDeciderSettings(repos, model);
+    await record(c, { action: 'updated', targetType: 'settings', summary: 'Updated room decider settings' });
+    return c.json(saved);
   });
 
   app.get('/api/rooms/:id/members', async (c) => {
@@ -818,7 +862,14 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
   app.post('/api/presets', async (c) => {
     const body = await parseBody(c, CreateBotPreset);
     if (!body.ok) return body.response;
-    return c.json(await repos.botPresets.create(body.data), 201);
+    const preset = await repos.botPresets.create(body.data);
+    await record(c, {
+      action: 'created',
+      targetType: 'preset',
+      targetId: preset.id,
+      summary: `Created preset "${preset.name}"`,
+    });
+    return c.json(preset, 201);
   });
 
   /** Copies a bot's name, job, instructions and look into a new preset. `name` overrides the preset's name. */
@@ -836,6 +887,12 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
       instructions: bot.instructions.slice(0, 20_000),
       ...(avatar === undefined ? {} : { avatar }),
     });
+    await record(c, {
+      action: 'created',
+      targetType: 'preset',
+      targetId: preset.id,
+      summary: `Created preset "${preset.name}" from bot "${bot.name}"`,
+    });
     return c.json(preset, 201);
   });
 
@@ -843,12 +900,28 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     const body = await parseBody(c, UpdateBotPreset);
     if (!body.ok) return body.response;
     const preset = await repos.botPresets.update(c.req.param('id'), body.data);
-    return preset ? c.json(preset) : notFound(c, 'Preset');
+    if (!preset) return notFound(c, 'Preset');
+    await record(c, {
+      action: 'updated',
+      targetType: 'preset',
+      targetId: preset.id,
+      summary: `Updated preset "${preset.name}"`,
+    });
+    return c.json(preset);
   });
 
-  app.delete('/api/presets/:id', async (c) =>
-    (await repos.botPresets.remove(c.req.param('id'))) ? c.body(null, 204) : notFound(c, 'Preset'),
-  );
+  app.delete('/api/presets/:id', async (c) => {
+    const preset = await repos.botPresets.get(c.req.param('id'));
+    if (!preset) return notFound(c, 'Preset');
+    await repos.botPresets.remove(preset.id);
+    await record(c, {
+      action: 'deleted',
+      targetType: 'preset',
+      targetId: preset.id,
+      summary: `Deleted preset "${preset.name}"`,
+    });
+    return c.body(null, 204);
+  });
 
   app.get('/api/teams', async (c) => c.json(await repos.teams.list()));
 
@@ -861,7 +934,9 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
         return invalidReference(c, 'chiefBotId', `unknown or archived bots: ${missing.join(', ')}`);
       }
     }
-    return c.json(await repos.teams.create(body.data), 201);
+    const team = await repos.teams.create(body.data);
+    await record(c, { action: 'created', targetType: 'team', targetId: team.id, summary: `Created team "${team.name}"` });
+    return c.json(team, 201);
   });
 
   /** Updates a team. `chiefBotId: null` removes the chief. */
@@ -878,13 +953,20 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
       }
     }
     const team = await repos.teams.update(id, body.data);
-    return team ? c.json(team) : notFound(c, 'Team');
+    if (!team) return notFound(c, 'Team');
+    await record(c, { action: 'updated', targetType: 'team', targetId: id, summary: `Updated team "${team.name}"` });
+    return c.json(team);
   });
 
   /** Deletes the team and ungroups its bots. The bots stay. */
-  app.delete('/api/teams/:id', async (c) =>
-    (await repos.teams.remove(c.req.param('id'))) ? c.body(null, 204) : notFound(c, 'Team'),
-  );
+  app.delete('/api/teams/:id', async (c) => {
+    const id = c.req.param('id');
+    const team = await repos.teams.get(id);
+    if (!team) return notFound(c, 'Team');
+    await repos.teams.remove(id);
+    await record(c, { action: 'deleted', targetType: 'team', targetId: id, summary: `Deleted team "${team.name}"` });
+    return c.body(null, 204);
+  });
 
   app.get('/api/tasks', async (c) => {
     const filter: TaskFilter = {};
@@ -1227,7 +1309,14 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
         400,
       );
     }
-    return c.json(await repos.mcpServers.create(body.data), 201);
+    const server = await repos.mcpServers.create(body.data);
+    await record(c, {
+      action: 'created',
+      targetType: 'mcp-server',
+      targetId: server.id,
+      summary: `Created MCP server "${server.name}"`,
+    });
+    return c.json(server, 201);
   });
 
   app.patch('/api/mcp/servers/:id', async (c) => {
@@ -1249,7 +1338,14 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     }
     try {
       const updated = await repos.mcpServers.update(id, body.data);
-      return updated ? c.json(updated) : notFound(c, 'MCP server');
+      if (!updated) return notFound(c, 'MCP server');
+      await record(c, {
+        action: 'updated',
+        targetType: 'mcp-server',
+        targetId: id,
+        summary: `Updated MCP server "${updated.name}"`,
+      });
+      return c.json(updated);
     } catch (error) {
       // The patch merged with the stored server can break the transport's required field.
       if (error instanceof z.ZodError) return invalid(c, error);
@@ -1257,9 +1353,18 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     }
   });
 
-  app.delete('/api/mcp/servers/:id', async (c) =>
-    (await repos.mcpServers.remove(c.req.param('id'))) ? c.body(null, 204) : notFound(c, 'MCP server'),
-  );
+  app.delete('/api/mcp/servers/:id', async (c) => {
+    const server = await repos.mcpServers.get(c.req.param('id'));
+    if (!server) return notFound(c, 'MCP server');
+    await repos.mcpServers.remove(server.id);
+    await record(c, {
+      action: 'deleted',
+      targetType: 'mcp-server',
+      targetId: server.id,
+      summary: `Deleted MCP server "${server.name}"`,
+    });
+    return c.body(null, 204);
+  });
 
   /** Tests the handshake the way a run's engine would make it. A failed handshake is a 200 with `ok: false`. */
   app.post('/api/mcp/servers/:id/test', async (c) => {
@@ -1278,7 +1383,14 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     if (issues.length > 0) return c.json({ error: 'Invalid request', issues }, 400);
     const routine = await repos.routines.create({ ...body.data, trigger: withWebhookSecret(body.data.trigger) });
     await scheduler.sync();
-    return c.json((await repos.routines.get(routine.id)) ?? routine, 201);
+    const created = (await repos.routines.get(routine.id)) ?? routine;
+    await record(c, {
+      action: 'created',
+      targetType: 'routine',
+      targetId: created.id,
+      summary: `Created routine "${created.name}"`,
+    });
+    return c.json(created, 201);
   });
 
   app.patch('/api/routines/:id', async (c) => {
@@ -1294,20 +1406,38 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     await repos.routines.update(id, { ...body.data, trigger });
     await scheduler.sync();
     const routine = await repos.routines.get(id);
-    return routine ? c.json(routine) : notFound(c, 'Routine');
+    if (!routine) return notFound(c, 'Routine');
+    await record(c, {
+      action: 'updated',
+      targetType: 'routine',
+      targetId: id,
+      summary: `Updated routine "${routine.name}"`,
+    });
+    return c.json(routine);
   });
 
   app.delete('/api/routines/:id', async (c) => {
-    const removed = await repos.routines.remove(c.req.param('id'));
-    if (!removed) return notFound(c, 'Routine');
+    const id = c.req.param('id');
+    const routine = await repos.routines.get(id);
+    if (!routine) return notFound(c, 'Routine');
+    await repos.routines.remove(id);
     await scheduler.sync();
+    await record(c, {
+      action: 'deleted',
+      targetType: 'routine',
+      targetId: id,
+      summary: `Deleted routine "${routine.name}"`,
+    });
     return c.body(null, 204);
   });
 
   app.post('/api/routines/:id/run', async (c) => {
-    const result = await scheduler.runRoutineNow(c.req.param('id'));
+    const routine = await repos.routines.get(c.req.param('id'));
+    if (!routine) return notFound(c, 'Routine');
+    const result = await scheduler.runRoutineNow(routine.id);
     if (!result) return notFound(c, 'Routine');
     if (result.status === 'skipped') return c.json({ error: 'Routine is already running' }, 409);
+    await record(c, { action: 'ran', targetType: 'routine', targetId: routine.id, summary: `Ran routine "${routine.name}"` });
     return c.json({ runId: result.runId }, 202);
   });
 
@@ -1462,7 +1592,14 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
       throw error;
     }
     try {
-      return c.json(await repos.savedLogins.create(body.data, { id, secretNames: names }), 201);
+      const login = await repos.savedLogins.create(body.data, { id, secretNames: names });
+      await record(c, {
+        action: 'created',
+        targetType: 'saved-login',
+        targetId: login.id,
+        summary: `Added saved login "${login.name}"`,
+      });
+      return c.json(login, 201);
     } catch (error) {
       await dropSavedLoginSecrets(vault, id);
       throw error;
@@ -1486,14 +1623,28 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     if (body.data.totp === null) await vault.delete(names.totp);
     else if (body.data.totp !== undefined) await vault.set(names.totp, normalizeBase32(body.data.totp));
     const login = await repos.savedLogins.update(id, body.data, names);
-    return login === undefined ? notFound(c, 'Saved login') : c.json(login);
+    if (login === undefined) return notFound(c, 'Saved login');
+    await record(c, {
+      action: 'updated',
+      targetType: 'saved-login',
+      targetId: id,
+      summary: `Updated saved login "${login.name}"`,
+    });
+    return c.json(login);
   });
 
   app.delete('/api/logins/:id', async (c) => {
     const id = c.req.param('id');
-    if ((await repos.savedLogins.get(id)) === undefined) return notFound(c, 'Saved login');
+    const login = await repos.savedLogins.get(id);
+    if (login === undefined) return notFound(c, 'Saved login');
     await dropSavedLoginSecrets(vault, id);
     await repos.savedLogins.remove(id);
+    await record(c, {
+      action: 'deleted',
+      targetType: 'saved-login',
+      targetId: id,
+      summary: `Deleted saved login "${login.name}"`,
+    });
     return c.body(null, 204);
   });
 
@@ -1509,10 +1660,14 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     if (!body.ok) return body.response;
     const remoteAddress = c.env?.incoming?.socket?.remoteAddress;
     try {
-      return c.json(
-        await pairing.complete(body.data, remoteAddress === undefined ? {} : { remoteAddress }),
-        201,
-      );
+      const paired = await pairing.complete(body.data, remoteAddress === undefined ? {} : { remoteAddress });
+      await record(c, {
+        action: 'created',
+        targetType: 'device',
+        targetId: paired.deviceId,
+        summary: `Paired device "${body.data.deviceName}"`,
+      });
+      return c.json(paired, 201);
     } catch (error) {
       if (error instanceof PairingError) return c.json({ error: error.message }, error.status);
       throw error;
@@ -1521,9 +1676,19 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
 
   app.get('/api/devices', async (c) => c.json(await repos.devices.list()));
 
-  app.delete('/api/devices/:id', async (c) =>
-    (await repos.devices.remove(c.req.param('id'))) ? c.body(null, 204) : notFound(c, 'Device'),
-  );
+  app.delete('/api/devices/:id', async (c) => {
+    const id = c.req.param('id');
+    const device = await repos.devices.get(id);
+    if (!device) return notFound(c, 'Device');
+    await repos.devices.remove(id);
+    await record(c, {
+      action: 'revoked',
+      targetType: 'device',
+      targetId: id,
+      summary: `Revoked device "${device.name}"`,
+    });
+    return c.body(null, 204);
+  });
 
   // Speech: the settings, a cheap capability probe, and the speak call. The API key stays in the vault.
 
@@ -1536,7 +1701,9 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     const body = await parseBody(c, UpdateVoiceSettings);
     if (!body.ok) return body.response;
     try {
-      return c.json(await saveVoiceSettings(repos, body.data));
+      const saved = await saveVoiceSettings(repos, body.data);
+      await record(c, { action: 'updated', targetType: 'settings', summary: 'Updated voice settings' });
+      return c.json(saved);
     } catch (error) {
       if (error instanceof z.ZodError) return invalid(c, error);
       throw error;
@@ -1584,7 +1751,9 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
         return c.json({ error: 'Invalid request', issues: [{ path: ['model'], message: resolved.reason }] }, 400);
       }
     }
-    return c.json(await saveTranscriptionSettings(repos, body.data));
+    const saved = await saveTranscriptionSettings(repos, body.data);
+    await record(c, { action: 'updated', targetType: 'settings', summary: 'Updated transcription settings' });
+    return c.json(saved);
   });
 
   app.get('/api/providers', async (c) => {

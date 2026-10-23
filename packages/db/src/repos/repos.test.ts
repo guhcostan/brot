@@ -824,6 +824,58 @@ describe('approvals', () => {
   });
 });
 
+describe('admin activity', () => {
+  const entry = (summary: string) => ({
+    action: 'created' as const,
+    targetType: 'bot',
+    targetId: 'bot_1',
+    summary,
+    actor: 'local',
+  });
+
+  it('records entries with a generated id and timestamp, and lists them newest first', async () => {
+    const first = await repos.adminActivity.record(entry('Created bot "Ada"'));
+    expect(first).toMatchObject({
+      action: 'created',
+      targetType: 'bot',
+      targetId: 'bot_1',
+      summary: 'Created bot "Ada"',
+      actor: 'local',
+    });
+    expect(first.id).not.toBe('');
+    expect(first.at).toMatch(/^20/);
+    expect(await repos.adminActivity.list()).toEqual([first]);
+  });
+
+  it('breaks ordering ties within one millisecond by insertion order', async () => {
+    const first = await repos.adminActivity.record(entry('first'));
+    const second = await repos.adminActivity.record(entry('second'));
+    const third = await repos.adminActivity.record(entry('third'));
+    await handle.client.execute({
+      sql: 'UPDATE admin_activity SET at = ?',
+      args: ['2026-10-22T12:00:00.000Z'],
+    });
+
+    expect((await repos.adminActivity.list()).map((row) => row.summary)).toEqual(['third', 'second', 'first']);
+    expect((await repos.adminActivity.list({ limit: 2 })).map((row) => row.id)).toEqual([third.id, second.id]);
+    expect(first.id).not.toBe(second.id);
+  });
+
+  it('keeps a device-name actor, drops an absent target id, and clips long summaries', async () => {
+    const withDevice = await repos.adminActivity.record({
+      action: 'revoked',
+      targetType: 'device',
+      summary: 'Revoked device "iPhone"',
+      actor: 'iPhone',
+    });
+    expect(withDevice).toMatchObject({ actor: 'iPhone', action: 'revoked' });
+    expect(withDevice.targetId).toBeUndefined();
+
+    const long = await repos.adminActivity.record({ ...entry('x'.repeat(400)), actor: 'local' });
+    expect(long.summary).toHaveLength(300);
+  });
+});
+
 describe('policies', () => {
   it('creates, lists per bot, and removes policies', async () => {
     const { bot } = await seed();

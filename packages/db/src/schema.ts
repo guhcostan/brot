@@ -10,6 +10,7 @@ import {
   type AnySQLiteColumn,
 } from 'drizzle-orm/sqlite-core';
 import type {
+  AdminAction,
   ApprovalDecision,
   ApprovalKind,
   ApprovalMode,
@@ -534,3 +535,18 @@ export const botPresets = sqliteTable('bot_presets', {
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
 });
+
+/** The admin activity log: one row per write from the admin UI or CLI, newest shown first. */
+export const adminActivity = sqliteTable(
+  'admin_activity',
+  {
+    id: text('id').primaryKey(),
+    action: text('action').$type<AdminAction>().notNull(),
+    targetType: text('target_type').notNull(),
+    targetId: text('target_id'),
+    summary: text('summary').notNull(),
+    actor: text('actor').notNull(),
+    at: text('at').notNull(),
+  },
+  (t) => [index('admin_activity_at_idx').on(t.at)],
+);

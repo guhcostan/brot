@@ -1,4 +1,5 @@
 import type { Db } from '../client';
+import { createAdminActivityRepo } from './admin-activity';
 import { createApprovalRepo } from './approvals';
 import { createAttachmentRepo } from './attachments';
 import { createBotRepo } from './bots';
@@ -28,6 +29,7 @@ import { createThreadSessionRepo } from './thread-sessions';
 
 export function createRepos(db: Db) {
   return {
+    adminActivity: createAdminActivityRepo(db),
     bots: createBotRepo(db),
     browserProfiles: createBrowserProfileRepo(db),
     threads: createThreadRepo(db),
