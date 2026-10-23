@@ -650,6 +650,20 @@ mapped in `docs/MAUSBOT-PARITY.md` (34 bots / 7 teams, 33 bots with a browser an
   material pricing changes) and A5 (last30days community complaints with links) passed at $0.1771 total.
   A1/A2 were flagged for human review only on answer quality; all structural checks were green.
 - Suite: 2707 tests (288 files), typecheck 12/12, lint clean. Eval leftovers cleaned (only Capy/Teste).
+## Wave 44: vision attachments, business evals (2026-10-23)
+
+- **Vision in prompts.** A provider model can declare `vision: true` in providers.json; a resolved route carries
+  the capability, and for relayed runs whose model has it the harness collects image attachments from the
+  current trigger message (never history), reading bytes and passing base64 images in the run context: max 4
+  images of max 5 MiB each, png/jpeg/webp/gif, skips logged by attachment name and reason only. Capability is
+  re-checked per attempt, so a fallback to a text model drops the images. DSH sends the ACP prompt as
+  [text, ...image blocks] only on the first turn of a fresh session; primed sessions and text models keep the
+  byte-identical text prompt. docs/ARCHITECTURE has a Vision section; the mock engine ignores images.
+- **Business evals live, all pass:** A7 (sales outbound prep against an ICP, sends nothing), A8 (invoice
+  reminders, each send needs approval), A14 (changelog to release note and social post, publishing needs
+  approval) and A15 (product idea stress test with the cheapest next experiment) passed at $0.0867 total,
+  flagged for human review only on answer quality.
+- Suite: 2718 tests (288 files), typecheck 12/12, lint clean. Eval leftovers cleaned (only Capy/Teste).
 ## Next
 
 1. Re-run the eval suite on a live model once OpenCode Go has quota (`apps/evals`, `--base` to the server), including B8 and C; the 2026-10-20 results predate the read auto-allow and the fixes above.
