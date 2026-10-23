@@ -1,4 +1,5 @@
-import type { Approval, Bot, CanonicalEvent, McpServer, Memory, Message, Notification, Routine, RoutineRun, SavedLogin, Skill, Task, Team, Thread } from '@brot/protocol';
+import type { Approval, Bot, BotPreset, CanonicalEvent, McpServer, Memory, Message, Notification, Routine, RoutineRun, SavedLogin, Skill, Task, Team, Thread } from '@brot/protocol';
+
 import type { BrowserProfile } from './client';
 
 const CREATED = '2026-10-01T09:00:00.000Z';
@@ -774,6 +775,28 @@ export const DEMO_WORKSPACE_MEMORIES: Memory[] = [
     scope: 'workspace' as const,
     kind: 'fact' as const,
     content: 'Works solo on Brot and does not have a team to delegate to.',
+    createdAt: CREATED,
+    updatedAt: CREATED,
+  },
+];
+
+/** Two reusable defaults the create dialog offers: only name, job, instructions and look travel. */
+export const DEMO_BOT_PRESETS: BotPreset[] = [
+  {
+    id: 'preset_support',
+    name: 'Support triage',
+    job: 'Read incoming support mail, sort it by urgency, and draft replies for the person to approve.',
+    instructions: 'Be concise and kind. Always quote the order id. Never promise a refund the policy does not cover.',
+    avatar: 'capivara:violet',
+    createdAt: CREATED,
+    updatedAt: CREATED,
+  },
+  {
+    id: 'preset_social',
+    name: 'Social media manager',
+    job: 'Draft short posts and replies for the product accounts, in the voice the team already uses.',
+    instructions: 'Keep posts under 220 characters. Avoid hashtags unless asked. Never post without approval.',
+    avatar: 'arara:amber',
     createdAt: CREATED,
     updatedAt: CREATED,
   },

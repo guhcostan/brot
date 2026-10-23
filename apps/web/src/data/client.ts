@@ -178,6 +178,9 @@ export interface TeamPackageExport {
   filename: string;
 }
 
+/** Reusable defaults for new bots: only name, job, instructions and look travel. */
+export type { BotPreset, CreateBotPreset, CreatePresetFromBot, UpdateBotPreset } from '@brot/protocol';
+
 /** How many entities one import created. */
 export interface TeamPackageImportCounts {
   teams: number;
@@ -411,6 +414,14 @@ export interface BrotClient {
   updateSavedLogin(loginId: string, patch: UpdateSavedLogin): Promise<SavedLogin>;
   /** Deletes the login and the vault values behind it. */
   deleteSavedLogin(loginId: string): Promise<void>;
+
+  /** Reusable bot defaults offered by the create dialog and managed in Settings. */
+  listBotPresets(): Promise<import('@brot/protocol').BotPreset[]>;
+  createBotPreset(input: import('@brot/protocol').CreateBotPresetInput): Promise<import('@brot/protocol').BotPreset>;
+  updateBotPreset(presetId: string, patch: import('@brot/protocol').UpdateBotPreset): Promise<import('@brot/protocol').BotPreset>;
+  deleteBotPreset(presetId: string): Promise<void>;
+  /** Copies a bot's name, job, instructions and avatar into a new preset, optionally renaming it. */
+  createPresetFromBot(botId: string, input?: import('@brot/protocol').CreatePresetFromBot): Promise<import('@brot/protocol').BotPreset>;
 
   /** The workspace facts ("About me") every bot receives. */
   listWorkspaceMemories(): Promise<Memory[]>;

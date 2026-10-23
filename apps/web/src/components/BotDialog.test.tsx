@@ -2,7 +2,7 @@ import type { Bot, Team } from '@brot/protocol';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import type { BrowserProfile } from '../data/client';
-import { DEMO_MCP_SERVERS } from '../data/fixtures';
+import { DEMO_BOT_PRESETS, DEMO_MCP_SERVERS } from '../data/fixtures';
 import { t } from '../i18n';
 import { BotDialog, type BotDialogProps } from './BotDialog';
 
@@ -388,5 +388,50 @@ describe('BotDialog budgets', () => {
     const text = textOf(render({ initialBudgets: { runBudget: 'abc' } }));
 
     expect(text).toContain(t('botForm.budgetInvalidNumber'));
+  });
+});
+
+describe('BotDialog presets', () => {
+  const savePreset = async () => DEMO_BOT_PRESETS[0]!;
+
+  it('shows the start-from-a-preset strip for a new bot', () => {
+    const html = render({ initialPresets: DEMO_BOT_PRESETS });
+    const text = textOf(html);
+
+    expect(text).toContain(t('botForm.presetTitle'));
+    expect(text).toContain('Support triage');
+    expect(text).toContain('Social media manager');
+    expect(text).toContain(t('botForm.presetHint'));
+  });
+
+  it('hides the strip when there are no presets', () => {
+    const text = textOf(render({ initialPresets: [] }));
+
+    expect(text).not.toContain(t('botForm.presetTitle'));
+    expect(text).not.toContain(t('botForm.presetHint'));
+  });
+
+  it('applies a chosen preset to the draft', () => {
+    const html = render({ initialPresets: DEMO_BOT_PRESETS, initialPresetId: 'preset_support' });
+    const text = textOf(html);
+
+    expect(html).toContain('value="Support triage"');
+    expect(html).toContain('value="Read incoming support mail, sort it by urgency, and draft replies for the person to approve."');
+    expect(text).toContain('Be concise and kind.');
+    expect(text).toContain(t('botForm.presetApplied', { name: 'Support triage' }));
+  });
+
+  it('is not offered when editing an existing bot', () => {
+    const text = textOf(render({ bot, initialPresets: DEMO_BOT_PRESETS }));
+
+    expect(text).not.toContain(t('botForm.presetTitle'));
+  });
+
+  it('offers Save as preset only when editing', () => {
+    const createText = textOf(render({ initialPresets: DEMO_BOT_PRESETS }));
+    expect(createText).not.toContain(t('botForm.saveAsPreset'));
+
+    const editText = textOf(render({ bot, savePresetFromBot: savePreset }));
+    expect(editText).toContain(t('botForm.saveAsPreset'));
   });
 });

@@ -446,6 +446,8 @@ export function App(): ReactElement {
           closeBrowser={client.closeBrowser}
             loadBrowserProfiles={() => client.listBrowserProfiles()}
           loadMcpServers={() => client.listMcpServers()}
+          loadPresets={() => client.listBotPresets()}
+          savePresetFromBot={(botId, input) => client.createPresetFromBot(botId, input)}
           onClose={() => setBotDialog(null)}
         />
         <TeamDialog

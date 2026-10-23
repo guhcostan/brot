@@ -1,7 +1,7 @@
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { createMockClient } from '../data/mockClient';
-import { DEMO_BOTS, DEMO_BROWSER_PROFILES, DEMO_MCP_SERVERS, DEMO_SAVED_LOGINS, DEMO_TEAMS, DEMO_WORKSPACE_MEMORIES } from '../data/fixtures';
+import { DEMO_BOTS, DEMO_BOT_PRESETS, DEMO_BROWSER_PROFILES, DEMO_MCP_SERVERS, DEMO_SAVED_LOGINS, DEMO_TEAMS, DEMO_WORKSPACE_MEMORIES } from '../data/fixtures';
 import { TEAM_PACKAGE_FORMAT, TEAM_PACKAGE_VERSION, formatTeamPackage, type TeamPackage } from '@brot/protocol';
 import type { VoiceInfo } from '../voice';
 import { t } from '../i18n';
@@ -41,6 +41,7 @@ function render(overrides: Partial<SettingsViewProps> = {}, bots = botsRecord): 
     initialMcpServers: DEMO_MCP_SERVERS,
     initialSavedLogins: DEMO_SAVED_LOGINS,
     initialWorkspaceMemories: DEMO_WORKSPACE_MEMORIES,
+    initialBotPresets: DEMO_BOT_PRESETS,
     ...overrides,
   };
   return renderToStaticMarkup(
@@ -250,5 +251,29 @@ describe('settings about me', () => {
 
     expect(text).toContain(t('settings.aboutMeEmptyTitle'));
     expect(text).toContain(t('settings.aboutMeEmptyBody'));
+  });
+});
+
+describe('settings bot presets', () => {
+  it('lists the presets with names, jobs and actions', () => {
+    const html = render();
+    const text = textOf(html);
+
+    expect(text).toContain(t('settings.botPresets'));
+    expect(text).toContain(t('settings.botPresetsBody'));
+    expect(text).toContain(t('settings.botPresetsCount', { count: '2' }));
+    expect(text).toContain('Support triage');
+    expect(text).toContain('Social media manager');
+    expect(text).toContain(t('settings.botPresetNew'));
+    expect(text).toContain(t('settings.botPresetEditNamed', { name: 'Support triage' }));
+    expect(html).toContain(t('settings.botPresetDeleteNamed', { name: 'Support triage' }));
+  });
+
+  it('shows the empty state when there are no presets', () => {
+    const text = textOf(render({ initialBotPresets: [] }));
+
+    expect(text).toContain(t('settings.botPresetEmptyTitle'));
+    expect(text).toContain(t('settings.botPresetEmptyBody'));
+    expect(text).toContain(t('settings.botPresetNew'));
   });
 });

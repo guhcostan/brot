@@ -20,8 +20,11 @@ import {
   CreateThread,
   Device,
   Memory,
+  BotPreset as BotPresetSchema,
   BrowserTakeover as BrowserTakeoverSchema,
+  CreateBotPreset,
   CreateMcpServer,
+  CreatePresetFromBot,
   ImportSkill,
   ImportTeamPackage,
   MarkNotificationsRead,
@@ -52,6 +55,7 @@ import {
   UpdateMemory,
   UpdateRoomMembers,
   UpdateRoutine,
+  UpdateBotPreset,
   UpdateSavedLogin,
   UpdateSkill,
   UpdateTask,
@@ -842,6 +846,32 @@ export function createHttpClient({
       await request(`/api/logins/${encodeURIComponent(loginId)}`, { method: 'DELETE' });
     },
 
+    listBotPresets() {
+      return read('/api/presets', BotPresetSchema.array());
+    },
+
+    async createBotPreset(input) {
+      const body = CreateBotPreset.parse(input);
+      const response = await write('POST', '/api/presets', body);
+      return BotPresetSchema.parse(await response.json());
+    },
+
+    async updateBotPreset(presetId, patch) {
+      const body = UpdateBotPreset.parse(patch);
+      const response = await write('PATCH', `/api/presets/${encodeURIComponent(presetId)}`, body);
+      return BotPresetSchema.parse(await response.json());
+    },
+
+    async deleteBotPreset(presetId) {
+      await request(`/api/presets/${encodeURIComponent(presetId)}`, { method: 'DELETE' });
+    },
+
+    async createPresetFromBot(botId, input = {}) {
+      const body = CreatePresetFromBot.parse(input);
+      const response = await write('POST', `/api/presets/from-bot/${encodeURIComponent(botId)}`, body);
+      return BotPresetSchema.parse(await response.json());
+    },
+
     listWorkspaceMemories() {
       return read('/api/profile/memories', Memory.array());
     },
@@ -1096,4 +1126,14 @@ function replay({ threadId, messages, runs, approvals }: HistoryRecords): Canoni
 
   // Array.prototype.sort is stable, so records sharing a timestamp keep the order pushed above.
   return events.sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+}
+
+/** One preset from the server, validated with the protocol schema. */
+export function parseBotPreset(value: unknown): import('@brot/protocol').BotPreset {
+  return BotPresetSchema.parse(value);
+}
+
+/** A list of bot presets from the server. */
+export function parseBotPresets(value: unknown): import('@brot/protocol').BotPreset[] {
+  return BotPresetSchema.array().parse(value);
 }

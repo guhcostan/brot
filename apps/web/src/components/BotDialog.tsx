@@ -11,17 +11,20 @@ import {
   Textarea,
   cx,
   formatAvatar,
+  parseAvatar,
   type AvatarColor,
   type AvatarMood,
   type AvatarSpecies,
 } from '@brot/ui';
 import type { BrowserProfile, BrowserStatus, Provider } from '../data/client';
+import type { BotPreset, CreatePresetFromBot } from '@brot/protocol';
 import { ROLE_TEMPLATES, type ComputerChoice, type RoleTemplate } from '../data/templates';
 import { avatarOf, formatUsd } from '../format';
+import { COLOR_KEY, SPECIES_KEY } from './avatarOptions';
 import { t, type TranslationKey } from '../i18n';
 import { BrowserPanel } from './BrowserPanel';
 import { ConfirmDialog, Dialog } from './Dialog';
-import { Archive, Close, Trash } from './icons';
+import { Archive, Close, Sparkle, Trash } from './icons';
 
 export interface BotDialogProps {
   open: boolean;
@@ -51,36 +54,20 @@ export interface BotDialogProps {
   initialProviders?: Provider[];
   /** Budget drafts to render, e.g. to SSR an invalid value's inline error. */
   initialBudgets?: { runBudget?: string; dailyBudget?: string };
+  /** Loads the presets the create dialog offers in its "Start from a preset" strip. */
+  loadPresets?: () => Promise<BotPreset[]>;
+  /** Presets to render before the load resolves, e.g. in an SSR render. */
+  initialPresets?: BotPreset[];
+  /** Applies this preset to a new bot's draft on mount, e.g. in an SSR render. */
+  initialPresetId?: string;
+  /** Saves this bot as a preset (edit mode only). */
+  savePresetFromBot?: (botId: string, input?: CreatePresetFromBot) => Promise<BotPreset>;
   /** The MCP mode to render for a new bot, e.g. in an SSR render. */
   initialMcpMode?: 'all' | 'custom';
   onClose: () => void;
 }
 
-const SPECIES_KEY: Record<AvatarSpecies, TranslationKey> = {
-  capivara: 'species.capivara',
-  onca: 'species.onca',
-  tucano: 'species.tucano',
-  arara: 'species.arara',
-  tamandua: 'species.tamandua',
-  boto: 'species.boto',
-  preguica: 'species.preguica',
-  mico: 'species.mico',
-  lobo: 'species.lobo',
-  jabuti: 'species.jabuti',
-};
 
-const COLOR_KEY: Record<AvatarColor, TranslationKey> = {
-  black: 'color.black',
-  teal: 'color.teal',
-  violet: 'color.violet',
-  blue: 'color.blue',
-  orange: 'color.orange',
-  amber: 'color.amber',
-  pink: 'color.pink',
-  brown: 'color.brown',
-  gray: 'color.gray',
-  white: 'color.white',
-};
 
 const COMPUTER_KEYS: Record<ComputerChoice, { title: TranslationKey; hint: TranslationKey }> = {
   none: { title: 'botForm.computer.none', hint: 'botForm.computer.noneHint' },
@@ -244,14 +231,32 @@ function BotForm({
   initialMcpMode = 'all',
   initialProviders,
   initialBudgets,
+  loadPresets,
+  initialPresets,
+  initialPresetId,
+  savePresetFromBot,
   onClose,
 }: BotDialogProps): ReactElement {
   const [form, setForm] = useState<FormState>(() => {
     const initial = initialState(bot, initialMcpMode);
+    const seed = !bot && initialPresetId !== undefined ? initialPresets?.find((preset) => preset.id === initialPresetId) : undefined;
+    const seeded =
+      seed === undefined
+        ? initial
+        : {
+            ...initial,
+            name: seed.name,
+            job: seed.job,
+            instructions: seed.instructions,
+            ...(() => {
+              const avatar = parseAvatar(seed.avatar, seed.id);
+              return { species: avatar.shape, color: avatar.color };
+            })(),
+          };
     return initialBudgets === undefined
-      ? initial
+      ? seeded
       : {
-          ...initial,
+          ...seeded,
           ...(initialBudgets.runBudget === undefined ? {} : { runBudget: initialBudgets.runBudget }),
           ...(initialBudgets.dailyBudget === undefined ? {} : { dailyBudget: initialBudgets.dailyBudget }),
         };
@@ -280,6 +285,29 @@ function BotForm({
     );
   }, [mcpServers]);
   const [liveViewOpen, setLiveViewOpen] = useState(false);
+  const [presets, setPresets] = useState<BotPreset[] | null>(initialPresets ?? null);
+  const [presetId, setPresetId] = useState<string | null>(initialPresetId ?? null);
+  const [savePresetOpen, setSavePresetOpen] = useState(false);
+  const [savePresetName, setSavePresetName] = useState('');
+  const [savePresetBusy, setSavePresetBusy] = useState(false);
+  const [savePresetError, setSavePresetError] = useState<string | null>(null);
+  const [savedPresetName, setSavedPresetName] = useState<string | null>(null);
+  useEffect(() => {
+    if (loadPresets === undefined || initialPresets !== undefined) return;
+    let active = true;
+    loadPresets()
+      .then((list) => {
+        if (active) setPresets(list);
+      })
+      .catch((cause: unknown) => {
+        console.warn('The bot preset list did not load', cause);
+        if (active) setPresets([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, [loadPresets, initialPresets]);
+
   useEffect(() => {
     if (initialMcpServers !== undefined) return;
     let active = true;
@@ -396,6 +424,35 @@ function BotForm({
       hosts: [...entry.egress],
       budget: entry.teamBudgetUsd === undefined ? '' : String(entry.teamBudgetUsd),
     }));
+  };
+
+  const applyPreset = (preset: BotPreset) => {
+    const avatar = parseAvatar(preset.avatar, preset.id);
+    setPresetId(preset.id);
+    setTemplate(null);
+    setForm((current) => ({
+      ...current,
+      name: preset.name,
+      job: preset.job,
+      instructions: preset.instructions,
+      species: avatar.shape,
+      color: avatar.color,
+    }));
+  };
+
+  const savePreset = async () => {
+    if (bot === undefined || savePresetFromBot === undefined || savePresetBusy) return;
+    setSavePresetBusy(true);
+    setSavePresetError(null);
+    try {
+      const created = await savePresetFromBot(bot.id, savePresetName.trim() === '' ? {} : { name: savePresetName.trim() });
+      setSavedPresetName(created.name);
+      setSavePresetOpen(false);
+    } catch (cause) {
+      setSavePresetError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setSavePresetBusy(false);
+    }
   };
 
   const budget = form.budget.trim() === '' ? undefined : Number(form.budget);
@@ -525,6 +582,9 @@ function BotForm({
 
   return (
     <form onSubmit={submit} className="flex flex-col gap-6 px-5 pt-4 pb-5" noValidate>
+      {!bot && presets !== null && presets.length > 0 ? (
+        <PresetStrip presets={presets} chosen={presetId} onPick={applyPreset} />
+      ) : null}
       {!bot ? <TemplatePicker chosen={template} onPick={applyTemplate} /> : null}
 
       <div className="flex flex-col gap-5 sm:flex-row sm:items-start">
@@ -888,6 +948,16 @@ function BotForm({
             </Button>
           </>
         ) : null}
+        {bot !== undefined && savePresetFromBot !== undefined ? (
+          <Button variant="secondary" size="sm" disabled={busy} onClick={() => {
+            setSavePresetName(bot.name);
+            setSavePresetError(null);
+            setSavePresetOpen(true);
+          }} type="button">
+            <Sparkle size={15} />
+            {t('botForm.saveAsPreset')}
+          </Button>
+        ) : null}
         <span className="flex-1" />
         <Button variant="secondary" onClick={onClose}>
           {t('dialog.cancel')}
@@ -897,6 +967,44 @@ function BotForm({
         </Button>
       </div>
 
+      {savedPresetName !== null ? (
+        <p role="status" className="m-0 text-sm text-ink-2">
+          {t('botForm.presetSaved')}
+        </p>
+      ) : null}
+      {bot !== undefined && savePresetFromBot !== undefined ? (
+        <Dialog open={savePresetOpen} title={t('botForm.savePresetTitle')} description={t('botForm.savePresetDescription')} onClose={() => setSavePresetOpen(false)}>
+          {savePresetOpen ? (
+            <div className="flex flex-col gap-4 px-5 pt-4 pb-5">
+              <Input
+                label={t('botForm.presetName')}
+                value={savePresetName}
+                onChange={(event) => setSavePresetName(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    void savePreset();
+                  }
+                }}
+                autoFocus
+              />
+              {savePresetError !== null ? (
+                <p role="alert" className="m-0 text-sm text-attention-text">
+                  {savePresetError}
+                </p>
+              ) : null}
+              <div className="flex justify-end gap-2">
+                <Button variant="secondary" onClick={() => setSavePresetOpen(false)}>
+                  {t('dialog.cancel')}
+                </Button>
+                <Button variant="primary" disabled={savePresetBusy} onClick={() => void savePreset()}>
+                  {t('botForm.savePresetAction')}
+                </Button>
+              </div>
+            </div>
+          ) : null}
+        </Dialog>
+      ) : null}
       {bot ? (
         <BrowserPanel
           open={liveViewOpen}
@@ -947,6 +1055,38 @@ function TemplatePicker({ chosen, onPick }: { chosen: string | null; onPick: (te
           );
         })}
       </div>
+    </fieldset>
+  );
+}
+
+function PresetStrip({ presets, chosen, onPick }: { presets: BotPreset[]; chosen: string | null; onPick: (preset: BotPreset) => void }): ReactElement {
+  return (
+    <fieldset className="m-0 flex min-w-0 flex-col gap-2 border-0 p-0">
+      <legend className="mb-2 p-0 text-sm font-medium">{t('botForm.presetTitle')}</legend>
+      <div className="no-scrollbar -mx-5 flex gap-2 overflow-x-auto px-5 pb-1">
+        {presets.map((preset) => {
+          const avatar = parseAvatar(preset.avatar, preset.id);
+          const selected = chosen === preset.id;
+          return (
+            <button
+              key={preset.id}
+              type="button"
+              aria-pressed={selected}
+              onClick={() => onPick(preset)}
+              data-avatar-zone
+              className={cx(
+                'group flex w-[150px] flex-none flex-col items-start gap-1.5 rounded-lg border px-2.5 pt-2.5 pb-2 text-left transition-[background-color,border-color,transform] duration-[var(--dur-fast)] hover:bg-surface-2 active:scale-[0.97]',
+                selected ? 'border-ink bg-surface-2' : 'border-line bg-surface',
+              )}
+            >
+              <BotAvatar shape={avatar.shape} color={avatar.color} size={30} mood={selected ? 'success' : 'idle'} />
+              <span className="w-full truncate text-xs leading-tight font-medium text-ink">{preset.name}</span>
+              <span className="line-clamp-2 text-[11px] leading-tight text-ink-2">{preset.job}</span>
+            </button>
+          );
+        })}
+      </div>
+      <p className="m-0 text-xs text-ink-3">{chosen === null ? t('botForm.presetHint') : t('botForm.presetApplied', { name: presets.find((preset) => preset.id === chosen)?.name ?? '' })}</p>
     </fieldset>
   );
 }

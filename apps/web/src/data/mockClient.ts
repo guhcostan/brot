@@ -4,6 +4,7 @@ import type {
   ApprovalKind,
   Attachment,
   Bot,
+  BotPreset,
   BrowserTakeover,
   SavedLogin,
   CanonicalEvent,
@@ -29,7 +30,9 @@ import type {
 import {
   ComputerInput,
   CreateBot,
+  CreateBotPreset,
   CreateMcpServer,
+  CreatePresetFromBot,
   CreateMemory,
   CreateWorkspaceMemory,
   CreateSavedLogin,
@@ -51,6 +54,7 @@ import {
   UpdateMemory,
   UpdateRoomMembers,
   UpdateRoutine,
+  UpdateBotPreset,
   UpdateSavedLogin,
   UpdateSkill,
   UpdateTeam,
@@ -84,6 +88,7 @@ import { applyInput, navigate, newScreen, renderScreen, type FakeScreen } from '
 import {
   DEFAULT_THREAD_TITLE,
   DEMO_BOT_BROWSER_PROFILES,
+  DEMO_BOT_PRESETS,
   DEMO_BOTS,
   DEMO_BROWSER_PROFILES,
   DEMO_HISTORY,
@@ -109,6 +114,7 @@ import {
 } from './fixtures';
 import { findMentions } from '../mentions';
 import { skillFileFilename } from '../skillFileName';
+
 import { buildSearchSnippet } from '../search';
 import { DEFAULT_SYSTEM_VOICE, silentWavBlob, voiceTextAllowed } from '../voice';
 
@@ -264,6 +270,7 @@ function nextMockRunAt(cron: string, from = Date.now()): string | undefined {
  */
 export function createMockClient(): BrotClient {
   const bots = new Map<string, Bot>(DEMO_BOTS.map((bot) => [bot.id, structuredClone(bot)]));
+  const botPresets = new Map<string, BotPreset>(DEMO_BOT_PRESETS.map((preset) => [preset.id, structuredClone(preset)]));
   const teams = new Map<string, Team>(DEMO_TEAMS.map((team) => [team.id, structuredClone(team)]));
   const nameOf = (botId: string) => bots.get(botId)?.name ?? botId;
   const byTeamName = (a: Team, b: Team) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id);
@@ -1041,6 +1048,66 @@ export function createMockClient(): BrotClient {
       if (memories.delete(memoryId)) return;
       if (workspaceMemories.delete(memoryId)) return;
       throw new Error(`Unknown memory: ${memoryId}`);
+    },
+
+    async listBotPresets() {
+      return [...botPresets.values()]
+        .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id))
+        .map((preset) => structuredClone(preset));
+    },
+
+    async createBotPreset(input) {
+      const data = CreateBotPreset.parse(input);
+      const at = now();
+      const created: BotPreset = {
+        id: nextId('preset'),
+        name: data.name.trim(),
+        job: data.job.trim(),
+        instructions: data.instructions,
+        ...(data.avatar === undefined ? {} : { avatar: data.avatar }),
+        createdAt: at,
+        updatedAt: at,
+      };
+      botPresets.set(created.id, created);
+      return structuredClone(created);
+    },
+
+    async updateBotPreset(presetId, patch) {
+      const current = botPresets.get(presetId);
+      if (!current) throw new Error(`Unknown bot preset: ${presetId}`);
+      const data = UpdateBotPreset.parse(patch);
+      const next: BotPreset = {
+        ...current,
+        ...(data.name === undefined ? {} : { name: data.name.trim() }),
+        ...(data.job === undefined ? {} : { job: data.job.trim() }),
+        ...(data.instructions === undefined ? {} : { instructions: data.instructions }),
+        ...(data.avatar === undefined ? {} : { avatar: data.avatar }),
+        updatedAt: now(),
+      };
+      botPresets.set(presetId, next);
+      return structuredClone(next);
+    },
+
+    async deleteBotPreset(presetId) {
+      if (!botPresets.delete(presetId)) throw new Error(`Unknown bot preset: ${presetId}`);
+    },
+
+    async createPresetFromBot(botId, input = {}) {
+      const bot = bots.get(botId);
+      if (!bot) throw new Error(`Unknown bot: ${botId}`);
+      const at = now();
+      const data = CreatePresetFromBot.parse(input);
+      const created: BotPreset = {
+        id: nextId('preset'),
+        name: data.name?.trim() || bot.name,
+        job: bot.job,
+        instructions: bot.instructions,
+        ...(bot.avatar === undefined ? {} : { avatar: bot.avatar }),
+        createdAt: at,
+        updatedAt: at,
+      };
+      botPresets.set(created.id, created);
+      return structuredClone(created);
     },
 
     async listWorkspaceMemories() {
