@@ -49,12 +49,14 @@ import {
   UpdateTeam,
   UpdateThread,
   UpdateVoiceSettings,
+  MemoryJournalQuery,
   VoiceSpeakRequest,
   type Bot,
   type BrowserProfileRef,
   type CanonicalEvent,
   type RoutineTrigger,
   type Thread,
+  type UndoMemoryResult,
 } from '@brot/protocol';
 import { Hono, type Context } from 'hono';
 import { cors } from 'hono/cors';
@@ -1027,6 +1029,65 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     const body = await parseBody(c, CreateWorkspaceMemory);
     if (!body.ok) return body.response;
     return c.json(await repos.memories.create({ ...body.data, scope: 'workspace' }), 201);
+  });
+
+  /** Every memory write, newest first. Filters: `botId`, `scope` and a `limit` of 1..200 (default 50). */
+  app.get('/api/memories/journal', async (c) => {
+    const botId = c.req.query('botId');
+    const scope = c.req.query('scope');
+    const limit = c.req.query('limit');
+    const parsed = MemoryJournalQuery.safeParse({
+      ...(botId ? { botId } : {}),
+      ...(scope ? { scope } : {}),
+      ...(limit ? { limit } : {}),
+    });
+    if (!parsed.success) return invalid(c, parsed.error);
+    return c.json(await repos.memoryJournal.list(parsed.data));
+  });
+
+  /**
+   * Undoes one journal entry. A created memory is removed, an edit is reverted to the content before it, and a
+   * deleted memory is recreated with a new id. Each undo goes through the memory repo, so it lands in the journal.
+   */
+  app.post('/api/memories/journal/:id/undo', async (c) => {
+    const entry = await repos.memoryJournal.get(c.req.param('id'));
+    if (!entry) return notFound(c, 'Memory journal entry');
+    const current = entry.memoryId === undefined ? undefined : await repos.memories.get(entry.memoryId);
+
+    if (entry.action === 'created') {
+      if (current === undefined) return c.json({ error: 'This memory is gone; there is nothing to undo.' }, 409);
+      if (current.kind !== entry.kind || current.content !== (entry.contentAfter ?? '')) {
+        return c.json({ error: 'This memory changed after it was created; edit it instead.' }, 409);
+      }
+      await repos.memories.remove(current.id);
+      return c.json({ result: 'removed' } satisfies UndoMemoryResult);
+    }
+
+    if (entry.action === 'updated') {
+      if (current === undefined) return c.json({ error: 'This memory is gone; its edit cannot be undone.' }, 409);
+      if (current.kind !== entry.kind || current.content !== (entry.contentAfter ?? '')) {
+        return c.json({ error: 'This memory changed after that edit; edit it instead.' }, 409);
+      }
+      const memory = await repos.memories.update(current.id, { content: entry.contentBefore ?? '' });
+      return memory ? c.json({ result: 'restored', memory } satisfies UndoMemoryResult) : notFound(c, 'Memory');
+    }
+
+    // A deleted memory is recreated from the journal. Its bot must still exist for a bot-scoped memory.
+    if (entry.contentBefore === undefined) return c.json({ error: 'This journal entry has nothing to restore.' }, 409);
+    if (entry.scope === 'bot') {
+      const owner = entry.botId;
+      if (owner === undefined || (await repos.bots.get(owner)) === undefined) {
+        return c.json({ error: 'The bot that owned this memory is gone; it cannot be restored.' }, 409);
+      }
+      const memory = await repos.memories.create(owner, { kind: entry.kind, content: entry.contentBefore });
+      return c.json({ result: 'restored', memory } satisfies UndoMemoryResult);
+    }
+    const memory = await repos.memories.create({
+      scope: 'workspace',
+      kind: entry.kind,
+      content: entry.contentBefore,
+    });
+    return c.json({ result: 'restored', memory } satisfies UndoMemoryResult);
   });
 
   app.patch('/api/memories/:id', async (c) => {

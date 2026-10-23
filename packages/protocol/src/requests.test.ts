@@ -11,6 +11,7 @@ import {
   CreateWorkspaceMemory,
   CreateRoutine,
   CreateTask,
+  MemoryJournalQuery,
   PairingComplete,
   PostMessage,
   ResolveApproval,
@@ -236,6 +237,21 @@ describe('request schemas', () => {
     expect(() => PostMessage.parse({ content: 'x', attachmentIds: [...full, 'att_extra'] })).toThrow();
     expect(() => PostMessage.parse({ content: 'x', attachmentIds: [''] })).toThrow();
     expect(() => PostMessage.parse({ content: 'x', attachmentIds: [1] })).toThrow();
+  });
+
+  it('parses the memory journal filters with a default and capped limit', () => {
+    expect(MemoryJournalQuery.parse({})).toEqual({ limit: 50 });
+    expect(MemoryJournalQuery.parse({ botId: 'bot_1', scope: 'bot', limit: '10' })).toEqual({
+      botId: 'bot_1',
+      scope: 'bot',
+      limit: 10,
+    });
+    expect(MemoryJournalQuery.parse({ scope: 'workspace' })).toEqual({ scope: 'workspace', limit: 50 });
+    expect(() => MemoryJournalQuery.parse({ scope: 'team' })).toThrow();
+    expect(() => MemoryJournalQuery.parse({ limit: '0' })).toThrow();
+    expect(() => MemoryJournalQuery.parse({ limit: '201' })).toThrow();
+    expect(() => MemoryJournalQuery.parse({ limit: 'many' })).toThrow();
+    expect(() => MemoryJournalQuery.parse({ limit: '2.5' })).toThrow();
   });
 
   it('creates memories for a bot or for the whole workspace', () => {

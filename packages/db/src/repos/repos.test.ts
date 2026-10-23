@@ -840,6 +840,100 @@ describe('workspace memories', () => {
   });
 });
 
+describe('memory journal', () => {
+  it('journals a create, an update and a delete with the content around each write', async () => {
+    const { bot } = await seed();
+    const created = await repos.memories.create(bot.id, { kind: 'fact', content: 'Likes tea' });
+    await repos.memories.update(created.id, { content: 'Prefers green tea', kind: 'preference' });
+
+    const live = await repos.memoryJournal.list();
+    expect(live.map((entry) => entry.action)).toEqual(['updated', 'created']);
+    const [edit, added] = live;
+    expect(added).toMatchObject({
+      memoryId: created.id,
+      botId: bot.id,
+      scope: 'bot',
+      kind: 'fact',
+      action: 'created',
+      contentAfter: 'Likes tea',
+    });
+    expect(added?.contentBefore).toBeUndefined();
+    expect(edit).toMatchObject({
+      memoryId: created.id,
+      kind: 'preference',
+      action: 'updated',
+      contentBefore: 'Likes tea',
+      contentAfter: 'Prefers green tea',
+    });
+
+    expect(await repos.memories.remove(created.id)).toBe(true);
+    const history = await repos.memoryJournal.list();
+    expect(history.map((entry) => entry.action)).toEqual(['deleted', 'updated', 'created']);
+    const [deleted, editedRow, createdRow] = history;
+    expect(deleted).toMatchObject({
+      action: 'deleted',
+      scope: 'bot',
+      kind: 'preference',
+      contentBefore: 'Prefers green tea',
+      botId: bot.id,
+    });
+    // The memory is gone, so the FK cleared every entry's memory id.
+    expect(deleted?.memoryId).toBeUndefined();
+    expect(editedRow?.memoryId).toBeUndefined();
+    expect(createdRow?.memoryId).toBeUndefined();
+    expect(await repos.memoryJournal.get(createdRow?.id ?? 'missing')).toEqual(createdRow);
+  });
+
+  it('journals workspace memories with their scope', async () => {
+    const workspace = await repos.memories.create({ scope: 'workspace', kind: 'preference', content: 'Works in Lisbon' });
+    const [entry] = await repos.memoryJournal.list({ scope: 'workspace' });
+    expect(entry).toMatchObject({ memoryId: workspace.id, scope: 'workspace', kind: 'preference', action: 'created' });
+    expect(entry?.botId).toBeUndefined();
+  });
+
+  it('orders entries newest first, with rowid breaking timestamp ties', async () => {
+    const { bot } = await seed();
+    const memory = await repos.memories.create(bot.id, { kind: 'fact', content: 'one' });
+    await repos.memories.update(memory.id, { content: 'two' });
+    await repos.memories.update(memory.id, { content: 'three' });
+    await handle.client.execute({ sql: "UPDATE memory_journal SET at = '2026-10-19T12:00:00.000Z'" });
+
+    const entries = await repos.memoryJournal.list();
+    expect(entries.map((entry) => entry.action)).toEqual(['updated', 'updated', 'created']);
+    expect(entries.map((entry) => entry.contentAfter)).toEqual(['three', 'two', 'one']);
+  });
+
+  it('filters by bot and scope and caps the limit', async () => {
+    const { bot } = await seed();
+    const other = await repos.bots.create({ name: 'Grace', job: 'x' });
+    await repos.memories.create(bot.id, { kind: 'fact', content: 'A' });
+    await repos.memories.create(other.id, { kind: 'fact', content: 'B' });
+    await repos.memories.create({ scope: 'workspace', kind: 'fact', content: 'C' });
+
+    expect(await repos.memoryJournal.list({ botId: bot.id })).toHaveLength(1);
+    expect(await repos.memoryJournal.list({ botId: bot.id })).toMatchObject([{ botId: bot.id, contentAfter: 'A' }]);
+    expect(await repos.memoryJournal.list({ scope: 'bot' })).toHaveLength(2);
+    expect(await repos.memoryJournal.list({ scope: 'workspace' })).toHaveLength(1);
+    expect(await repos.memoryJournal.list({ limit: 2 })).toHaveLength(2);
+  });
+
+  it('keeps journal rows when the memory or its bot is deleted, clearing the references', async () => {
+    const { bot } = await seed();
+    const memory = await repos.memories.create(bot.id, { kind: 'fact', content: 'Likes tea' });
+    await repos.memories.remove(memory.id);
+
+    const kept = await repos.memoryJournal.get((await repos.memoryJournal.list())[0]?.id ?? 'missing');
+    expect(kept).toMatchObject({ action: 'deleted', contentBefore: 'Likes tea', botId: bot.id });
+    const createdRow = (await repos.memoryJournal.list()).find((entry) => entry.action === 'created');
+    expect(createdRow?.memoryId).toBeUndefined();
+
+    expect(await repos.bots.remove(bot.id)).toBe(true);
+    const afterBotDelete = await repos.memoryJournal.list();
+    expect(afterBotDelete.length).toBeGreaterThanOrEqual(2);
+    expect(afterBotDelete.every((entry) => entry.botId === undefined)).toBe(true);
+  });
+});
+
 describe('skills', () => {
   it('starts at version 1 and bumps the version on every update', async () => {
     const skill = await repos.skills.create({ name: 'summarize', description: 'Summarize', body: 'v1' });

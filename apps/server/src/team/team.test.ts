@@ -438,6 +438,110 @@ describe('delegate_task', () => {
     expect(await f.repos.tasks.list({ assigneeBotId: bo.id })).toHaveLength(0);
   });
 
+  it('keeps two delegations from the same run in the caller chain', async () => {
+    const f = await setup();
+    const ada = await f.bot('Ada');
+    const bo = await f.bot('Bo');
+    const cy = await f.bot('Cy');
+    const thread = await f.thread(ada);
+    const scope = await f.scope(ada, thread, { chainId: 'lead-chain', depth: 0, askHops: 0 });
+
+    expect(await invoke(f.tool('delegate_task'), scope, { botName: 'Bo', title: 'First' })).toMatchObject({ ok: true });
+    expect(await invoke(f.tool('delegate_task'), scope, { botName: 'Cy', title: 'Second' })).toMatchObject({ ok: true });
+
+    const tasks = await f.repos.tasks.list({ chainId: 'lead-chain' });
+    expect(tasks).toHaveLength(2);
+    expect(tasks.map((task) => task.chainId)).toEqual(['lead-chain', 'lead-chain']);
+    expect(tasks.map((task) => task.assigneeBotId).sort()).toEqual([bo.id, cy.id].sort());
+    expect(tasks.every((task) => task.depth === 1)).toBe(true);
+    // Same chain as the caller, so no separate task chain needs a budget link.
+    expect(f.runner.links).toEqual([]);
+    expect(f.runner.starts.map((start) => start.chain?.chainId)).toEqual(['lead-chain', 'lead-chain']);
+  });
+
+  it('joins the parent chain when a parentTaskId is named', async () => {
+    const f = await setup();
+    const ada = await f.bot('Ada');
+    const bo = await f.bot('Bo');
+    const cy = await f.bot('Cy');
+    const thread = await f.thread(ada);
+    const root = await f.repos.tasks.create({ title: 'Root', assigneeBotId: ada.id, threadId: thread.id });
+    const parent = await f.repos.tasks.create({
+      title: 'Parent',
+      assigneeBotId: ada.id,
+      threadId: thread.id,
+      createdByBotId: bo.id,
+      parentTaskId: root.id,
+    });
+    const scope = await f.scope(ada, thread, { chainId: root.chainId, depth: 1, askHops: 0 });
+
+    expect(
+      await invoke(f.tool('delegate_task'), scope, { botName: 'Cy', title: 'Child', parentTaskId: parent.id }),
+    ).toMatchObject({ ok: true });
+
+    const [child] = await f.repos.tasks.list({ assigneeBotId: cy.id });
+    expect(child).toMatchObject({ chainId: root.chainId, parentTaskId: parent.id, depth: 2 });
+  });
+
+  it('keeps delegations from different runs in their own chains', async () => {
+    const f = await setup();
+    const ada = await f.bot('Ada');
+    await f.bot('Bo');
+    const thread = await f.thread(ada);
+
+    await invoke(f.tool('delegate_task'), await f.scope(ada, thread, { chainId: 'run-one', depth: 0, askHops: 0 }), {
+      botName: 'Bo',
+      title: 'From one',
+    });
+    await invoke(f.tool('delegate_task'), await f.scope(ada, thread, { chainId: 'run-two', depth: 0, askHops: 0 }), {
+      botName: 'Bo',
+      title: 'From two',
+    });
+
+    const chains = (await f.repos.tasks.list({ assigneeBotId: (await f.repos.bots.list()).find((bot) => bot.name === 'Bo')?.id })).map(
+      (task) => task.chainId,
+    );
+    expect(chains).toEqual(['run-one', 'run-two']);
+  });
+
+  it('enforces the chain task limit across delegations from one run', async () => {
+    const f = await setup();
+    const ada = await f.bot('Ada');
+    await f.bot('Bo');
+    const cy = await f.bot('Cy');
+    const thread = await f.thread(ada);
+    const root = await f.repos.tasks.create({ title: 'Root', assigneeBotId: ada.id, threadId: thread.id });
+    for (let index = 0; index < TEAM_MAX_TASKS_PER_CHAIN - 2; index += 1) {
+      await f.repos.tasks.create({
+        title: `Filler ${index}`,
+        assigneeBotId: cy.id,
+        threadId: thread.id,
+        createdByBotId: ada.id,
+        parentTaskId: root.id,
+      });
+    }
+    const scope = await f.scope(ada, thread, { chainId: root.chainId, depth: 0, askHops: 0 });
+
+    expect(await invoke(f.tool('delegate_task'), scope, { botName: 'Bo', title: 'Last slot' })).toMatchObject({ ok: true });
+    expect(await refusal(f.tool('delegate_task'), scope, { botName: 'Bo', title: 'Over the limit' })).toMatch(
+      `already holds ${TEAM_MAX_TASKS_PER_CHAIN} tasks`,
+    );
+  });
+
+  it('stops the second delegation when the shared chain budget is spent', async () => {
+    let spent = 0;
+    const f = await setup({ spentUsd: () => spent });
+    const ada = await f.bot('Ada');
+    await f.bot('Bo');
+    await f.repos.bots.update(ada.id, { teamBudgetUsd: 2 });
+    const scope = await f.scope(ada, await f.thread(ada), { chainId: 'budget-chain', depth: 0, askHops: 0 });
+
+    expect(await invoke(f.tool('delegate_task'), scope, { botName: 'Bo', title: 'First' })).toMatchObject({ ok: true });
+    spent = 2;
+    expect(await refusal(f.tool('delegate_task'), scope, { botName: 'Bo', title: 'Second' })).toMatch(/budget/);
+    expect(await f.repos.tasks.list({ chainId: 'budget-chain' })).toHaveLength(1);
+  });
+
   it('marks the task failed when the assignee cannot be started', async () => {
     const f = await setup();
     const ada = await f.bot('Ada');
@@ -717,7 +821,7 @@ describe('delegated task settlement', () => {
 });
 
 describe('delegated work and the caller budget', () => {
-  it('charges a task delegated from a run to the chain that run is in', async () => {
+  it('puts a task delegated from a run into the chain that run is in', async () => {
     const f = await setup();
     const ada = await f.bot('Ada');
     const bo = await f.bot('Bo');
@@ -726,16 +830,20 @@ describe('delegated work and the caller budget', () => {
     expect(await invoke(f.tool('delegate_task'), scope, { botName: 'Bo', title: 'Work' })).toMatchObject({ ok: true });
 
     const [task] = await f.repos.tasks.list({ assigneeBotId: bo.id });
-    expect(task?.chainId).not.toBe('room-chain');
-    expect(f.runner.links).toEqual([[task?.chainId, 'room-chain']]);
-    expect(f.runner.starts[0]?.chain).toMatchObject({ chainId: task?.chainId, depth: 1 });
+    expect(task?.chainId).toBe('room-chain');
+    // Already in the caller's chain, so nothing has to be linked for the budget.
+    expect(f.runner.links).toEqual([]);
+    expect(f.runner.starts[0]?.chain).toMatchObject({ chainId: 'room-chain', depth: 1 });
   });
 
-  it('charges nothing to a budget when the delegating run is outside any chain', async () => {
+  it('gives a delegation from an unchained run its own chain', async () => {
     const f = await setup();
     const ada = await f.bot('Ada');
-    await f.bot('Bo');
+    const bo = await f.bot('Bo');
     await invoke(f.tool('delegate_task'), await f.scope(ada, await f.thread(ada)), { botName: 'Bo', title: 'Loose' });
+
+    const [task] = await f.repos.tasks.list({ assigneeBotId: bo.id });
+    expect(task?.chainId).toBe(task?.id);
     expect(f.runner.links).toEqual([]);
   });
 });

@@ -55,6 +55,7 @@ describe('migrate', () => {
       'events',
       'mcp_servers',
       'memories',
+      'memory_journal',
       'messages',
       'notifications',
       'policies',
@@ -73,7 +74,7 @@ describe('migrate', () => {
     ]);
 
     const applied = await handle.client.execute('SELECT COUNT(*) AS count FROM __drizzle_migrations');
-    expect(Number(applied.rows[0]?.count)).toBe(22);
+    expect(Number(applied.rows[0]?.count)).toBe(23);
   });
 
   it('adds bot presets on a fresh database', async () => {
@@ -1108,6 +1109,69 @@ describe('migrate', () => {
     expect(await repos.roomBatons.get('room_old')).toBe('bot_old');
     expect(await repos.threads.remove('room_old')).toBe(true);
     expect(await repos.roomBatons.get('room_old')).toBeUndefined();
+  });
+
+  it('adds the memory journal in place and keeps history when the memory or bot goes', async () => {
+    const { handle } = await tempDb();
+    const journal = JSON.parse(await readFile(join(migrationsFolder, 'meta', '_journal.json'), 'utf8')) as {
+      entries: Array<{ tag: string; when: number }>;
+    };
+    const applied = journal.entries.slice(0, 22);
+    if (applied.length !== 22 || applied[21]?.tag !== '0021_strong_captain_marvel') {
+      throw new Error('journal must start with the 0000 to 0021 migrations');
+    }
+
+    for (const entry of applied) {
+      await handle.client.executeMultiple(await readFile(join(migrationsFolder, `${entry.tag}.sql`), 'utf8'));
+    }
+    await handle.client.execute(
+      'CREATE TABLE "__drizzle_migrations" ("id" INTEGER PRIMARY KEY AUTOINCREMENT, "hash" text NOT NULL, "created_at" numeric)',
+    );
+    for (const entry of applied) {
+      await handle.client.execute({
+        sql: 'INSERT INTO "__drizzle_migrations" ("hash", "created_at") VALUES (?, ?)',
+        args: [entry.tag, entry.when],
+      });
+    }
+    await handle.client.execute(
+      `INSERT INTO bots (id, name, job, instructions, engine, computer, pinned, archived, created_at, updated_at)
+       VALUES ('bot_old', 'Ada', 'Researcher', '', 'mock', 'none', 0, 0, '2026-10-19T10:00:00.000Z', '2026-10-19T10:00:00.000Z')`,
+    );
+    await handle.client.execute(
+      `INSERT INTO memories (id, bot_id, scope, kind, content, created_at, updated_at)
+       VALUES ('mem_old', 'bot_old', 'bot', 'fact', 'Likes tea', '2026-10-19T10:00:00.000Z', '2026-10-19T10:00:00.000Z')`,
+    );
+
+    await migrate(handle.db);
+
+    expect(await tableNames(handle)).toContain('memory_journal');
+    expect(await columnNames(handle, 'memory_journal')).toEqual([
+      'id',
+      'memory_id',
+      'bot_id',
+      'scope',
+      'kind',
+      'action',
+      'content_before',
+      'content_after',
+      'source_run_id',
+      'at',
+    ]);
+    const repos = createRepos(handle.db);
+    expect((await repos.memories.update('mem_old', { content: 'Prefers green tea' }))?.content).toBe('Prefers green tea');
+    const [entry] = await repos.memoryJournal.list({ botId: 'bot_old' });
+    expect(entry).toMatchObject({
+      memoryId: 'mem_old',
+      botId: 'bot_old',
+      action: 'updated',
+      contentBefore: 'Likes tea',
+      contentAfter: 'Prefers green tea',
+    });
+
+    expect(await repos.bots.remove('bot_old')).toBe(true);
+    const kept = await repos.memoryJournal.list();
+    expect(kept.length).toBeGreaterThan(0);
+    expect(kept.every((row) => row.botId === undefined && row.memoryId === undefined)).toBe(true);
   });
 
   it('enables foreign keys on the connection', async () => {

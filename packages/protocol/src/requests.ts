@@ -13,6 +13,7 @@ import {
   IsoDateTime,
   McpServerIds,
   MemoryKind,
+  MemoryScope,
   PolicyEffect,
   ResponderMode,
   RoutineTrigger,
@@ -322,6 +323,14 @@ export const UpdateMemory = z.object({
   kind: MemoryKind.optional(),
 });
 export type UpdateMemory = z.infer<typeof UpdateMemory>;
+
+/** The filters GET /api/memories/journal accepts. `limit` defaults to 50 and is capped at 200. */
+export const MemoryJournalQuery = z.object({
+  botId: z.string().min(1).optional(),
+  scope: MemoryScope.optional(),
+  limit: z.coerce.number().int().min(1).max(200).default(50),
+});
+export type MemoryJournalQuery = z.infer<typeof MemoryJournalQuery>;
 
 export const CreateSkill = z.object({
   name: z.string().min(1),

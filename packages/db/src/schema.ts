@@ -19,6 +19,7 @@ import type {
   ComputerState,
   DeviceRole,
   EgressPolicy,
+  MemoryAction,
   MemoryKind,
   MemoryScope,
   McpServerTransport,
@@ -280,6 +281,29 @@ export const memories = sqliteTable(
     updatedAt: text('updated_at').notNull(),
   },
   (t) => [index('memories_bot_idx').on(t.botId)],
+);
+
+/**
+ * One write to a memory, kept for the memory journal and undo. Rows outlive the memory and the bot they name:
+ * both foreign keys clear to null instead of deleting history.
+ */
+export const memoryJournal = sqliteTable(
+  'memory_journal',
+  {
+    id: text('id').primaryKey(),
+    memoryId: text('memory_id').references(() => memories.id, { onDelete: 'set null' }),
+    botId: text('bot_id').references(() => bots.id, { onDelete: 'set null' }),
+    scope: text('scope').$type<MemoryScope>().notNull(),
+    /** The memory's kind after the write; for a deletion, the kind it had. */
+    kind: text('kind').$type<MemoryKind>().notNull(),
+    action: text('action').$type<MemoryAction>().notNull(),
+    contentBefore: text('content_before'),
+    contentAfter: text('content_after'),
+    /** Not a foreign key: history outlives the run that wrote it. */
+    sourceRunId: text('source_run_id'),
+    at: text('at').notNull(),
+  },
+  (t) => [index('memory_journal_bot_idx').on(t.botId), index('memory_journal_at_idx').on(t.at)],
 );
 
 export const skills = sqliteTable(

@@ -10,6 +10,8 @@ interface DelegationPlan {
   parent?: Task;
   depth: number;
   askHops: number;
+  /** The chain the new task joins. Absent only when the caller is outside any chain, so the task starts its own. */
+  chainId?: string;
 }
 
 /** Hands a task to another bot. It starts in that bot's DM thread and runs without waiting. */
@@ -52,7 +54,8 @@ export function createDelegateTaskTool(deps: TeamDeps): BrotTool {
 /**
  * Where a new delegation sits. Under a named parent it joins the parent's chain one level deeper. Without
  * one, a bot at the top of its chain gets a child in that chain, and a bot deeper than that must name
- * its parent, so a delegation can never reset the depth.
+ * its parent, so a delegation can never reset the depth. The plan carries the resolved chain, so every
+ * delegation from one run lands in that run's chain (and its guards and budget cover the whole exchange).
  */
 async function planDelegation(
   deps: TeamDeps,
@@ -91,7 +94,12 @@ async function planDelegation(
   if (chainId !== undefined && (await chainBudgetSpent(deps, chainId, [scope.botId, target.id]))) {
     return { error: 'The team budget for this chain is spent, so no new work can start.' };
   }
-  return { parent, depth, askHops: parent && callerChain ? callerChain.askHops : 0 };
+  return {
+    parent,
+    depth,
+    askHops: parent && callerChain ? callerChain.askHops : 0,
+    ...(chainId === undefined ? {} : { chainId }),
+  };
 }
 
 async function delegate(
@@ -112,6 +120,7 @@ async function delegate(
       threadId: scope.threadId,
       createdByBotId: scope.botId,
       parentTaskId: plan.parent?.id,
+      ...(plan.chainId === undefined ? {} : { chainId: plan.chainId }),
     });
   } catch (error) {
     return { ok: false, output: errorMessage(error) };

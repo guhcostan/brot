@@ -508,6 +508,38 @@ export const Memory = z.object({
 });
 export type Memory = z.infer<typeof Memory>;
 
+/** What a memory journal entry records: a memory was created, changed, or deleted. */
+export const MemoryAction = z.enum(['created', 'updated', 'deleted']);
+export type MemoryAction = z.infer<typeof MemoryAction>;
+
+/**
+ * One write to a memory, listed newest first by the journal. The content around the write is kept, so a
+ * deleted memory can be restored. `memoryId` and `botId` are absent after the memory or the bot is gone.
+ */
+export const MemoryJournalEntry = z.object({
+  id: z.string(),
+  memoryId: z.string().optional(),
+  botId: z.string().optional(),
+  scope: MemoryScope,
+  /** The memory's kind after the write (the kind it had when deleted). */
+  kind: MemoryKind,
+  action: MemoryAction,
+  contentBefore: z.string().optional(),
+  contentAfter: z.string().optional(),
+  /** The run that wrote the memory, when a bot run did. */
+  sourceRunId: z.string().optional(),
+  at: IsoDateTime,
+});
+export type MemoryJournalEntry = z.infer<typeof MemoryJournalEntry>;
+
+/** What undoing a journal entry did: restored a memory, or removed one. */
+export const UndoMemoryResult = z.object({
+  result: z.enum(['restored', 'removed']),
+  /** The restored memory. Absent when the undo removed one. */
+  memory: Memory.optional(),
+});
+export type UndoMemoryResult = z.infer<typeof UndoMemoryResult>;
+
 export const Skill = z.object({
   id: z.string(),
   botId: z.string().optional(),

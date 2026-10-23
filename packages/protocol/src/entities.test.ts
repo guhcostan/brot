@@ -9,6 +9,7 @@ import {
   Computer,
   Device,
   Memory,
+  MemoryJournalEntry,
   MemoryScope,
   Message,
   Policy,
@@ -22,6 +23,7 @@ import {
   Skill,
   Task,
   TaskStatus,
+  UndoMemoryResult,
   Team,
   Thread,
   ThreadKind,
@@ -177,6 +179,32 @@ describe('entity schemas', () => {
     expect(roundTrip(Policy, policy)).toEqual(policy);
     expect(roundTrip(Memory, memory)).toEqual(memory);
     expect(roundTrip(Skill, skill)).toEqual(skill);
+  });
+
+  it('round-trips a memory journal entry and the undo result', () => {
+    const entry = {
+      id: 'mj1',
+      memoryId: 'mem1',
+      botId: 'bot_1',
+      scope: 'bot' as const,
+      kind: 'fact' as const,
+      action: 'updated' as const,
+      contentBefore: 'Likes tea',
+      contentAfter: 'Prefers green tea',
+      sourceRunId: 'run_1',
+      at,
+    };
+    expect(roundTrip(MemoryJournalEntry, entry)).toEqual(entry);
+    const orphaned = MemoryJournalEntry.parse({ ...entry, memoryId: undefined, botId: undefined, sourceRunId: undefined });
+    expect(orphaned.memoryId).toBeUndefined();
+    expect(orphaned.botId).toBeUndefined();
+    expect(orphaned.sourceRunId).toBeUndefined();
+    expect(() => MemoryJournalEntry.parse({ ...entry, action: 'restored' })).toThrow();
+
+    const restored = { result: 'restored' as const, memory: { id: 'mem2', botId: 'bot_1', scope: 'bot' as const, kind: 'fact' as const, content: 'Likes tea', createdAt: at, updatedAt: at } };
+    expect(roundTrip(UndoMemoryResult, restored)).toEqual(restored);
+    expect(UndoMemoryResult.parse({ result: 'removed' })).toEqual({ result: 'removed' });
+    expect(() => UndoMemoryResult.parse({ result: 'kept' })).toThrow();
   });
 
   it('round-trips routines with both trigger kinds and device', () => {

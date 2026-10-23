@@ -7,6 +7,7 @@ import { createComputerRepo } from './computers';
 import { createDeviceRepo } from './devices';
 import { createEventRepo } from './events';
 import { createMcpServerRepo } from './mcp-servers';
+import { createMemoryJournalRepo } from './memory-journal';
 import { createMemoryRepo } from './memories';
 import { createNotificationRepo } from './notifications';
 import { createMessageRepo } from './messages';
@@ -37,6 +38,7 @@ export function createRepos(db: Db) {
     policies: createPolicyRepo(db),
     botPresets: createBotPresetRepo(db),
     memories: createMemoryRepo(db),
+    memoryJournal: createMemoryJournalRepo(db),
     mcpServers: createMcpServerRepo(db),
     notifications: createNotificationRepo(db),
     skills: createSkillRepo(db),
