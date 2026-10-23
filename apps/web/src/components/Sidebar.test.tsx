@@ -170,3 +170,12 @@ describe('sidebar teams', () => {
     expect(html).toContain('Capy');
   });
 });
+
+describe('sidebar getting started action', () => {
+  it('shows the help action only when the app offers it', () => {
+    expect(textOf(render())).not.toContain(t('gettingStarted.open'));
+
+    const withAction = textOf(render({ onOpenGettingStarted: () => undefined }));
+    expect(withAction).toContain(t('gettingStarted.open'));
+  });
+});

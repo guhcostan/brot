@@ -5,7 +5,7 @@ import type { MessageSearchFilter, Room } from '../data/client';
 import { avatarOf } from '../format';
 import { t, type Locale } from '../i18n';
 import type { Selection } from '../state/store';
-import { Bell, Board, Chart, ChevronRight, Clock, Gear, Inbox, Pencil, Plus } from './icons';
+import { Bell, Board, Chart, ChevronRight, Clock, Gear, Inbox, Pencil, Plus, Sparkle } from './icons';
 import { MessageSearchResults } from './MessageSearchResults';
 import { useLiveMood } from './mood';
 import { memberSummary } from './RoomView';
@@ -42,6 +42,8 @@ export interface SidebarProps {
   onEditTeam: (teamId: string) => void;
   /** Full-text message search; snippets come back as plain text. */
   onSearchMessages: (filter: MessageSearchFilter) => Promise<SearchHit[]>;
+  /** Reopens the Getting started panel. */
+  onOpenGettingStarted?: (() => void) | undefined;
   /** Re-renders the sidebar's copy when the language changes. */
   locale: Locale;
   /** Bots whose thread rows start expanded. */
@@ -86,6 +88,7 @@ export function Sidebar({
   onNewTeam,
   onEditTeam,
   onSearchMessages,
+  onOpenGettingStarted,
   defaultExpanded,
   className,
 }: SidebarProps): ReactElement {
@@ -456,7 +459,15 @@ export function Sidebar({
         ) : null}
       </div>
 
-      <footer className="-mx-3 flex flex-none border-t border-line px-3 pt-3">
+      <footer className="-mx-3 flex flex-none flex-col gap-0.5 border-t border-line px-3 pt-3">
+        {onOpenGettingStarted !== undefined ? (
+          <button type="button" onClick={onOpenGettingStarted} className={cx(rowClass, 'py-1.5 text-sm text-ink-2 hover:text-ink')}>
+            <span className="flex size-8 flex-none items-center justify-center">
+              <Sparkle size={15} />
+            </span>
+            <span className="flex-1 font-medium">{t('gettingStarted.open')}</span>
+          </button>
+        ) : null}
         <button
           type="button"
           aria-current={selection?.kind === 'settings' ? 'true' : undefined}

@@ -24,6 +24,13 @@ import { getLocale, setLocale, t, type Locale } from './i18n';
 import { inbox, membersOf, statusOfBot, statusOfRoom, taskList, threadStatusOf, type Selection } from './state/store';
 import { tasksForBot, tasksForRoom } from './state/tasks';
 import { emptyThread, pendingApprovals } from './state/thread';
+import { GettingStartedPanel } from './components/GettingStartedPanel';
+import {
+  readGettingStartedDismissed,
+  shouldAutoOpenGettingStarted,
+  workspaceLooksFresh,
+  writeGettingStartedDismissed,
+} from './onboarding';
 import { useChat } from './state/useChat';
 import type { VoiceInfo, VoiceContext } from './voice';
 import { useNotifications } from './state/useNotifications';
@@ -83,7 +90,22 @@ export function App(): ReactElement {
     void loadVoice();
   }, [loadVoice]);
   const voice = useMemo<VoiceContext>(() => ({ status: voiceStatus, speak: client.speakText }), [voiceStatus, client]);
+  const [gettingStartedOpen, setGettingStartedOpen] = useState(false);
+  const [gettingStartedDismissed, setGettingStartedDismissed] = useState(false);
+  const [gettingStartedRemindLater, setGettingStartedRemindLater] = useState(false);
+  const [gettingStartedDismissalLoaded, setGettingStartedDismissalLoaded] = useState(false);
+  useEffect(() => {
+    setGettingStartedDismissed(readGettingStartedDismissed());
+    setGettingStartedDismissalLoaded(true);
+  }, []);
   const { state, select, openBot, newThread, loadThreads, loadHistory, send, sendToRoom, decide, createRoom, createTask, cancelTask, updateBot, createTeam, updateTeam, deleteTeam } = chat;
+  const workspaceFresh = workspaceLooksFresh({ rooms: state.rooms, threadLists: state.threadLists });
+  useEffect(() => {
+    if (!state.ready || !gettingStartedDismissalLoaded) return;
+    if (shouldAutoOpenGettingStarted({ fresh: workspaceFresh, dismissed: gettingStartedDismissed, remindLater: gettingStartedRemindLater })) {
+      setGettingStartedOpen(true);
+    }
+  }, [state.ready, gettingStartedDismissalLoaded, workspaceFresh, gettingStartedDismissed, gettingStartedRemindLater]);
   const [pane, setPane] = useState<Pane>('thread');
   const [locale, setLocaleState] = useState<Locale>(getLocale);
   const [theme, setThemeState] = useState<Theme>(getTheme);
@@ -144,6 +166,39 @@ export function App(): ReactElement {
     },
     [goTo],
   );
+
+  const firstBot = state.bots.find((entry) => !entry.archived) ?? state.bots[0];
+  const closeGettingStarted = () => {
+    setGettingStartedOpen(false);
+    setGettingStartedRemindLater(true);
+  };
+  const dismissGettingStarted = () => {
+    writeGettingStartedDismissed();
+    setGettingStartedDismissed(true);
+    setGettingStartedOpen(false);
+  };
+  const gettingStartedSayHello = () => {
+    closeGettingStarted();
+    if (firstBot !== undefined) void openBotPane(firstBot.id);
+    else newBot();
+  };
+  const gettingStartedGiveTools = () => {
+    closeGettingStarted();
+    if (firstBot !== undefined) setBotDialog({ botId: firstBot.id });
+    else newBot();
+  };
+  const gettingStartedAddKey = () => {
+    closeGettingStarted();
+    goTo({ kind: 'settings' });
+  };
+  const gettingStartedRoutine = () => {
+    closeGettingStarted();
+    goTo({ kind: 'routines' });
+  };
+  const gettingStartedPair = () => {
+    closeGettingStarted();
+    goTo({ kind: 'settings' });
+  };
 
   const startThread = useCallback(
     async (botId: string) => {
@@ -394,6 +449,7 @@ export function App(): ReactElement {
             onNewTeam={() => setTeamDialog({})}
             onEditTeam={(teamId) => setTeamDialog({ teamId })}
             onSearchMessages={client.searchMessages}
+            onOpenGettingStarted={() => setGettingStartedOpen(true)}
             locale={locale}
             className={pane === 'bots' ? 'flex' : 'hidden md:flex'}
           />
@@ -429,7 +485,20 @@ export function App(): ReactElement {
         ) : null}
 
         <NewRoomDialog open={newRoomOpen} bots={state.bots.filter((entry) => !entry.archived)} onClose={() => setNewRoomOpen(false)} onCreate={createRoom} />
-        <BotDialog
+        <GettingStartedPanel
+        open={gettingStartedOpen}
+        bots={state.bots}
+        rooms={state.rooms}
+        threads={state.threads}
+        onClose={closeGettingStarted}
+        onDismiss={dismissGettingStarted}
+        onAddKey={gettingStartedAddKey}
+        onSayHello={gettingStartedSayHello}
+        onGiveTools={gettingStartedGiveTools}
+        onScheduleRoutine={gettingStartedRoutine}
+        onPairPhone={gettingStartedPair}
+      />
+      <BotDialog
           open={botDialog !== null}
           bot={editing}
           teams={state.teams}

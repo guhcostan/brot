@@ -1,0 +1,127 @@
+import type { Device, Routine, Thread } from '@brot/protocol';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { DEMO_BOTS, DEMO_ROOMS, DEMO_ROUTINES } from './data/fixtures';
+import type { Provider } from './data/client';
+import { emptyThread } from './state/thread';
+import {
+  GETTING_STARTED_DISMISSED_KEY,
+  gettingStartedItems,
+  readGettingStartedDismissed,
+  shouldAutoOpenGettingStarted,
+  workspaceLooksFresh,
+  writeGettingStartedDismissed,
+} from './onboarding';
+
+const at = '2026-10-19T09:00:00.000Z';
+
+const thread = (id: string): Thread => ({ id, botId: 'bot_capy', title: 'Thread', createdAt: at, updatedAt: at });
+
+const provider = (configured: boolean): Provider => ({ id: 'p1', label: 'Provider', models: [], configured, secretName: 'provider_key' });
+const device: Device = { id: 'dev_1', name: 'Phone', role: 'full', publicKey: 'key', createdAt: at };
+describe('local dismissal', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('is off and unwritable when localStorage is unavailable', () => {
+    vi.stubGlobal('localStorage', undefined);
+    expect(readGettingStartedDismissed()).toBe(false);
+    expect(writeGettingStartedDismissed()).toBe(false);
+  });
+
+  it('round-trips the dismissal flag through localStorage', () => {
+    const store = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: (key: string, value: string) => store.set(key, value),
+      removeItem: (key: string) => store.delete(key),
+    });
+
+    expect(readGettingStartedDismissed()).toBe(false);
+    expect(writeGettingStartedDismissed()).toBe(true);
+    expect(store.get(GETTING_STARTED_DISMISSED_KEY)).toBe('1');
+    expect(readGettingStartedDismissed()).toBe(true);
+    expect(writeGettingStartedDismissed(false)).toBe(true);
+    expect(readGettingStartedDismissed()).toBe(false);
+  });
+
+  it('survives a throwing storage implementation', () => {
+    vi.stubGlobal('localStorage', {
+      getItem: () => {
+        throw new Error('denied');
+      },
+      setItem: () => {
+        throw new Error('denied');
+      },
+      removeItem: () => {
+        throw new Error('denied');
+      },
+    });
+
+    expect(readGettingStartedDismissed()).toBe(false);
+    expect(writeGettingStartedDismissed()).toBe(false);
+  });
+});
+
+describe('workspaceLooksFresh', () => {
+  it('is fresh with no rooms and only empty or unknown thread lists', () => {
+    expect(workspaceLooksFresh({ rooms: [], threadLists: {} })).toBe(true);
+    expect(workspaceLooksFresh({ rooms: [], threadLists: { bot_1: [], bot_2: [] } })).toBe(true);
+  });
+
+  it('is not fresh once there is a room or any thread', () => {
+    expect(workspaceLooksFresh({ rooms: DEMO_ROOMS, threadLists: {} })).toBe(false);
+    expect(workspaceLooksFresh({ rooms: [], threadLists: { bot_1: [thread('t1')] } })).toBe(false);
+  });
+});
+
+describe('shouldAutoOpenGettingStarted', () => {
+  it('opens only for a fresh, not dismissed, not postponed workspace', () => {
+    expect(shouldAutoOpenGettingStarted({ fresh: true, dismissed: false, remindLater: false })).toBe(true);
+    expect(shouldAutoOpenGettingStarted({ fresh: true, dismissed: true, remindLater: false })).toBe(false);
+    expect(shouldAutoOpenGettingStarted({ fresh: true, dismissed: false, remindLater: true })).toBe(false);
+    expect(shouldAutoOpenGettingStarted({ fresh: false, dismissed: false, remindLater: false })).toBe(false);
+  });
+});
+
+describe('gettingStartedItems', () => {
+  const bareBot = { ...DEMO_BOTS[0]!, computer: 'none' as const, browser: false, desktop: false };
+  const facts = {
+    providers: [provider(false)],
+    routines: [] as Routine[],
+    devices: [] as Device[],
+    bots: [bareBot],
+    rooms: [] as typeof DEMO_ROOMS,
+    threads: {},
+  };
+
+  it('marks a fresh workspace with pending states', () => {
+    const items = gettingStartedItems(facts);
+
+    expect(items.map((item) => item.id)).toEqual(['modelKey', 'hello', 'tools', 'routine', 'phone']);
+    expect(items.every((item) => !item.done)).toBe(true);
+    expect(items.find((item) => item.id === 'tools')?.optional).toBe(true);
+    expect(items.find((item) => item.id === 'phone')?.optional).toBe(true);
+  });
+
+  it('marks configured keys, messages, tools, routines and a phone as done', () => {
+    const items = gettingStartedItems({
+      ...facts,
+      providers: [provider(true)],
+      routines: DEMO_ROUTINES,
+      devices: [device],
+      bots: DEMO_BOTS,
+      threads: { thr_1: { ...emptyThread, items: [{ kind: 'message', id: 'm1', role: 'user', content: 'hi', streaming: false, at }] } },
+    });
+
+    for (const item of items) expect(item.done).toBe(true);
+  });
+
+  it('leaves a model key pending for an unconfigured provider and marks a failed fetch', () => {
+    const failing = gettingStartedItems({ ...facts, providers: null, routines: null, devices: null });
+
+    expect(failing.find((item) => item.id === 'modelKey')).toMatchObject({ done: false, loading: true, failed: true });
+    expect(failing.find((item) => item.id === 'routine')).toMatchObject({ done: false, loading: true, failed: true });
+    expect(failing.find((item) => item.id === 'phone')).toMatchObject({ done: false, loading: true, failed: true });
+  });
+});
