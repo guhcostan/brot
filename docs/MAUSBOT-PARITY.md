@@ -74,7 +74,7 @@ Legend: ✅ parity or better · 🟡 partial · ❌ absent · 🎯 current wave.
 | Saved logins vault + `fill_login` | ✅ | ✅ vault-backed logins with a Settings UI, host-gated fill_login with TOTP | W7 done |
 | Connected apps (Composio marketplace) + per-bot tool grants | ✅ | ❌ | W3 |
 | Custom MCP servers (stdio/HTTP, per-bot) | ✅ | ✅ stdio/HTTP servers with vault secrets, handshake test, Settings panel and per-bot grants | W5 done |
-| Approval levels per bot/thread + decision log | ✅ | 🟡 per-bot ask/edits modes with an irreversible safety floor; decision log/export next | W6 |
+| Approval levels per bot/thread + decision log | ✅ | ✅ per-bot ask/edits modes with a safety floor, decision log with CSV export and an Activity view | W6 done |
 | Routines: cron/weekday with timezone, receipts, recovery, calendar | ✅ | ✅ runs, receipts, catch-up, timezone, routines page; calendar next | W3 done |
 | Webhook triggers | ✅ | 🟡 receiver exists, no signed secret UX | W6 |
 | App-event triggers | ✅ | ❌ | W6 |
@@ -84,7 +84,7 @@ Legend: ✅ parity or better · 🟡 partial · ❌ absent · 🎯 current wave.
 | Message search across threads | ✅ | ✅ GET /api/search and the sidebar Messages section | W8 done |
 | Attachments: images/screenshots/files in transcript, quota | ✅ | ✅ composer, transcript gallery, storage, text-in-prompt and orphan sweep | W6 done |
 | Notifications: in-app/desktop, per-bot, exact-thread routing | ✅ | ✅ inbox, unread badge, native banners, per-bot toggle | W6 done |
-| Analytics: usage ledger, decision log, admin activity, Today page | ✅ | ✅ Insights page (Today + usage + CSV); decision log and admin activity next | W8 |
+| Analytics: usage ledger, decision log, admin activity, Today page | ✅ | ✅ Insights page, usage ledger/CSV, decision log/CSV and Activity; admin activity and org library next | W8 |
 | Team sharing: `.md`/package import-export, presets, org library | ✅ | 🟡 Markdown package export/import and bot presets are live; org library next | W9 |
 | Remote access: pairing, browser client, phone PWA, companions | ✅ | 🟡 mobile app + relay, loopback trust only | W10 |
 | Self-hosting: Docker, VPS, tunnel, backups | ✅ | 🟡 Docker + compose; no tunnel/backups | W10 |

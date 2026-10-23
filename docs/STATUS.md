@@ -418,6 +418,19 @@ mapped in `docs/MAUSBOT-PARITY.md` (34 bots / 7 teams, 33 bots with a browser an
 - Verified live: create, from-bot copy of Teste's values, name-ordered list, rename, invalid avatar 400 and
   deletes.
 - Suite: 2329 tests (239 files), typecheck 12/12, lint clean.
+## Wave 30: approval decision log (2026-10-22)
+
+- **Decision log.** GET /api/decisions lists resolved approvals (allowed/denied) newest first with a
+  half-open decidedAt range, bot/decision filters and a limit; only audit fields are returned, never tool
+  arguments. GET /api/decisions/export.csv streams the same rows as RFC 4180 CSV with a UTF-8 BOM, CRLF,
+  formula-injection neutralization and an attachment filename. Defaults to the last 30 days; bad inputs are
+  400s. No new table or migration.
+- **Activity section.** Settings shows the audit trail with decision badges, bot avatar/name, tool, summary,
+  relative time and replies; filters for decision and range, Refresh and CSV download; loading/empty/error
+  states. en/pt-BR/es.
+- Verified live: a browser_key approval denied with a reply appeared in the log and the deny filter, the CSV
+  had the BOM and expected header, and an invalid decision was a 400.
+- Suite: 2365 tests (244 files), typecheck 12/12, lint clean.
 ## Next
 
 1. Re-run the eval suite on a live model once OpenCode Go has quota (`apps/evals`, `--base` to the server), including B8 and C; the 2026-10-20 results predate the read auto-allow and the fixes above.
