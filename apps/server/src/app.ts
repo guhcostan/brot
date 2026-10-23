@@ -3,13 +3,16 @@ import type { Repos, TaskFilter } from '@brot/db';
 import type { EngineRegistry } from '@brot/engines';
 import {
   ApprovalStatus,
+  BotPresetAvatar,
   ComputerInput,
   CreateBot,
+  CreateBotPreset,
   CreateBrowserProfile,
   CreateMcpServer,
   CreateMemory,
   CreateWorkspaceMemory,
   CreatePolicy,
+  CreatePresetFromBot,
   CreateRoom,
   CreateRoutine,
   CreateSavedLogin,
@@ -31,6 +34,7 @@ import {
   TaskStatus,
   ThreadKind,
   UpdateBot,
+  UpdateBotPreset,
   UpdateBrowserProfile,
   UpdateMcpServer,
   UpdateMemory,
@@ -665,6 +669,45 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     await repos.threads.remove(id);
     return c.body(null, 204);
   });
+
+  // Bot presets: reusable defaults a new bot can start from. Names may repeat; the list is by name.
+
+  app.get('/api/presets', async (c) => c.json(await repos.botPresets.list()));
+
+  app.post('/api/presets', async (c) => {
+    const body = await parseBody(c, CreateBotPreset);
+    if (!body.ok) return body.response;
+    return c.json(await repos.botPresets.create(body.data), 201);
+  });
+
+  /** Copies a bot's name, job, instructions and look into a new preset. `name` overrides the preset's name. */
+  app.post('/api/presets/from-bot/:botId', async (c) => {
+    const bot = await repos.bots.get(c.req.param('botId'));
+    if (!bot) return notFound(c, 'Bot');
+    const body = await parseBody(c, CreatePresetFromBot);
+    if (!body.ok) return body.response;
+    // A preset caps what a bot does not; older bot values are clipped instead of failing the copy.
+    const avatar =
+      bot.avatar !== undefined && BotPresetAvatar.safeParse(bot.avatar).success ? bot.avatar : undefined;
+    const preset = await repos.botPresets.create({
+      name: (body.data.name ?? bot.name).slice(0, 120),
+      job: bot.job.slice(0, 120),
+      instructions: bot.instructions.slice(0, 20_000),
+      ...(avatar === undefined ? {} : { avatar }),
+    });
+    return c.json(preset, 201);
+  });
+
+  app.patch('/api/presets/:id', async (c) => {
+    const body = await parseBody(c, UpdateBotPreset);
+    if (!body.ok) return body.response;
+    const preset = await repos.botPresets.update(c.req.param('id'), body.data);
+    return preset ? c.json(preset) : notFound(c, 'Preset');
+  });
+
+  app.delete('/api/presets/:id', async (c) =>
+    (await repos.botPresets.remove(c.req.param('id'))) ? c.body(null, 204) : notFound(c, 'Preset'),
+  );
 
   app.get('/api/teams', async (c) => c.json(await repos.teams.list()));
 

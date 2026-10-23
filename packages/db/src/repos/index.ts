@@ -11,6 +11,7 @@ import { createMemoryRepo } from './memories';
 import { createNotificationRepo } from './notifications';
 import { createMessageRepo } from './messages';
 import { createPolicyRepo } from './policies';
+import { createBotPresetRepo } from './presets';
 import { createRoomRepo } from './rooms';
 import { createRoutineRepo } from './routines';
 import { createRoutineRunRepo } from './routine-runs';
@@ -33,6 +34,7 @@ export function createRepos(db: Db) {
     runs: createRunRepo(db),
     approvals: createApprovalRepo(db),
     policies: createPolicyRepo(db),
+    botPresets: createBotPresetRepo(db),
     memories: createMemoryRepo(db),
     mcpServers: createMcpServerRepo(db),
     notifications: createNotificationRepo(db),

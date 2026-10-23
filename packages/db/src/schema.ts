@@ -486,3 +486,14 @@ export const settings = sqliteTable('settings', {
   value: text('value', { mode: 'json' }).$type<unknown>().notNull(),
   updatedAt: text('updated_at').notNull(),
 });
+
+/** Reusable defaults for a new bot: the name, job, instructions and look travel; nothing else does. */
+export const botPresets = sqliteTable('bot_presets', {
+  id: text('id').primaryKey(),
+  name: text('name').notNull(),
+  job: text('job').notNull(),
+  instructions: text('instructions').notNull(),
+  avatar: text('avatar'),
+  createdAt: text('created_at').notNull(),
+  updatedAt: text('updated_at').notNull(),
+});

@@ -47,6 +47,7 @@ describe('migrate', () => {
       '__drizzle_migrations',
       'approvals',
       'attachments',
+      'bot_presets',
       'bots',
       'browser_profiles',
       'computers',
@@ -71,7 +72,22 @@ describe('migrate', () => {
     ]);
 
     const applied = await handle.client.execute('SELECT COUNT(*) AS count FROM __drizzle_migrations');
-    expect(Number(applied.rows[0]?.count)).toBe(20);
+    expect(Number(applied.rows[0]?.count)).toBe(21);
+  });
+
+  it('adds bot presets on a fresh database', async () => {
+    const { handle } = await tempDb();
+    await migrate(handle.db);
+
+    expect(await columnNames(handle, 'bot_presets')).toEqual([
+      'id',
+      'name',
+      'job',
+      'instructions',
+      'avatar',
+      'created_at',
+      'updated_at',
+    ]);
   });
 
   it('adds saved logins on a fresh database', async () => {
@@ -982,6 +998,57 @@ describe('migrate', () => {
       dailyBudgetUsd: 5,
     });
     expect((await repos.bots.update('bot_old', { runBudgetUsd: null }))?.runBudgetUsd).toBeUndefined();
+  });
+
+  it('adds bot presets in place on an existing database', async () => {
+    const { handle } = await tempDb();
+    const journal = JSON.parse(await readFile(join(migrationsFolder, 'meta', '_journal.json'), 'utf8')) as {
+      entries: Array<{ tag: string; when: number }>;
+    };
+    const applied = journal.entries.slice(0, 20);
+    if (applied.length !== 20 || applied[19]?.tag !== '0019_needy_mesmero') {
+      throw new Error('journal must start with the 0000 to 0019 migrations');
+    }
+
+    for (const entry of applied) {
+      await handle.client.executeMultiple(await readFile(join(migrationsFolder, `${entry.tag}.sql`), 'utf8'));
+    }
+    await handle.client.execute(
+      'CREATE TABLE "__drizzle_migrations" ("id" INTEGER PRIMARY KEY AUTOINCREMENT, "hash" text NOT NULL, "created_at" numeric)',
+    );
+    for (const entry of applied) {
+      await handle.client.execute({
+        sql: 'INSERT INTO "__drizzle_migrations" ("hash", "created_at") VALUES (?, ?)',
+        args: [entry.tag, entry.when],
+      });
+    }
+
+    await migrate(handle.db);
+
+    expect(await tableNames(handle)).toContain('bot_presets');
+    expect(await columnNames(handle, 'bot_presets')).toEqual([
+      'id',
+      'name',
+      'job',
+      'instructions',
+      'avatar',
+      'created_at',
+      'updated_at',
+    ]);
+    const repos = createRepos(handle.db);
+    const preset = await repos.botPresets.create({
+      name: 'Researcher',
+      job: 'Reads',
+      instructions: 'Be brief.',
+      avatar: 'capivara:black',
+    });
+    expect(preset).toMatchObject({
+      name: 'Researcher',
+      job: 'Reads',
+      instructions: 'Be brief.',
+      avatar: 'capivara:black',
+    });
+    expect(await repos.botPresets.remove(preset.id)).toBe(true);
   });
 
   it('enables foreign keys on the connection', async () => {

@@ -1932,3 +1932,47 @@ describe('settings', () => {
     ).toEqual({ provider: 'system' });
   });
 });
+
+describe('bot presets', () => {
+  it('creates a preset with defaults and reads it back', async () => {
+    const created = await repos.botPresets.create({ name: 'Researcher', job: 'Reads papers' });
+    expect(created).toMatchObject({ name: 'Researcher', job: 'Reads papers', instructions: '' });
+    expect(created.avatar).toBeUndefined();
+    expect(await repos.botPresets.get(created.id)).toEqual(created);
+
+    const dressed = await repos.botPresets.create({
+      name: 'Ops',
+      job: 'Keeps things up',
+      instructions: 'Be terse.',
+      avatar: 'onca:blue',
+    });
+    expect(dressed).toMatchObject({ instructions: 'Be terse.', avatar: 'onca:blue' });
+  });
+
+  it('lists by name, allows duplicate names, updates fields and removes', async () => {
+    const zeta = await repos.botPresets.create({ name: 'Zeta', job: 'j' });
+    const alpha = await repos.botPresets.create({ name: 'Alpha', job: 'j' });
+    const alphaAgain = await repos.botPresets.create({ name: 'Alpha', job: 'j2' });
+    expect((await repos.botPresets.list()).map((preset) => preset.name)).toEqual(['Alpha', 'Alpha', 'Zeta']);
+
+    const updated = await repos.botPresets.update(alpha.id, {
+      name: 'Renamed',
+      instructions: 'Say less.',
+      avatar: 'boto:black',
+    });
+    expect(updated).toMatchObject({ name: 'Renamed', job: 'j', instructions: 'Say less.', avatar: 'boto:black' });
+    expect(updated?.updatedAt).toBeDefined();
+    expect((await repos.botPresets.get(alpha.id))?.name).toBe('Renamed');
+
+    expect(await repos.botPresets.remove(zeta.id)).toBe(true);
+    expect(await repos.botPresets.remove(zeta.id)).toBe(false);
+    expect(await repos.botPresets.get(zeta.id)).toBeUndefined();
+    expect(await repos.botPresets.update(alphaAgain.id, {})).toMatchObject({ name: 'Alpha', job: 'j2' });
+  });
+
+  it('refuses a preset outside the schemas', async () => {
+    await expect(repos.botPresets.create({ name: '', job: 'j' })).rejects.toThrow();
+    await expect(repos.botPresets.create({ name: 'X', job: 'j', avatar: 'ada.png' })).rejects.toThrow();
+    await expect(repos.botPresets.update('missing', { name: 'X' })).resolves.toBeUndefined();
+  });
+});
