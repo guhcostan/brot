@@ -127,6 +127,10 @@ export class BrotApi {
     return this.request('POST', `/api/bots/${botId}/threads`, { title });
   }
 
+  async deleteRoom(id: string): Promise<void> {
+    await this.request('DELETE', `/api/rooms/${id}`);
+  }
+
   createRoom(input: CreateRoomInput): Promise<Thread> {
     return this.request('POST', '/api/rooms', input);
   }

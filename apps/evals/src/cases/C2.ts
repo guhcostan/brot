@@ -1,5 +1,6 @@
 import { check, info } from '../checks';
 import type { Case } from '../types';
+import { sleep } from '../util';
 import { botSpec } from './shared';
 
 const escape = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -35,8 +36,16 @@ export const C2: Case = {
     const runOf = async (key: string, threadKey: string): Promise<{ status: string; error: string; costUsd: number }> => {
       const runId = await ctx.say(threadKey, TRIGGER);
       if (runId === null) throw new Error(`${key} did not start a run`);
-      const run = await ctx.waitRun(await ctx.resolveThread(threadKey), runId);
-      return { status: run.status, error: run.error ?? '', costUsd: run.costUsd };
+      const threadId = await ctx.resolveThread(threadKey);
+      const run = await ctx.waitRun(threadId, runId);
+      let costUsd = run.costUsd;
+      // The relay's usage report can land a moment after a successful run settles; wait for it so the cost is real.
+      for (let attempt = 0; run.status === 'completed' && costUsd === 0 && attempt < 20; attempt += 1) {
+        await sleep(100);
+        const updated = (await ctx.api.listRuns(threadId)).find((candidate) => candidate.id === runId);
+        costUsd = updated?.costUsd ?? costUsd;
+      }
+      return { status: run.status, error: run.error ?? '', costUsd };
     };
     ctx.notes.dailyRun = await runOf('onca', 'onca:dm');
     ctx.notes.runCapRun = await runOf('tuca', 'tuca:dm');

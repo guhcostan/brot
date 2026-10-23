@@ -15,7 +15,7 @@ export const C7: Case = {
   note: 'The eval starts a stdio MCP fixture on the server machine, grants it to one bot with egress deny, and asks the bot to call acme_lookup and report its value.',
   egress: [],
   async setup(ctx) {
-    const server = await ctx.api.createMcpServer({
+    const server = await ctx.createMcpServer({
       name: `acme-${ctx.settings.caseId.toLowerCase()}-${Date.now().toString(36)}`,
       transport: 'stdio',
       command: 'node',
@@ -36,7 +36,6 @@ export const C7: Case = {
     });
     const created = await ctx.api.bot(ctx.botRef('capy').id);
     ctx.notes.c7Egress = created.egress?.mode ?? 'none';
-    ctx.settings.log(`${ctx.settings.caseId}: MCP server ${server.name} (${server.id}) granted to ${created.name}`);
   },
   async run(ctx) {
     await ctx.sayAndWait('capy:dm', `Call the acme_lookup tool and reply with the exact value it returns. Do not guess.`);
@@ -83,9 +82,8 @@ export const C7: Case = {
     ];
   },
   async cleanup(ctx) {
+    // The runner deletes the tracked MCP server; this hook only drops the bots so none is archived.
     for (const bot of ctx.bots.values()) await ctx.api.deleteBot(bot.id).catch(() => undefined);
-    const serverId = typeof ctx.notes.c7McpServer === 'string' ? ctx.notes.c7McpServer : undefined;
-    if (serverId !== undefined) await ctx.api.deleteMcpServer(serverId).catch(() => undefined);
     ctx.bots.clear();
   },
 };

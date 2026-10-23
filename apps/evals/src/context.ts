@@ -1,6 +1,6 @@
 import { mkdir, readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import type { CreateRoomInput, Run, Thread } from '@brot/protocol';
+import type { CreateMcpServerInput, CreateRoomInput, McpServer, Run, Thread } from '@brot/protocol';
 import type { BotCreate, BrotApi } from './api';
 import type { EngineChoice } from './args';
 import {
@@ -86,6 +86,10 @@ const WARM_UP_MESSAGE = 'Warm-up: reply with the single word OK and nothing else
 export class CaseContext {
   readonly bots = new Map<string, BotRef>();
   readonly threads = new Map<string, string>();
+  /** Rooms this case created, so the runner can delete them after the evidence is collected. */
+  readonly rooms: Array<{ key: string; id: string }> = [];
+  /** User MCP servers this case created, so the runner can delete them after the evidence is collected. */
+  readonly mcpServers: Array<{ name: string; id: string }> = [];
   readonly routines = new Map<string, { id: string; botKey: string; name: string }>();
   readonly artifactRequests: Array<{ botKey: string; path: string }> = [];
   /** Workspace folders copied out of the computer after the run, so a person can read them. */
@@ -197,7 +201,16 @@ export class CaseContext {
     const thread: Thread = await this.api.createRoom(input);
     this.threads.set(key, thread.id);
     this.roomKeys.add(key);
+    this.rooms.push({ key, id: thread.id });
     return thread.id;
+  }
+
+  /** Creates a user MCP server and records it, so the runner deletes it even if the case crashes. */
+  async createMcpServer(input: CreateMcpServerInput): Promise<McpServer> {
+    const server = await this.api.createMcpServer(input);
+    this.mcpServers.push({ name: server.name, id: server.id });
+    this.settings.log(`${this.settings.caseId}: created MCP server ${server.name} ${server.id}`);
+    return server;
   }
 
   /** A thread key is either a named thread, or `<botKey>:dm`, which is created on first use. */

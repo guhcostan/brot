@@ -249,20 +249,40 @@ async function keepOutFolders(ctx: CaseContext, artifactsDir: string, caseId: st
   }
 }
 
-/** Archives the case's bots and removes their computers. Bots stay in the database, archived, for the record. */
+/** Runs one cleanup step in isolation: a failure is logged and never changes the case's outcome. */
+async function cleanupStep(log: Logger, label: string, step: () => Promise<unknown>): Promise<void> {
+  try {
+    await step();
+  } catch (error) {
+    log(`${label}: ${errorMessage(error)}`);
+  }
+}
+
+/**
+ * Removes everything the case created. Rooms and user MCP servers are always deleted. Bots are archived when the
+ * case finished (pass/fail) so the report keeps its ids alongside the rows, and deleted outright when the case did
+ * not finish (error, timeout, cost-stop), so a broken run leaves nothing behind. `keepComputers` only skips the
+ * Docker resource removal.
+ */
 async function cleanupCase(
   api: BrotApi,
+  ctx: CaseContext,
   bots: BotRef[],
-  secrets: string[],
+  keepBots: boolean,
   keepComputers: boolean,
   log: Logger,
 ): Promise<void> {
-  for (const bot of bots) {
-    await api.archiveBot(bot.id).catch((error: unknown) => log(`archive ${bot.name}: ${errorMessage(error)}`));
+  for (const room of ctx.rooms) await cleanupStep(log, `delete room ${room.key}`, () => api.deleteRoom(room.id));
+  for (const server of ctx.mcpServers) {
+    await cleanupStep(log, `delete MCP server ${server.name}`, () => api.deleteMcpServer(server.id));
   }
-  for (const name of secrets) await api.deleteSecret(name).catch(() => undefined);
+  for (const bot of bots) {
+    if (keepBots) await cleanupStep(log, `archive ${bot.name}`, () => api.archiveBot(bot.id));
+    else await cleanupStep(log, `delete ${bot.name}`, () => api.deleteBot(bot.id));
+  }
+  for (const name of ctx.secretNames) await cleanupStep(log, `delete secret ${name}`, () => api.deleteSecret(name));
   if (keepComputers) return;
-  for (const bot of bots) await removeBotResources(bot.id);
+  for (const bot of bots) await cleanupStep(log, `remove computer of ${bot.name}`, () => removeBotResources(bot.id));
 }
 
 export interface CaseRunInput {
@@ -452,7 +472,9 @@ export async function runCase(
     }
   }
   const bots = [...ctx.bots.values()];
-  await cleanupCase(api, bots, ctx.secretNames, options.keepComputers, log);
+  // A case that did not finish leaves no bots behind; a finished one keeps them archived for the record.
+  const keepBots = outcome.status !== 'error' && outcome.status !== 'stopped' && !timedOut;
+  await cleanupCase(api, ctx, bots, keepBots, options.keepComputers, log);
   finish(outcome, startedMs);
   return { outcome, botIds: bots.map((bot) => bot.id) };
 }
