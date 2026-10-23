@@ -38,6 +38,8 @@ CLI:
 ```bash
 pnpm brot doctor    # which engines are installed and logged in
 pnpm brot serve     # run the server headless
+pnpm brot backup    # snapshot the database, attachments and settings
+pnpm brot restore --from <dir>   # restore into a stopped server's home
 ```
 
 Bot computers run in Docker (on macOS, [Colima](https://github.com/abiosoft/colima) works well). Build the images once:
@@ -56,6 +58,8 @@ Self-host with Docker:
 docker compose -f deploy/compose.yaml up -d
 ```
 
+Back up and restore a self-hosted home with [docs/BACKUP.md](docs/BACKUP.md) (stop the server before restoring).
+
 ## How it works
 
 ```
@@ -67,7 +71,7 @@ docker compose -f deploy/compose.yaml up -d
           └── one sandboxed computer per bot
 ```
 
-Read more: [Architecture](docs/ARCHITECTURE.md) · [Product spec](docs/PRODUCT.md) · [Design](DESIGN.md) · [Tech stack](docs/TECH-STACK.md) · [Web actions](docs/BROWSER-AGENT.md) · [Remote control](docs/REMOTE-CONTROL.md) · [REA](docs/REA-INTEGRATION.md) · [Roadmap](docs/ROADMAP.md) · [Business](docs/BUSINESS.md) · [Research](docs/RESEARCH.md)
+Read more: [Architecture](docs/ARCHITECTURE.md) · [Backup & restore](docs/BACKUP.md) · [Product spec](docs/PRODUCT.md) · [Design](DESIGN.md) · [Tech stack](docs/TECH-STACK.md) · [Web actions](docs/BROWSER-AGENT.md) · [Remote control](docs/REMOTE-CONTROL.md) · [REA](docs/REA-INTEGRATION.md) · [Roadmap](docs/ROADMAP.md) · [Business](docs/BUSINESS.md) · [Research](docs/RESEARCH.md)
 
 ## Responsible use
 

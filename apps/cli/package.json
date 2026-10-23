@@ -12,6 +12,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@brot/db": "workspace:*",
     "@brot/engines": "workspace:*",
     "@brot/protocol": "workspace:*",
     "@brot/server": "workspace:*",

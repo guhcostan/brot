@@ -1,7 +1,8 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createDb, createRepos, migrate } from '@brot/db';
 import { DEFAULT_URL, runCli, type CliDeps } from './cli';
 import { capture, fakeFetch, json, unreachable } from './testing';
 
@@ -38,6 +39,9 @@ describe('runCli', () => {
 
     expect(await runCli(['--help'], deps)).toBe(0);
     expect(stdout.text()).toContain('serve [--host <host>] [--port <port>]');
+    expect(stdout.text()).toContain('backup [--out <dir>] [--no-secrets] [--force]');
+    expect(stdout.text()).toContain('restore --from <dir> [--force]');
+    expect(stdout.text()).toContain('--home <dir>');
     expect(stderr.text()).toBe('');
   });
 
@@ -59,6 +63,9 @@ describe('runCli', () => {
     [['doctor', '--url', 'not a url'], '--url is not a valid URL: not a url'],
     [['run', 'bot_1'], 'run needs a bot id and a message'],
     [['run'], 'run needs a bot id and a message'],
+    [['restore'], 'restore needs --from <dir>'],
+    [['backup', 'extra'], 'backup takes no arguments'],
+    [['restore', '--from', 'x', 'extra'], 'restore takes no arguments'],
   ])('rejects %j with a usage error (exit 2)', async (argv, message) => {
     const { deps, stderr } = await harness();
 
@@ -100,5 +107,49 @@ describe('runCli', () => {
 
   it('defaults the server URL to the protocol port on loopback', () => {
     expect(DEFAULT_URL).toBe('http://127.0.0.1:8799');
+  });
+});
+
+describe('backup and restore commands', () => {
+  async function makeHome(home: string): Promise<void> {
+    await mkdir(home, { recursive: true });
+    const db = await createDb(`file:${join(home, 'brot.db')}`);
+    await migrate(db.db);
+    const repos = createRepos(db.db);
+    const bot = await repos.bots.create({ name: 'Ada', job: 'Researcher' });
+    await repos.threads.create(bot.id, { title: 'Chat' });
+    db.client.close();
+  }
+
+  it('backs up a home through the CLI and restores it into a new one', async () => {
+    const { deps, stdout } = await harness();
+    const home = deps.env.BROT_HOME;
+    if (home === undefined) throw new Error('the harness needs a BROT_HOME');
+    await makeHome(home);
+    const out = join(home, 'cli-backup');
+
+    expect(await runCli(['backup', '--out', out, '--no-secrets'], deps)).toBe(0);
+    expect(stdout.text()).toContain(`Backup written to ${out}`);
+    const manifest = JSON.parse(await readFile(join(out, 'manifest.json'), 'utf8')) as {
+      format: string;
+      includesSecrets: boolean;
+    };
+    expect(manifest).toMatchObject({ format: 'brot-backup', includesSecrets: false });
+
+    const target = join(home, 'restored');
+    expect(await runCli(['restore', '--from', out, '--home', target], deps)).toBe(0);
+    expect(stdout.text()).toContain('bots: 1');
+    expect((await stat(join(target, 'brot.db'))).isFile()).toBe(true);
+  });
+
+  it('exits 1 with a clear message when there is no database to back up', async () => {
+    const { deps, stderr } = await harness({ env: {} });
+    const out = join(tmpdir(), `brot-cli-missing-${Date.now()}`);
+    try {
+      expect(await runCli(['backup', '--home', out, '--out', out], deps)).toBe(1);
+      expect(stderr.text()).toContain('no database at');
+    } finally {
+      await rm(out, { recursive: true, force: true });
+    }
   });
 });

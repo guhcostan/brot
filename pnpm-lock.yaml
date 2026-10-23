@@ -29,6 +29,9 @@ importers:
 
   apps/cli:
     dependencies:
+      '@brot/db':
+        specifier: workspace:*
+        version: link:../../packages/db
       '@brot/engines':
         specifier: workspace:*
         version: link:../../packages/engines
