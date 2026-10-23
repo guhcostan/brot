@@ -444,6 +444,13 @@ export async function runCase(
     outcome.status = 'fail';
   }
 
+  if (caseDef.cleanup !== undefined) {
+    try {
+      await caseDef.cleanup(ctx);
+    } catch (error) {
+      log(`${caseDef.id}: cleanup: ${errorMessage(error)}`);
+    }
+  }
   const bots = [...ctx.bots.values()];
   await cleanupCase(api, bots, ctx.secretNames, options.keepComputers, log);
   finish(outcome, startedMs);

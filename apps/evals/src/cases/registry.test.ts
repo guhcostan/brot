@@ -13,7 +13,7 @@ describe('case registry', () => {
 
   it('skips the later and gap cases with a reason, and only those', () => {
     const skipped = ALL_CASES.filter((caseDef) => skipReasonFor(caseDef) !== undefined).map((caseDef) => caseDef.id);
-    expect(skipped).toEqual(['A11', 'C2', 'C7']);
+    expect(skipped).toEqual(['A11']);
     for (const id of skipped) expect(skipReasonFor(ALL_CASES.find((caseDef) => caseDef.id === id)!)).toMatch(/\w/);
   });
 

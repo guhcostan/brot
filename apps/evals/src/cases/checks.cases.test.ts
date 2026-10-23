@@ -5,6 +5,9 @@ import { A1 } from './A1';
 import { A8 } from './A8';
 import { B5 } from './B5';
 import { B6 } from './B6';
+import { C2 } from './C2';
+import { C7 } from './C7';
+import { readFixture } from './shared';
 
 function evidenceOf(overrides: Partial<Evidence>): Evidence {
   return {
@@ -268,5 +271,106 @@ describe('B6: isolation and identity', () => {
     for (const id of ['onca-writes-own', 'tuca-writes-own', 'no-cross-write', 'no-identity-confusion', 'separate-computers']) {
       expect(byId(checks, id).status, id).toBe('pass');
     }
+  });
+});
+
+describe('C2: per-bot budget caps', () => {
+  const bots = {
+    onca: { key: 'onca', id: 'bot-a', name: 'Onça', engine: 'dsh' },
+    tuca: { key: 'tuca', id: 'bot-b', name: 'Tuca', engine: 'dsh' },
+    tamu: { key: 'tamu', id: 'bot-c', name: 'Tamu', engine: 'dsh' },
+  };
+  const runs = [
+    { id: 'run-a', botId: 'bot-a', status: 'failed', costUsd: 0 },
+    { id: 'run-b', botId: 'bot-b', status: 'failed', costUsd: 0.00042 },
+    { id: 'run-c', botId: 'bot-c', status: 'completed', costUsd: 0.0012 },
+  ] as Run[];
+  const notes = {
+    dailyRun: { status: 'failed', error: 'Daily budget for "Onça" is exhausted: spent $0 of $0 today.', costUsd: 0 },
+    runCapRun: { status: 'failed', error: 'Run budget for "Tuca" exceeded: spent $0.00042 of $0.', costUsd: 0.00042 },
+    uncappedRun: { status: 'completed', error: '', costUsd: 0.0012 },
+  };
+
+  it('passes when both caps stop their run with the exact message and the uncapped bot answers', () => {
+    const checks = C2.check(evidenceOf({ bots, runs, notes }));
+    for (const id of ['daily-cap-stops-the-run', 'daily-cap-cost-zero', 'run-cap-stops-the-run', 'run-cap-recorded-spend', 'uncapped-completes', 'uncapped-cost-recorded']) {
+      expect(byId(checks, id).status, id).toBe('pass');
+    }
+    expect(byId(checks, 'cost-per-bot').evidence).toContain('Onça: $0.000000');
+    expect(byId(checks, 'cost-per-bot').evidence).toContain('Tamu: $0.001200');
+  });
+
+  it('fails a cap that did not produce its exact budget message', () => {
+    const checks = C2.check(
+      evidenceOf({
+        bots,
+        runs,
+        notes: {
+          ...notes,
+          dailyRun: { status: 'failed', error: 'computer did not start', costUsd: 0 },
+          runCapRun: { status: 'failed', error: 'Run budget for "Tuca" exceeded: spent $0.00042 of $0.0004.', costUsd: 0.00042 },
+        },
+      }),
+    );
+    expect(byId(checks, 'daily-cap-stops-the-run').status).toBe('fail');
+    expect(byId(checks, 'run-cap-stops-the-run').status).toBe('fail');
+  });
+
+  it('fails when the daily cap somehow spent money or the uncapped run did not finish', () => {
+    const checks = C2.check(
+      evidenceOf({
+        bots,
+        runs,
+        notes: {
+          dailyRun: { status: 'failed', error: 'Daily budget for "Onça" is exhausted: spent $0 of $0 today.', costUsd: 0.0001 },
+          runCapRun: notes.runCapRun,
+          uncappedRun: { status: 'failed', error: 'engine crashed', costUsd: 0.0012 },
+        },
+      }),
+    );
+    expect(byId(checks, 'daily-cap-cost-zero').status).toBe('fail');
+    expect(byId(checks, 'uncapped-completes').status).toBe('fail');
+  });
+});
+
+describe('C7: a user MCP server attached to a bot', () => {
+  const magic = readFixture('c7/acme-magic.txt').trim();
+  const bots = { capy: { key: 'capy', id: 'bot-c7', name: 'Capy', engine: 'dsh' } };
+  const runs = [{ id: 'run-c7', botId: 'bot-c7', status: 'completed', costUsd: 0.002 } as Run];
+  const base = {
+    bots,
+    runs,
+    notes: { c7Egress: 'deny', c7McpName: 'acme-c7', c7McpServer: 'mcp-1' },
+    events: [toolCall('run-c7', 'mcp__acme__acme_lookup', {}, 'c1')],
+    finalTexts: [{ botKey: 'capy', runId: 'run-c7', threadId: 'thread-1', text: `The account id is ${magic}.` }],
+  };
+
+  it('passes when the MCP tool was called, its value reported, egress stayed deny and no approval was needed', () => {
+    const checks = C7.check(evidenceOf(base));
+    for (const id of ['run-completed', 'mcp-tool-called', 'magic-in-reply', 'egress-stayed-deny', 'no-approval-needed']) {
+      expect(byId(checks, id).status, id).toBe('pass');
+    }
+    expect(byId(checks, 'mcp-server').evidence).toContain('acme-c7');
+  });
+
+  it('fails when the tool was not called, the value is missing, or egress was widened', () => {
+    const checks = C7.check(
+      evidenceOf({
+        ...base,
+        notes: { ...base.notes, c7Egress: 'allowlist' },
+        events: [],
+        finalTexts: [{ botKey: 'capy', runId: 'run-c7', threadId: 'thread-1', text: 'I could not find that value.' }],
+      }),
+    );
+    expect(byId(checks, 'mcp-tool-called').status).toBe('fail');
+    expect(byId(checks, 'magic-in-reply').status).toBe('fail');
+    expect(byId(checks, 'egress-stayed-deny').status).toBe('fail');
+  });
+
+  it('fails when the read-only tool raised an approval', () => {
+    const checks = C7.check(
+      evidenceOf({ ...base, approvals: [approvalOf({ botKey: 'capy', tool: 'acme_lookup', kind: 'other', summary: 'acme_lookup' })] }),
+    );
+    expect(byId(checks, 'no-approval-needed').status).toBe('fail');
   });
 });

@@ -57,6 +57,14 @@ export interface BotSpec {
   /** Hosts the bot may reach. Empty means no network at all. */
   egress: string[];
   teamBudgetUsd?: number;
+  /** Per-run USD cap. 0 allows no spending; absent means no cap. */
+  runBudgetUsd?: number;
+  /** Per-UTC-day USD cap. 0 allows no spending; absent means no cap. */
+  dailyBudgetUsd?: number;
+  /** The default sandbox computer; `none` gives the engine only Brot's own MCP tools. */
+  computer?: 'none' | 'sandbox';
+  /** User MCP servers this bot may attach. Absent means every enabled server. */
+  mcpServerIds?: string[];
 }
 
 export interface RoomSpec {
@@ -146,11 +154,14 @@ export class CaseContext {
       job: spec.job,
       instructions: spec.instructions,
       engine: engineIsDsh ? 'dsh' : 'mock',
-      computer: 'sandbox',
+      computer: spec.computer ?? 'sandbox',
       avatar: `${spec.species}:${spec.color}`,
       egress: spec.egress.length === 0 ? { mode: 'deny', allow: [] } : { mode: 'allowlist', allow: spec.egress },
       ...(engineIsDsh ? { model: this.settings.model } : {}),
       ...(spec.teamBudgetUsd === undefined ? {} : { teamBudgetUsd: spec.teamBudgetUsd }),
+      ...(spec.runBudgetUsd === undefined ? {} : { runBudgetUsd: spec.runBudgetUsd }),
+      ...(spec.dailyBudgetUsd === undefined ? {} : { dailyBudgetUsd: spec.dailyBudgetUsd }),
+      ...(spec.mcpServerIds === undefined ? {} : { mcpServerIds: spec.mcpServerIds }),
     };
     const created = await this.api.createBot(body);
     for (const policy of internalToolPolicies()) await this.api.createPolicy(created.id, policy);

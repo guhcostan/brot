@@ -3,8 +3,10 @@ import type {
   ApprovalDecision,
   Bot,
   CanonicalEvent,
+  CreateMcpServerInput,
   CreateRoomInput,
   CreateRoutineInput,
+  McpServer,
   Memory,
   Policy,
   Routine,
@@ -40,6 +42,9 @@ export interface BotCreate {
   avatar?: string;
   egress?: { mode: 'deny'; allow: [] } | { mode: 'allowlist'; allow: string[] };
   teamBudgetUsd?: number;
+  runBudgetUsd?: number;
+  dailyBudgetUsd?: number;
+  mcpServerIds?: string[];
 }
 
 /** A thin client for the REST API in apps/server/src/app.ts. Loopback callers need no token. */
@@ -79,8 +84,28 @@ export class BrotApi {
     return this.request('POST', '/api/bots', body);
   }
 
+  bot(id: string): Promise<Bot> {
+    return this.request('GET', `/api/bots/${id}`);
+  }
+
   archiveBot(id: string): Promise<Bot> {
     return this.request('PATCH', `/api/bots/${id}`, { archived: true });
+  }
+
+  async deleteBot(id: string): Promise<void> {
+    await this.request('DELETE', `/api/bots/${id}`);
+  }
+
+  mcpServers(): Promise<McpServer[]> {
+    return this.request('GET', '/api/mcp/servers');
+  }
+
+  createMcpServer(input: CreateMcpServerInput): Promise<McpServer> {
+    return this.request('POST', '/api/mcp/servers', input);
+  }
+
+  async deleteMcpServer(id: string): Promise<void> {
+    await this.request('DELETE', `/api/mcp/servers/${id}`);
   }
 
   /** A policy decides a tool's requests without an approval card. `effect: 'allow'` is what the runner uses for team tools. */

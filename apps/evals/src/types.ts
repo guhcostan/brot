@@ -124,6 +124,11 @@ export interface Case {
   setup(api: CaseApi): Promise<void>;
   run(api: CaseApi): Promise<void>;
   check(evidence: Evidence): CheckResult[];
+  /**
+   * Optional async teardown after the checks: for resources the runner does not create, such as a user MCP
+   * server. Delete the case's bots here and empty `ctx.bots`, so the runner does not archive them again.
+   */
+  cleanup?(api: CaseApi): Promise<void>;
   /** Phase 2 of a two-phase case. Receives the phase 1 state the runner saved. */
   resumeRun?(api: CaseApi, state: unknown): Promise<void>;
 }
