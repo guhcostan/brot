@@ -637,6 +637,19 @@ mapped in `docs/MAUSBOT-PARITY.md` (34 bots / 7 teams, 33 bots with a browser an
 - Verified backup/restore on the real home: `--no-secrets` backup then restore into a temp home returned 2
   bots and 2 threads with a clean database (the WAL/SHM seen once came from the verification query itself).
 - Suite: 2694 tests (286 files), typecheck 12/12, lint clean. Eval leftovers cleaned.
+## Wave 43: copy actions, developer evals (2026-10-23)
+
+- **Copy message and code.** Completed user/assistant messages gain a Copy action that writes the full
+  message text from state (never the clamped DOM) with a transient Copied label and an inline failure when
+  the clipboard is unavailable. Settled message text promotes fenced code blocks into cards with the
+  language label and a Copy code button (exact code, no fences), keeping long blocks scrollable; mentions
+  and code blocks are composed through small extracted components. Pure helpers cover copyable text, fenced
+  extraction and the SSR-safe clipboard call. en/pt-BR/es.
+- **Developer evals live, all pass:** A1 (reproduce a reported bug with a failing test), A2 (patch until the
+  test passes and prepare a PR draft, opening it needs approval), A4 (competitor watch routine reports only
+  material pricing changes) and A5 (last30days community complaints with links) passed at $0.1771 total.
+  A1/A2 were flagged for human review only on answer quality; all structural checks were green.
+- Suite: 2707 tests (288 files), typecheck 12/12, lint clean. Eval leftovers cleaned (only Capy/Teste).
 ## Next
 
 1. Re-run the eval suite on a live model once OpenCode Go has quota (`apps/evals`, `--base` to the server), including B8 and C; the 2026-10-20 results predate the read auto-allow and the fixes above.
