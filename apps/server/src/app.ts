@@ -60,7 +60,8 @@ import { z } from 'zod';
 import { authenticate, isLocalRequest, requireJsonWrites, type AppEnv } from './auth';
 import type { Broker } from './broker';
 import type { EventBus } from './bus';
-import type { Harness } from './harness';
+import type { ComputerProvider } from './computers';
+import type { ComputerProviders, Harness } from './harness';
 import { PairingError, type Pairing } from './pairing';
 import { triggerIssues, type Scheduler } from './scheduler';
 import type { BrotMcpService } from './mcp/types';
@@ -125,6 +126,8 @@ export interface AppDeps {
   desktop?: DesktopService;
   /** The bot browser on the server machine, for bots with `browser: true` and no desktop computer. */
   browser: HostBrowserService;
+  /** The contained-computer providers. A deleted or converted bot's computer is stopped through them. */
+  computers: ComputerProviders;
   /** Attachment bytes under `<home>/attachments`. Only ids reach the API; no path does. */
   attachments: AttachmentStorage;
   /** The model providers the relay knows (seeded plus providers.json). Listed by GET /api/providers. */
@@ -206,6 +209,19 @@ async function unknownBots(repos: Repos, ids: readonly string[]): Promise<string
     if (!bot || bot.archived) missing.push(id);
   }
   return missing;
+}
+
+/**
+ * Stops one provider's computer for a bot. Best effort by design: a provider that is absent or failing is logged,
+ * never thrown, so a bot can always be deleted or converted even when its sandbox is already gone.
+ */
+async function stopComputer(provider: ComputerProvider | undefined, botId: string): Promise<void> {
+  if (provider === undefined) return;
+  try {
+    await provider.stop(botId);
+  } catch (error) {
+    console.error(`could not stop the ${provider.id} computer of bot ${botId}`, error);
+  }
 }
 
 /** Ids that name no stored user MCP server. `null` and absent grants have nothing to validate. */
@@ -321,7 +337,7 @@ function ruleViolation(c: Context<AppEnv>, error: unknown): Response {
 }
 
 export function createApp(deps: AppDeps): Hono<AppEnv> {
-  const { repos, bus, broker, harness, scheduler, vault, pairing, engines, rooms, tasks, config, browser, attachments } = deps;
+  const { repos, bus, broker, harness, scheduler, vault, pairing, engines, rooms, tasks, config, browser, attachments, computers } = deps;
   const trustLoopback = deps.trustLoopback ?? true;
   const voiceDeps = { vault, ...(deps.voice ?? {}) };
   const app = new Hono<AppEnv>();
@@ -424,8 +440,11 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     }
     const before = await repos.bots.get(c.req.param('id'));
     const bot = await repos.bots.update(c.req.param('id'), body.data);
-    if (bot && before && bot.engine !== before.engine) await harness.resetEngineSessions(bot.id);
-    return bot ? c.json(bot) : notFound(c, 'Bot');
+    if (!bot) return notFound(c, 'Bot');
+    if (before && bot.engine !== before.engine) await harness.resetEngineSessions(bot.id);
+    // A bot that stops being a sandbox bot leaves its container behind unless it is stopped.
+    if (before?.computer === 'sandbox' && bot.computer !== 'sandbox') await stopComputer(computers.sandbox, bot.id);
+    return c.json(bot);
   });
 
   app.delete('/api/bots/:id', async (c) => {
@@ -433,6 +452,9 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     const bot = await repos.bots.get(id);
     if (!bot) return notFound(c, 'Bot');
     await harness.cancelBotRuns(id);
+    // Containers outlive rows unless they are stopped: the computer and its egress sidecar go with the bot.
+    await stopComputer(computers.sandbox, id);
+    await stopComputer(computers.host, id);
     // The profile holds the bot's logins, so it goes with the bot; closing first releases Chrome's lock.
     await browser.deleteProfile(bot);
     await repos.bots.remove(id);

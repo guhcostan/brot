@@ -1,6 +1,7 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createEngineRegistry, createMockEngine } from '@brot/engines';
 import type { Bot, Memory, Message, Run, Thread } from '@brot/protocol';
+import type { ComputerProvider } from './computers';
 import { call, createTestContext, recordEvents, waitUntil, type TestContext } from './testing';
 
 let ctx: TestContext;
@@ -77,6 +78,108 @@ describe('bots', () => {
     expect((await call(ctx.app, 'GET', '/api/bots/nope')).status).toBe(404);
     expect((await call(ctx.app, 'PATCH', '/api/bots/nope', { job: 'x' })).status).toBe(404);
     expect((await call(ctx.app, 'DELETE', '/api/bots/nope')).status).toBe(404);
+  });
+});
+
+describe('bot computers on delete and convert', () => {
+  /** A provider that records the ids it is asked to stop; `fail` makes stop throw after recording. */
+  function recordingProvider(id: 'docker' | 'host', stops: string[], fail = false): ComputerProvider {
+    return {
+      id,
+      available: async () => ({ ok: true }),
+      ensure: async () => {
+        throw new Error('the fake provider never starts a computer');
+      },
+      internalEndpoint: () => ({ url: 'http://127.0.0.1:8799' }),
+      stop: async (botId) => {
+        stops.push(botId);
+        if (fail) throw new Error(`${id} stop failed`);
+      },
+      close: async () => undefined,
+    };
+  }
+
+  it('stops every computer provider once with the bot id before deleting the bot', async () => {
+    const stops: string[] = [];
+    const local = await createTestContext({
+      computers: { sandbox: recordingProvider('docker', stops), host: recordingProvider('host', stops) },
+    });
+    try {
+      const created = await call(local.app, 'POST', '/api/bots', { name: 'Ada', job: 'Researcher' });
+      expect(created.status).toBe(201);
+      const bot = (await created.json()) as Bot;
+
+      expect((await call(local.app, 'DELETE', `/api/bots/${bot.id}`)).status).toBe(204);
+      expect(stops).toEqual([bot.id, bot.id]);
+      expect(await local.services.repos.bots.get(bot.id)).toBeUndefined();
+    } finally {
+      await local.close();
+    }
+  });
+
+  it('returns 204 and logs when a provider stop throws', async () => {
+    const stops: string[] = [];
+    const local = await createTestContext({ computers: { sandbox: recordingProvider('docker', stops, true) } });
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      const bot = (await (
+        await call(local.app, 'POST', '/api/bots', { name: 'Ada', job: 'Researcher' })
+      ).json()) as Bot;
+
+      expect((await call(local.app, 'DELETE', `/api/bots/${bot.id}`)).status).toBe(204);
+      expect(stops).toEqual([bot.id]);
+      expect(logged.mock.calls.some((args) => String(args[0]).includes('could not stop the docker computer'))).toBe(
+        true,
+      );
+      expect(await local.services.repos.bots.get(bot.id)).toBeUndefined();
+    } finally {
+      logged.mockRestore();
+      await local.close();
+    }
+  });
+
+  it('stops the sandbox computer when a bot stops being a sandbox bot', async () => {
+    const stops: string[] = [];
+    const local = await createTestContext({ computers: { sandbox: recordingProvider('docker', stops) } });
+    try {
+      const bot = (await (
+        await call(local.app, 'POST', '/api/bots', { name: 'Ada', job: 'Researcher' })
+      ).json()) as Bot;
+
+      const patched = await call(local.app, 'PATCH', `/api/bots/${bot.id}`, { computer: 'none' });
+      expect(patched.status).toBe(200);
+      expect(await patched.json()).toMatchObject({ computer: 'none' });
+      expect(stops).toEqual([bot.id]);
+
+      // Editing other fields and switching back to sandbox stops nothing: only leaving sandbox does.
+      await call(local.app, 'PATCH', `/api/bots/${bot.id}`, { name: 'Grace' });
+      expect((await call(local.app, 'PATCH', `/api/bots/${bot.id}`, { computer: 'sandbox' })).status).toBe(200);
+      expect(stops).toEqual([bot.id]);
+    } finally {
+      await local.close();
+    }
+  });
+
+  it('still updates the bot when stopping the old sandbox throws', async () => {
+    const stops: string[] = [];
+    const local = await createTestContext({ computers: { sandbox: recordingProvider('docker', stops, true) } });
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      const bot = (await (
+        await call(local.app, 'POST', '/api/bots', { name: 'Ada', job: 'Researcher' })
+      ).json()) as Bot;
+
+      const patched = await call(local.app, 'PATCH', `/api/bots/${bot.id}`, { computer: 'none' });
+      expect(patched.status).toBe(200);
+      expect(await patched.json()).toMatchObject({ id: bot.id, computer: 'none' });
+      expect(stops).toEqual([bot.id]);
+      expect(logged.mock.calls.some((args) => String(args[0]).includes('could not stop the docker computer'))).toBe(
+        true,
+      );
+    } finally {
+      logged.mockRestore();
+      await local.close();
+    }
   });
 });
 

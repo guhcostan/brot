@@ -65,6 +65,13 @@ describe('docker provider without a daemon', () => {
     const provider = createDockerComputerProvider({ brotPort: 9000 });
     expect(provider.internalEndpoint()).toEqual({ url: 'http://brot-egress:9000' });
   });
+
+  it('stops a bot that has no containers without throwing', async () => {
+    // Deleting a bot calls stop even when its computer never started; docker failures are swallowed by stop.
+    const provider = createDockerComputerProvider({ dockerBin: '/nonexistent/brot-docker-cli' });
+    await expect(provider.stop('bot_without_containers')).resolves.toBeUndefined();
+    await provider.close();
+  });
 });
 
 async function run(handle: ComputerHandle, cmd: string[]): Promise<string> {
