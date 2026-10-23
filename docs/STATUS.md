@@ -618,6 +618,25 @@ mapped in `docs/MAUSBOT-PARITY.md` (34 bots / 7 teams, 33 bots with a browser an
   923 s (7 bots, 2.1M tokens in); the runner stopped it cleanly and deleted the bots, rooms and containers.
   The case is simply expensive: future runs need a higher cap or a trimmed fixture.
 - Suite: 2669 tests (283 files), typecheck 12/12, lint clean.
+## Wave 42: backups, help dialog, audit eval (2026-10-23)
+
+- **Self-host backups.** `brot backup` takes a consistent snapshot of a Brot home with SQLite VACUUM INTO
+  (safe while the server runs; WAL/SHM never copied), plus attachments, providers.json and, unless
+  `--no-secrets`, the vault pair at 0600, with a manifest recording format/version/timestamp/files/secrets.
+  `brot restore` validates the manifest and files first, refuses a non-empty home without `--force` (message
+  says to stop Brot), copies everything, removes stale WAL/SHM and then opens + migrates the restored DB,
+  printing bot/thread counts as proof. Refuses a bad or incomplete backup before writing anything.
+  docs/BACKUP.md documents contents and limits (browser profiles and Docker state are not included) and is
+  linked from the README.
+- **Help & shortcuts dialog.** A sidebar footer action documents the shortcuts the app already has (search,
+  send, newline, escape, slash commands, dictation, attach, mobile sidebar) with key caps, and offers Show
+  getting started again, which clears the persisted onboarding dismissal via a new SSR-safe helper and opens
+  the checklist. en/pt-BR/es.
+- **Live eval A12 (nightly audit routine)** passes at $0.0607: the bot ran lint/tests/npm audit in its
+  computer and produced the safe-fix draft flow without touching anything else.
+- Verified backup/restore on the real home: `--no-secrets` backup then restore into a temp home returned 2
+  bots and 2 threads with a clean database (the WAL/SHM seen once came from the verification query itself).
+- Suite: 2694 tests (286 files), typecheck 12/12, lint clean. Eval leftovers cleaned.
 ## Next
 
 1. Re-run the eval suite on a live model once OpenCode Go has quota (`apps/evals`, `--base` to the server), including B8 and C; the 2026-10-20 results predate the read auto-allow and the fixes above.

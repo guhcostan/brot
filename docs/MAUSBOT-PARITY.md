@@ -88,7 +88,7 @@ Legend: ✅ parity or better · 🟡 partial · ❌ absent · 🎯 current wave.
 | Analytics: usage ledger, decision log, admin activity, Today page | ✅ | ✅ Insights page, usage ledger/CSV, decision log/CSV and Activity; admin activity and org library next | W8 |
 | Team sharing: `.md`/package import-export, presets, org library | ✅ | 🟡 Markdown package export/import and bot presets are live; org library next | W9 |
 | Remote access: pairing, browser client, phone PWA, companions | ✅ | 🟡 mobile app + relay, loopback trust only | W10 |
-| Self-hosting: Docker, VPS, tunnel, backups | ✅ | 🟡 Docker + compose; no tunnel/backups | W10 |
+| Self-hosting: Docker, VPS, tunnel, backups | ✅ | 🟡 Docker + compose and CLI backup/restore; tunnel and scheduled backups next | W10 |
 | Cloud (Boat), Team Cloud, enterprise/SSO | ✅ | ❌ out of scope for now (backlog: Brot Cloud) | later |
 | Multi-engine CLIs and custom ACP providers | ✅ | ❌ deliberate (DSH only) | — |
 
