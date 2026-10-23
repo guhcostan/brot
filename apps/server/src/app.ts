@@ -89,7 +89,7 @@ import type { HostBrowserService } from './browser/types';
 import { activityActor, recordActivity, type RecordActivityEntry } from './activity/record';
 import { mountAttachmentRoutes, type AttachmentStorage } from './attachments';
 import { mountSearchRoutes } from './search';
-import { mountTeamPackageRoutes } from './team-packages';
+import { mountStarterTeamRoutes, mountTeamPackageRoutes } from './team-packages';
 import { mountTodayRoutes } from './today';
 import { mountDecisionRoutes } from './decisions';
 import { mountUsageRoutes } from './usage';
@@ -1776,6 +1776,12 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
   mountDecisionRoutes(app, { repos, ...(deps.now === undefined ? {} : { now: deps.now }) });
 
   mountTeamPackageRoutes(app, { repos, ...(deps.now === undefined ? {} : { now: deps.now }) });
+
+  mountStarterTeamRoutes(app, {
+    repos,
+    ...(deps.now === undefined ? {} : { now: deps.now }),
+    record: (c, entry) => record(c, entry),
+  });
 
   mountTodayRoutes(app, { repos, ...(deps.now === undefined ? {} : { now: deps.now }) });
 
