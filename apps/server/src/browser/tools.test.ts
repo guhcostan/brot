@@ -44,6 +44,9 @@ function fakeHostBrowser(): FakeHostBrowser {
     async status() {
       return fake.state;
     },
+    async probeMyChrome() {
+      return { endpoint: 'http://127.0.0.1:9333', available: false, reason: 'not part of this fake' };
+    },
     async openForLogin() {
       fake.state = { state: 'login' };
       return fake.state;

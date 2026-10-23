@@ -53,6 +53,9 @@ function fakeHostBrowser(): FakeHostBrowser {
     async browser() {
       return {};
     },
+    async probeMyChrome() {
+      return { endpoint: 'http://127.0.0.1:9333', available: false, reason: 'not part of this fake' };
+    },
     async status(bot) {
       fake.statusCalls.push(bot.id);
       return stateOf(profileKeyOf(bot));

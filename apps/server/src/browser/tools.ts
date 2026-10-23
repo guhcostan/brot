@@ -191,7 +191,7 @@ export function createBrowserTools(deps: BrowserToolDeps): BrotTool[] {
   return [
     driving(
       'browser_open',
-      "Open a web address in the bot's browser. Navigation is a read, but the computer's egress policy still applies.",
+      "Open a web address in the bot's browser. Navigation is a read. A bot on its own profile Chrome still follows the bot's egress policy; a bot on My Chrome drives the person's signed-in Chrome, whose own network is not proxied or filtered by Brot.",
       OpenInput,
       'read',
       ({ url }) => `Open ${url} in the bot's browser`,

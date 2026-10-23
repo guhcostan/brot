@@ -5,6 +5,7 @@ import { ATTACHMENT_MAX_PER_MESSAGE } from './attachments';
 import {
   ApprovalDecision,
   ApprovalMode,
+  BrowserMode,
   ComputerKind,
   ComputerState,
   Takeover,
@@ -64,6 +65,8 @@ export const CreateBot = z
     browser: z.boolean().default(false),
     /** Browse with a shared profile instead of the bot's own. */
     browserProfileId: z.string().min(1).optional(),
+    /** `my-chrome` attaches to the person's signed-in Chrome; it needs `browser: true`. */
+    browserMode: BrowserMode.optional(),
     notifications: z.boolean().default(true),
     speakReplies: z.boolean().default(false),
     mcpServerIds: McpServerIds.nullable().optional(),
@@ -78,7 +81,24 @@ export const CreateBot = z
     dailyBudgetUsd: BudgetUsd.optional(),
     hostAcknowledged: z.boolean().optional(),
   })
-  .superRefine(requireHostAcknowledgement);
+  .superRefine(requireHostAcknowledgement)
+  .superRefine(checkCreateBrowserMode);
+/** `my-chrome` has no profile Chrome to sign in, so it is only valid for a bot with `browser: true`. */
+function checkCreateBrowserMode(value: { browser?: boolean; browserMode?: BrowserMode }, ctx: z.RefinementCtx): void {
+  if (value.browserMode === 'my-chrome' && value.browser !== true) {
+    ctx.addIssue({ code: 'custom', path: ['browserMode'], message: 'my-chrome needs browser: true' });
+  }
+}
+
+/**
+ * A patch may change only the mode: the stored bot can already have `browser: true`, which the request cannot
+ * see. It is rejected only when the same patch switches browsing off.
+ */
+function checkUpdateBrowserMode(value: { browser?: boolean; browserMode?: BrowserMode }, ctx: z.RefinementCtx): void {
+  if (value.browserMode === 'my-chrome' && value.browser === false) {
+    ctx.addIssue({ code: 'custom', path: ['browserMode'], message: 'my-chrome needs browser: true' });
+  }
+}
 export type CreateBot = z.infer<typeof CreateBot>;
 export type CreateBotInput = z.input<typeof CreateBot>;
 
@@ -97,6 +117,8 @@ export const UpdateBot = z
     browser: z.boolean().optional(),
     /** A shared profile id, or `null` to go back to the bot's own profile. */
     browserProfileId: z.string().min(1).nullable().optional(),
+    /** `own` uses the bot's profile; `my-chrome` attaches to the person's signed-in Chrome. */
+    browserMode: BrowserMode.optional(),
     notifications: z.boolean().optional(),
     speakReplies: z.boolean().optional(),
     /** An allowlist of user MCP server ids; `null` returns to every enabled server, `[]` allows none. */
@@ -116,7 +138,8 @@ export const UpdateBot = z
     pinned: z.boolean().optional(),
     archived: z.boolean().optional(),
   })
-  .superRefine(requireHostAcknowledgement);
+  .superRefine(requireHostAcknowledgement)
+  .superRefine(checkUpdateBrowserMode);
 export type UpdateBot = z.infer<typeof UpdateBot>;
 
 /** A named group of bots with a shared brief. `instructions` is empty unless given. */

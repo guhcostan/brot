@@ -171,7 +171,7 @@ export async function createServices(
         ...(extras.desktop ?? {}),
       })
     : undefined;
-  const browser = extras.browser ?? createHostBrowserService({ home: config.home });
+  const browser = extras.browser ?? createHostBrowserService({ home: config.home, settings: repos.settings });
   const browserTools = createBrowserTools({
     repos,
     host: browser,

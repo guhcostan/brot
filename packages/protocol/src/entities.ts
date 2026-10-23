@@ -37,6 +37,59 @@ export type Team = z.infer<typeof Team>;
  * A browser profile on the server machine, holding the logins a person saved in it. A bot either browses with
  * its own profile (the default) or names a shared one, so several bots use the same signed-in session.
  */
+/** How a bot browses: `own` runs its own profile Chrome on the server machine; `my-chrome` attaches to the
+ * person's already signed-in Chrome over CDP. Absent means `own`, and the mode only applies with `browser: true`. */
+export const BrowserMode = z.enum(['own', 'my-chrome']);
+export type BrowserMode = z.infer<typeof BrowserMode>;
+
+/** The CDP endpoint a My Chrome bot attaches to when the setting is absent. */
+export const DEFAULT_MY_CHROME_ENDPOINT = 'http://127.0.0.1:9333';
+
+const LOOPBACK_CHROME_HOSTS = new Set(['127.0.0.1', 'localhost', '::1']);
+
+/**
+ * The problem with a My Chrome endpoint, or undefined when it is usable: an http(s) URL on a loopback host,
+ * with no credentials, path, query or fragment. The port is free. Exported so the server can phrase the same
+ * refusal for hand-written config and for request bodies.
+ */
+export function myChromeEndpointIssue(value: string): string | undefined {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return 'endpoint must be a valid URL, for example http://127.0.0.1:9333';
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return 'endpoint must use http or https';
+  if (url.username !== '' || url.password !== '') return 'endpoint must not include credentials';
+  if (url.search !== '' || url.hash !== '') return 'endpoint must not include a query or fragment';
+  if (url.pathname !== '/' && url.pathname !== '') return 'endpoint must not include a path';
+  const host = url.hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  if (!LOOPBACK_CHROME_HOSTS.has(host)) {
+    return 'endpoint must be loopback: 127.0.0.1, localhost or [::1]';
+  }
+  return undefined;
+}
+
+/** The CDP endpoint of the person's Chrome. `updatedAt` is set by the server; absent means the default. */
+export const MyChromeSettings = z.object({
+  endpoint: z.string().max(2048),
+  updatedAt: IsoDateTime.optional(),
+});
+export type MyChromeSettings = z.infer<typeof MyChromeSettings>;
+
+/** Saving a My Chrome endpoint. Setting it to the default endpoint removes the need for a stored value. */
+export const UpdateMyChromeSettings = z.object({ endpoint: z.string().max(2048) });
+export type UpdateMyChromeSettings = z.infer<typeof UpdateMyChromeSettings>;
+
+/**
+ * Checks an endpoint and returns the field issues a route reports. The stored setting can be hand-edited, so the
+ * server validates on save and reports a broken stored value instead of connecting to it.
+ */
+export function myChromeEndpointIssues(value: string, path: string[] = ['endpoint']): { path: string[]; message: string }[] {
+  const issue = myChromeEndpointIssue(value);
+  return issue === undefined ? [] : [{ path, message: issue }];
+}
+
 export const BrowserProfile = z.object({
   id: z.string(),
   name: z.string(),
@@ -92,6 +145,13 @@ export const Bot = z.object({
    * bot. Bots that name the same profile share one Chrome and every login in it.
    */
   browserProfileId: z.string().optional(),
+  /**
+   * How the host browser serves the bot. `own` (absent) launches a Chrome with the bot's profile and enforces
+   * its egress through the proxy. `my-chrome` attaches over CDP to the person's already signed-in Chrome: they
+   * see every tab, their browser keeps its own network (the bot's egress policy does NOT apply), and Brot never
+   * closes that Chrome. Only meaningful when `browser: true`.
+   */
+  browserMode: BrowserMode.optional(),
   /**
    * Whether finished runs post an inbox notification. Absent means true. Approvals and failed runs always
    * notify, because those need a person.

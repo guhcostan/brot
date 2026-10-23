@@ -438,7 +438,7 @@ function createGuardedBody(options: GuardedBodyOptions): ReadableStream<Uint8Arr
         for (;;) {
           if (settled) return;
           arm();
-          let result: ReadableStreamReadResult<Uint8Array>;
+          let result: Awaited<ReturnType<typeof reader.read>>;
           try {
             result = await reader.read();
           } catch (error) {

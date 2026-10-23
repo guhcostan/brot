@@ -1,10 +1,12 @@
 import { rm } from 'node:fs/promises';
-import type { Bot, BrowserTakeover, ComputerInput } from '@brot/protocol';
+import { chromium, type Browser } from 'playwright-core';
+import { BrowserMode, DEFAULT_MY_CHROME_ENDPOINT, MyChromeSettings, type Bot, type BrowserTakeover, type ComputerInput } from '@brot/protocol';
 import { applyInput, ensurePage, fillLogin as fillLoginInPage, inputProblem, pageHost as pageHostOf, runBrowserCommand, screenshot } from './driver';
 import { botAllowlist, createBotEgress, type BotEgress } from './egress';
 import { launchChrome, removeDevToolsState, resolveChromeBinary, type ChromeHandle } from './launch';
+import { botBrowserModeKey, MY_CHROME_HINT, MY_CHROME_SETTINGS_KEY } from './my-chrome';
 import { ensureProfileDir, profileDir } from './profile';
-import type { HostBrowserDeps, HostBrowserService, HostBrowserState, LoginCredentials } from './types';
+import type { HostBrowserDeps, HostBrowserService, HostBrowserState, LoginCredentials, MyChromeProbe } from './types';
 
 /** What the bot is told when it asks for the browser while the person's sign-in window is open. */
 const LOGIN_REFUSAL = 'the person is signing in; try again when the window closes';
@@ -13,6 +15,14 @@ const LOGIN_REFUSAL = 'the person is signing in; try again when the window close
 export const BROWSER_TAKEOVER_REFUSAL = 'The person is in control of the browser; wait until they hand it back.';
 /** Input during a sign-in window goes to that local window, not the API. */
 const LOGIN_INPUT_REFUSAL = 'The browser is in its sign-in window; type and click in that window.';
+
+/** My Chrome: the run attaches to the person's own Chrome, so it is never launched, proxied or closed by Brot. */
+const MY_CHROME_KEY = 'my-chrome';
+const MY_CHROME_TIMEOUT_MS = 5_000;
+const MY_CHROME_LOGIN_REFUSAL =
+  'My Chrome is already signed in; switch the bot to its own profile to sign in from Brot.';
+const myChromeUnreachable = (endpoint: string): string =>
+  `Could not reach Chrome at ${endpoint}. ${MY_CHROME_HINT}`;
 
 /** A host-browser failure a route can report with a status code. */
 export class BrowserError extends Error {
@@ -88,6 +98,117 @@ export function createHostBrowserService(deps: HostBrowserDeps): HostBrowserServ
 
   function requireBrowser(bot: Bot): void {
     if (bot.browser !== true) throw new BrowserError(409, 'This bot has no browser');
+  }
+
+  /** The person's Chrome CDP endpoint: the stored setting, or the loopback default. */
+  async function myChromeEndpoint(): Promise<string> {
+    const stored = await deps.settings?.get(MY_CHROME_SETTINGS_KEY, MyChromeSettings);
+    return stored?.endpoint ?? DEFAULT_MY_CHROME_ENDPOINT;
+  }
+
+  /** True when this bot's runs attach to the person's Chrome. The bot row has no mode column, so the setting
+   * (or an entity that already carries the mode) decides. */
+  async function usesMyChrome(bot: Bot): Promise<boolean> {
+    if (bot.browser !== true) return false;
+    if (bot.browserMode !== undefined) return bot.browserMode === 'my-chrome';
+    if (deps.settings === undefined) return false;
+    return (await deps.settings.get(botBrowserModeKey(bot.id), BrowserMode)) === 'my-chrome';
+  }
+
+  /** Our CDP handle to the person's Chrome. It is kept between commands; releasing one never affects the browser. */
+  let myChrome: { endpoint: string; browser: Browser } | undefined;
+
+  /** Connects to the person's Chrome (or reuses our live handle), with the short timeout a run can wait for. */
+  async function attachMyChrome(): Promise<{ endpoint: string; browser: Browser }> {
+    const endpoint = await myChromeEndpoint();
+    if (myChrome !== undefined && myChrome.endpoint === endpoint && myChrome.browser.isConnected()) return myChrome;
+    if (myChrome !== undefined) {
+      const stale = myChrome.browser;
+      myChrome = undefined;
+      await stale.close().catch(() => undefined);
+    }
+    const connect =
+      deps.connectOverCDP ??
+      ((url: string, timeoutMs?: number) => chromium.connectOverCDP(url, timeoutMs === undefined ? {} : { timeout: timeoutMs }));
+    try {
+      const browser = await connect(endpoint, MY_CHROME_TIMEOUT_MS);
+      myChrome = { endpoint, browser };
+      return { endpoint, browser };
+    } catch {
+      throw new BrowserError(409, myChromeUnreachable(endpoint));
+    }
+  }
+
+  /** Disconnects our handle only. The person's Chrome and its tabs keep running. */
+  function detachMyChrome(): void {
+    const handle = myChrome;
+    myChrome = undefined;
+    if (handle !== undefined) void handle.browser.close().catch(() => undefined);
+  }
+
+  /** The browser's own description (product, user agent) over CDP, so a probe shows what it reached. */
+  async function myChromeInfo(browser: Browser): Promise<{ version?: string; userAgent?: string } | undefined> {
+    const info: { version?: string; userAgent?: string } = {};
+    try {
+      info.version = browser.version();
+    } catch {
+      // Older browsers may not answer; the CDP session below is the fallback.
+    }
+    try {
+      const session = await browser.newBrowserCDPSession();
+      try {
+        const version = (await session.send('Browser.getVersion')) as { product?: string; userAgent?: string };
+        if (typeof version.product === 'string') info.version = version.product;
+        if (typeof version.userAgent === 'string') info.userAgent = version.userAgent;
+      } finally {
+        await session.detach().catch(() => undefined);
+      }
+    } catch {
+      // The identity is best effort; a probe that connected still reports available.
+    }
+    if (info.userAgent === undefined) {
+      try {
+        const page = browser.contexts()[0]?.pages()[0];
+        if (page !== undefined) {
+          const agent = await page.evaluate('navigator.userAgent');
+          if (typeof agent === 'string') info.userAgent = agent;
+        }
+      } catch {
+        // No page or no evaluation rights: the identifier stays partial.
+      }
+    }
+    return info.version === undefined && info.userAgent === undefined ? undefined : info;
+  }
+
+  /** The status a My Chrome bot reports: connected or not, with the endpoint the run would use. */
+  async function myChromeStatus(): Promise<{ state: HostBrowserState; mode: 'my-chrome'; endpoint: string }> {
+    try {
+      const attached = await attachMyChrome();
+      return { state: attached.browser.isConnected() ? 'running' : 'stopped', mode: 'my-chrome', endpoint: attached.endpoint };
+    } catch {
+      return { state: 'stopped', mode: 'my-chrome', endpoint: await myChromeEndpoint().catch(() => DEFAULT_MY_CHROME_ENDPOINT) };
+    }
+  }
+
+  async function probeMyChrome(): Promise<MyChromeProbe> {
+    const endpoint = await myChromeEndpoint();
+    try {
+      const attached = await attachMyChrome();
+      const connected = attached.browser.isConnected();
+      const browser = connected ? await myChromeInfo(attached.browser) : undefined;
+      detachMyChrome();
+      const automation = /headlesschrome|playwright|puppeteer/i.test(browser?.userAgent ?? '');
+      if (automation) console.warn(`My Chrome probe reached an automation browser at ${endpoint}. ${MY_CHROME_HINT}`);
+      return connected
+        ? { endpoint, available: true, ...(browser === undefined ? {} : { browser, automation }) }
+        : { endpoint, available: false, reason: myChromeUnreachable(endpoint) };
+    } catch (error) {
+      return {
+        endpoint,
+        available: false,
+        reason: error instanceof BrowserError ? error.message : myChromeUnreachable(endpoint),
+      };
+    }
   }
 
   function serial<T>(key: string, work: () => Promise<T>): Promise<T> {
@@ -177,21 +298,43 @@ export function createHostBrowserService(deps: HostBrowserDeps): HostBrowserServ
 
   return {
     status(bot) {
-      const key = profileKey(bot);
-      return serial(key, async () => ({ state: await stateOf(key) }));
+      return (async () => {
+        if (await usesMyChrome(bot)) return myChromeStatus();
+        const key = profileKey(bot);
+        return serial(key, async () => ({ state: await stateOf(key) }));
+      })();
     },
+
+    probeMyChrome,
 
     openForLogin(bot) {
-      const key = profileKey(bot);
-      return serial(key, async () => {
-        const existing = browsers.get(key);
-        if (existing !== undefined) await end(existing, key);
-        await launchForLogin(bot, key);
-        return { state: 'login' };
-      });
+      return (async () => {
+        if (await usesMyChrome(bot)) throw new BrowserError(409, MY_CHROME_LOGIN_REFUSAL);
+        const key = profileKey(bot);
+        return serial(key, async () => {
+          const existing = browsers.get(key);
+          if (existing !== undefined) await end(existing, key);
+          await launchForLogin(bot, key);
+          return { state: 'login' };
+        });
+      })();
     },
 
-    browser(bot, command, args) {
+    async browser(bot, command, args) {
+      if (await usesMyChrome(bot)) {
+        return serial(MY_CHROME_KEY, async () => {
+          if (takeoverOf(MY_CHROME_KEY).active) throw new Error(BROWSER_TAKEOVER_REFUSAL);
+          const { browser: cdp } = await attachMyChrome();
+          try {
+            // The person's Chrome keeps its own network: the bot's egress allowlist is not applied, and no proxy
+            // is inserted. The viewport is left alone because resizing their window would be intrusive.
+            return await runBrowserCommand(cdp, bot, command, args, { unproxied: true, viewport: false });
+          } catch (error) {
+            if (!cdp.isConnected()) detachMyChrome();
+            throw error;
+          }
+        });
+      }
       const key = profileKey(bot);
       return serial(key, async () => {
         let info = await live(key);
@@ -216,6 +359,23 @@ export function createHostBrowserService(deps: HostBrowserDeps): HostBrowserServ
     },
 
     browserScreen(bot) {
+      return (async () => {
+        if (await usesMyChrome(bot)) {
+          const pending = screenInFlight.get(MY_CHROME_KEY);
+          if (pending !== undefined) return pending;
+          const capture = serial(MY_CHROME_KEY, async () => {
+            requireBrowser(bot);
+            try {
+              const { browser: cdp } = await attachMyChrome();
+              return await screenshot(await ensurePage(cdp, { viewport: false }));
+            } catch (error) {
+              if (error instanceof BrowserError) throw error;
+              throw new BrowserError(409, `The browser is not running: ${errorLine(error)}`);
+            }
+          }).finally(() => screenInFlight.delete(MY_CHROME_KEY));
+          screenInFlight.set(MY_CHROME_KEY, capture);
+          return capture;
+        }
       const key = profileKey(bot);
       // The panel polls several times a second; concurrent polls for one profile share a single capture.
       const pending = screenInFlight.get(key);
@@ -239,20 +399,44 @@ export function createHostBrowserService(deps: HostBrowserDeps): HostBrowserServ
       }).finally(() => screenInFlight.delete(key));
       screenInFlight.set(key, capture);
       return capture;
+      })();
     },
 
     pageHost(bot) {
-      const key = profileKey(bot);
-      return serial(key, async () => {
-        requireBrowser(bot);
-        const info = await live(key);
-        return info === undefined ? null : pageHostOf(info.chrome.browser);
-      });
+      return (async () => {
+        if (await usesMyChrome(bot)) {
+          return serial(MY_CHROME_KEY, async () => {
+            requireBrowser(bot);
+            const { browser: cdp } = await attachMyChrome();
+            return pageHostOf(cdp);
+          });
+        }
+        const key = profileKey(bot);
+        return serial(key, async () => {
+          requireBrowser(bot);
+          const info = await live(key);
+          return info === undefined ? null : pageHostOf(info.chrome.browser);
+        });
+      })();
     },
 
     fillLogin(bot, credentials: LoginCredentials) {
-      const key = profileKey(bot);
-      return serial(key, async () => {
+      return (async () => {
+        if (await usesMyChrome(bot)) {
+          return serial(MY_CHROME_KEY, async () => {
+            requireBrowser(bot);
+            if (takeoverOf(MY_CHROME_KEY).active) throw new BrowserError(409, BROWSER_TAKEOVER_REFUSAL);
+            try {
+              const { browser: cdp } = await attachMyChrome();
+              await fillLoginInPage(await ensurePage(cdp, { viewport: false }), credentials);
+            } catch (error) {
+              if (error instanceof BrowserError) throw error;
+              throw new BrowserError(409, errorLine(error));
+            }
+          });
+        }
+        const key = profileKey(bot);
+        return serial(key, async () => {
         requireBrowser(bot);
         if (takeoverOf(key).active) throw new BrowserError(409, BROWSER_TAKEOVER_REFUSAL);
         let info = await live(key);
@@ -271,20 +455,24 @@ export function createHostBrowserService(deps: HostBrowserDeps): HostBrowserServ
         } catch (error) {
           throw new BrowserError(409, errorLine(error));
         }
-      });
+        });
+      })();
     },
 
     browserTakeover(bot) {
-      const key = profileKey(bot);
-      return serial(key, async () => {
-        requireBrowser(bot);
-        return takeoverOf(key);
-      });
+      return (async () => {
+        const key = (await usesMyChrome(bot)) ? MY_CHROME_KEY : profileKey(bot);
+        return serial(key, async () => {
+          requireBrowser(bot);
+          return takeoverOf(key);
+        });
+      })();
     },
 
     setBrowserTakeover(bot, change, requestedBy, threadId) {
-      const key = profileKey(bot);
-      return serial(key, async () => {
+      return (async () => {
+        const key = (await usesMyChrome(bot)) ? MY_CHROME_KEY : profileKey(bot);
+        return serial(key, async () => {
         requireBrowser(bot);
         const takeover: BrowserTakeover = {
           active: change.active,
@@ -295,12 +483,14 @@ export function createHostBrowserService(deps: HostBrowserDeps): HostBrowserServ
         // are kept on the record so a bot-initiated takeover can be surfaced without changing the API shape.
         takeovers.set(key, { takeover, requestedBy, ...(threadId === undefined ? {} : { threadId }) });
         return takeover;
-      });
+        });
+      })();
     },
 
     browserInput(bot, input: ComputerInput) {
-      const key = profileKey(bot);
-      return serial(key, async () => {
+      return (async () => {
+        const key = (await usesMyChrome(bot)) ? MY_CHROME_KEY : profileKey(bot);
+        return serial(key, async () => {
         requireBrowser(bot);
         if (!takeoverOf(key).active) throw new BrowserError(409, 'No takeover is active.');
         const problem = inputProblem(input);
@@ -314,31 +504,46 @@ export function createHostBrowserService(deps: HostBrowserDeps): HostBrowserServ
         } catch (error) {
           throw new BrowserError(409, errorLine(error));
         }
-      });
+        });
+      })();
     },
 
     close(bot) {
-      const key = profileKey(bot);
-      return serial(key, async () => {
+      return (async () => {
+        if (await usesMyChrome(bot)) {
+          // Closing a My Chrome bot only drops our CDP handle; the person's Chrome stays open.
+          detachMyChrome();
+          return;
+        }
+        const key = profileKey(bot);
+        return serial(key, async () => {
         const info = browsers.get(key);
         if (info !== undefined) {
           await end(info, key);
           return;
         }
         await removeDevToolsState(profileDir(deps.home, key)).catch(() => undefined);
-      });
+        });
+      })();
     },
 
     deleteProfile(bot) {
-      // A shared profile outlives any one bot; it is deleted through its own route, which also ungroups its bots.
-      if (bot.browserProfileId !== undefined) return Promise.resolve();
-      const key = profileKey(bot);
-      return serial(key, async () => {
-        const info = browsers.get(key);
-        if (info !== undefined) await end(info, key);
-        takeovers.delete(key);
-        await rm(profileDir(deps.home, key), { recursive: true, force: true });
-      });
+      return (async () => {
+        // My Chrome has no profile directory to delete and the person's browser is never touched.
+        if (await usesMyChrome(bot)) {
+          detachMyChrome();
+          return;
+        }
+        // A shared profile outlives any one bot; it is deleted through its own route, which also ungroups its bots.
+        if (bot.browserProfileId !== undefined) return;
+        const key = profileKey(bot);
+        return serial(key, async () => {
+          const info = browsers.get(key);
+          if (info !== undefined) await end(info, key);
+          takeovers.delete(key);
+          await rm(profileDir(deps.home, key), { recursive: true, force: true });
+        });
+      })();
     },
 
     statusForProfile(profileId) {
@@ -375,6 +580,7 @@ export function createHostBrowserService(deps: HostBrowserDeps): HostBrowserServ
           }),
         ),
       );
+      detachMyChrome();
       takeovers.clear();
       screenInFlight.clear();
     },

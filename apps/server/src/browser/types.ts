@@ -1,10 +1,37 @@
-import type { Bot, BrowserTakeover, ComputerInput, SetBrowserTakeover } from '@brot/protocol';
+import type { Bot, BrowserMode, BrowserTakeover, ComputerInput, SetBrowserTakeover } from '@brot/protocol';
+import type { Browser } from 'playwright-core';
 
 /** What a bot's host browser is doing. `login` means a headed window is open for the person to sign in. */
 export type HostBrowserState = 'stopped' | 'running' | 'login';
 
 export interface HostBrowserStatus {
   state: HostBrowserState;
+  /** `my-chrome` when the bot attaches to the person's Chrome; absent means its own profile. */
+  mode?: BrowserMode;
+  /** The CDP endpoint of the person's Chrome for a My Chrome bot. */
+  endpoint?: string;
+}
+
+/** The settings reads the browser needs. `Repos['settings']` satisfies it. */
+export interface SettingsStore {
+  get<T>(key: string, schema: { parse(value: unknown): T }): Promise<T | undefined>;
+}
+
+/** What the probe learned about the reached browser, so the person and the UI can see what they attach to. */
+export interface MyChromeBrowserInfo {
+  version?: string;
+  userAgent?: string;
+}
+
+/** What a My Chrome probe found. `reason` is the same text a run sees when Chrome is not listening. */
+export interface MyChromeProbe {
+  endpoint: string;
+  available: boolean;
+  /** Absent when the endpoint did not answer. */
+  browser?: MyChromeBrowserInfo;
+  /** True when the user agent looks like an automation browser (headless, Playwright, Puppeteer). */
+  automation?: boolean;
+  reason?: string;
 }
 
 /**
@@ -75,6 +102,11 @@ export interface HostBrowserService extends BrowserDriver {
    * error. Refused while a sign-in window is open or the person has taken over the profile.
    */
   fillLogin(bot: Bot, credentials: LoginCredentials): Promise<void>;
+  /**
+   * Whether a My Chrome endpoint answers: connects over CDP, disconnects the probe's own handle and reports the
+   * stored endpoint. Never leaves a connection open.
+   */
+  probeMyChrome(): Promise<MyChromeProbe>;
   /** The state of one profile's browser, by profile key (a shared profile id, or a bot id for an own profile). */
   statusForProfile(profileId: string): Promise<HostBrowserStatus>;
   /** Closes the browser serving a shared profile, saving it. Idempotent. */
@@ -102,4 +134,8 @@ export interface HostBrowserDeps {
   home: string;
   /** Chrome binary. Defaults to `BROT_BROWSER_PATH`, then the usual macOS/Linux/Windows locations. */
   binary?: string;
+  /** Settings rows: the My Chrome endpoint and each bot's browser mode. Absent disables stored modes. */
+  settings?: SettingsStore;
+  /** The CDP connector. Tests inject a fake; production uses playwright-core's `chromium.connectOverCDP`. */
+  connectOverCDP?: (endpoint: string, timeoutMs?: number) => Promise<Browser>;
 }

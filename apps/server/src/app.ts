@@ -23,6 +23,7 @@ import {
   ImportSkill,
   IsoDateTime,
   MarkNotificationsRead,
+  myChromeEndpointIssues,
   PairingComplete,
   PostMessage,
   PROTOCOL_VERSION,
@@ -38,6 +39,7 @@ import {
   UpdateBrowserProfile,
   UpdateMcpServer,
   UpdateMemory,
+  UpdateMyChromeSettings,
   UpdateRoomDeciderSettings,
   UpdateRoomMembers,
   UpdateRoutine,
@@ -76,6 +78,17 @@ import { mountTeamPackageRoutes } from './team-packages';
 import { mountTodayRoutes } from './today';
 import { mountDecisionRoutes } from './decisions';
 import { mountUsageRoutes } from './usage';
+import {
+  clearBotBrowserMode,
+  clearMyChromeSettings,
+  effectiveBrowserMode,
+  MY_CHROME_HINT,
+  readMyChromeSettings,
+  saveBotBrowserMode,
+  saveMyChromeSettings,
+  withBrowserMode,
+  withBrowserModes,
+} from './browser/my-chrome';
 import { mountDesktopRoutes, type DesktopService } from './desktop';
 import { testMcpServer } from './mcp-servers';
 import { readRoomDeciderSettings, writeRoomDeciderSettings } from './rooms/decider';
@@ -390,8 +403,44 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
   });
 
   app.get('/api/bots', async (c) =>
-    c.json(await repos.bots.list({ includeArchived: c.req.query('includeArchived') === 'true' })),
+    c.json(await withBrowserModes(repos, await repos.bots.list({ includeArchived: c.req.query('includeArchived') === 'true' }))),
   );
+
+  /**
+   * The person's own Chrome over CDP: the endpoint bots with `browserMode: 'my-chrome'` attach to, and whether it
+   * answers right now. The probe connects and disconnects, leaving no connection open.
+   */
+  app.get('/api/my-chrome', async (c) => {
+    const settings = await readMyChromeSettings(repos);
+    const issues = myChromeEndpointIssues(settings.endpoint);
+    if (issues.length > 0) {
+      return c.json({ settings, available: false, reason: issues[0]?.message ?? 'invalid endpoint' });
+    }
+    const probe = await browser.probeMyChrome();
+    return c.json({
+      settings,
+      available: probe.available,
+      ...(probe.browser === undefined ? {} : { browser: probe.browser }),
+      ...(probe.automation === undefined ? {} : { automation: probe.automation }),
+      ...(probe.reason === undefined ? {} : { reason: probe.reason }),
+      hint: MY_CHROME_HINT,
+    });
+  });
+
+  /** Removes the stored endpoint, going back to the loopback default (http://127.0.0.1:9333). */
+  app.delete('/api/my-chrome', async (c) => {
+    await clearMyChromeSettings(repos);
+    return c.body(null, 204);
+  });
+
+  /** Saves the My Chrome endpoint. The default endpoint needs no stored value. */
+  app.put('/api/my-chrome', async (c) => {
+    const body = await parseBody(c, UpdateMyChromeSettings);
+    if (!body.ok) return body.response;
+    const issues = myChromeEndpointIssues(body.data.endpoint);
+    if (issues.length > 0) return c.json({ error: 'Invalid request', issues }, 400);
+    return c.json(await saveMyChromeSettings(repos, body.data));
+  });
 
   /** Shared browser profiles: one signed-in Chrome on the server machine that several bots can use. */
   app.get('/api/browser/profiles', async (c) => c.json(await repos.browserProfiles.list()));
@@ -436,12 +485,15 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     if (missingMcpServers.length > 0) {
       return invalidReference(c, 'mcpServerIds', `unknown MCP servers: ${missingMcpServers.join(', ')}`);
     }
-    return c.json(await repos.bots.create(body.data), 201);
+    const { browserMode, ...create } = body.data;
+    const bot = await repos.bots.create(create);
+    if (browserMode !== undefined) await saveBotBrowserMode(repos, bot.id, browserMode);
+    return c.json(await withBrowserMode(repos, bot), 201);
   });
 
   app.get('/api/bots/:id', async (c) => {
     const bot = await repos.bots.get(c.req.param('id'));
-    return bot ? c.json(bot) : notFound(c, 'Bot');
+    return bot ? c.json(await withBrowserMode(repos, bot)) : notFound(c, 'Bot');
   });
 
   app.patch('/api/bots/:id', async (c) => {
@@ -456,13 +508,23 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     if (missingMcpServers.length > 0) {
       return invalidReference(c, 'mcpServerIds', `unknown MCP servers: ${missingMcpServers.join(', ')}`);
     }
+    const { browserMode, ...patch } = body.data;
     const before = await repos.bots.get(c.req.param('id'));
-    const bot = await repos.bots.update(c.req.param('id'), body.data);
+    const finalBrowser = patch.browser ?? before?.browser ?? false;
+    const finalMode = browserMode ?? (before === undefined ? 'own' : await effectiveBrowserMode(repos, before));
+    if (finalMode === 'my-chrome' && finalBrowser !== true) {
+      return c.json(
+        { error: 'Invalid request', issues: [{ path: ['browserMode'], message: 'my-chrome needs browser: true' }] },
+        400,
+      );
+    }
+    const bot = await repos.bots.update(c.req.param('id'), patch);
     if (!bot) return notFound(c, 'Bot');
+    if (browserMode !== undefined) await saveBotBrowserMode(repos, bot.id, browserMode);
     if (before && bot.engine !== before.engine) await harness.resetEngineSessions(bot.id);
     // A bot that stops being a sandbox bot leaves its container behind unless it is stopped.
     if (before?.computer === 'sandbox' && bot.computer !== 'sandbox') await stopComputer(computers.sandbox, bot.id);
-    return c.json(bot);
+    return c.json(await withBrowserMode(repos, bot));
   });
 
   app.delete('/api/bots/:id', async (c) => {
@@ -476,6 +538,7 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     // The profile holds the bot's logins, so it goes with the bot; closing first releases Chrome's lock.
     await browser.deleteProfile(bot);
     await repos.bots.remove(id);
+    await clearBotBrowserMode(repos, id);
     await scheduler.sync();
     return c.body(null, 204);
   });
@@ -486,7 +549,11 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     if (!bot) return notFound(c, 'Bot');
     if (bot.browser !== true) return c.json({ error: 'This bot has no browser' }, 409);
     const status = await browser.status(bot);
-    return c.json({ state: status.state, profile: await browserProfileRef(repos, bot) });
+    return c.json({
+      state: status.state,
+      ...(status.mode === 'my-chrome' ? { mode: 'my-chrome', endpoint: status.endpoint } : {}),
+      profile: await browserProfileRef(repos, bot),
+    });
   });
 
   /**
@@ -500,8 +567,13 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     if (botBrowserKind(bot) === 'desktop') {
       return c.json({ error: 'This bot already has a browser in its desktop' }, 409);
     }
-    const status = await browser.openForLogin(bot);
-    return c.json({ state: status.state, profile: await browserProfileRef(repos, bot) }, 202);
+    try {
+      const status = await browser.openForLogin(bot);
+      return c.json({ state: status.state, profile: await browserProfileRef(repos, bot) }, 202);
+    } catch (error) {
+      if (error instanceof BrowserError) return c.json({ error: error.message }, error.status);
+      throw error;
+    }
   });
 
   /**

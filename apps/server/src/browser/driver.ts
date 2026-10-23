@@ -100,11 +100,11 @@ function hasFixedViewport(page: Page): boolean {
  * The page commands run on. It is always the fixed browser viewport, so the live view and the person's clicks
  * see the same geometry a bot command does.
  */
-export async function ensurePage(browser: Browser): Promise<Page> {
+export async function ensurePage(browser: Browser, options: { viewport?: boolean } = {}): Promise<Page> {
   const existing = currentPage(browser);
   const context = browser.contexts()[0] ?? (await browser.newContext());
   const page = existing ?? (await context.newPage());
-  if (!hasFixedViewport(page)) await page.setViewportSize(BROWSER_VIEWPORT);
+  if (options.viewport !== false && !hasFixedViewport(page)) await page.setViewportSize(BROWSER_VIEWPORT);
   return page;
 }
 
@@ -358,27 +358,43 @@ async function fieldInfo(page: Page, ref: string): Promise<FieldInfo | null> {
   return isFieldInfo(result) ? result : null;
 }
 
-/** Validates an `open` URL: http(s) or `about:blank`, and on the bot's egress allowlist. Pure, for the tests. */
-export function resolveOpenUrl(bot: Bot, raw: unknown): URL {
+/**
+ * What a command runs on. `unproxied` is set for My Chrome: the person's own browser keeps its own network, so the
+ * bot's egress allowlist is not a boundary there and must not refuse navigation or imply a proxy.
+ */
+export interface BrowserCommandOptions {
+  unproxied?: boolean;
+  /** My Chrome drives the person's window; resizing their page would be intrusive. */
+  viewport?: boolean;
+}
+
+/** Validates an `open` URL: http(s) or `about:blank`, and on the bot's egress allowlist unless unproxied. */
+export function resolveOpenUrl(bot: Bot, raw: unknown, options: BrowserCommandOptions = {}): URL {
   const url = String(raw ?? '');
   const parsed = new URL(url);
   if (!['http:', 'https:'].includes(parsed.protocol) && url !== 'about:blank') {
     throw new Error('only http and https URLs can be opened');
   }
-  if (url !== 'about:blank' && !hostAllowedForBot(bot, parsed.hostname)) {
+  if (url !== 'about:blank' && options.unproxied !== true && !hostAllowedForBot(bot, parsed.hostname)) {
     // The same wording the http_request tool uses, so the model recognizes an egress refusal.
     throw new Error(`${parsed.hostname} is not on this bot's egress allowlist.`);
   }
   return parsed;
 }
 
-async function run(browser: Browser, bot: Bot, command: string, args: Record<string, unknown>): Promise<Record<string, unknown>> {
-  const page = await ensurePage(browser);
+async function run(
+  browser: Browser,
+  bot: Bot,
+  command: string,
+  args: Record<string, unknown>,
+  options: BrowserCommandOptions = {},
+): Promise<Record<string, unknown>> {
+  const page = await ensurePage(browser, options);
   page.setDefaultTimeout(10_000);
 
   switch (command) {
     case 'open': {
-      const url = resolveOpenUrl(bot, args.url).href;
+      const url = resolveOpenUrl(bot, args.url, options).href;
       await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
       return describe(page);
     }
@@ -575,9 +591,10 @@ export async function runBrowserCommand(
   bot: Bot,
   command: string,
   args: Record<string, unknown>,
+  options: BrowserCommandOptions = {},
 ): Promise<Record<string, unknown>> {
   try {
-    return await run(browser, bot, command, args);
+    return await run(browser, bot, command, args, options);
   } catch (error) {
     throw new Error(firstLine(error), { cause: error });
   }
