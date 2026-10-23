@@ -26,6 +26,8 @@ export interface ThreadViewProps {
   onPickThreadModel?: (model: string | null) => Promise<unknown>;
   /** Voice availability and the speak call for listen/auto-speak. */
   voice?: VoiceContext;
+  /** Runs a recognized composer slash command; resolves to an inline message or null. */
+  onCommand?: (name: string, args: string) => Promise<string | null>;
   thread: ThreadState;
   /** False until the bot's history has loaded. */
   loaded: boolean;
@@ -53,7 +55,7 @@ export function useStickToBottom(deps: readonly unknown[]) {
   return ref;
 }
 
-export function ThreadView({ bot, title, threadMeta, loadProviders, onPickThreadModel, voice, thread, loaded, status, onSend, uploadAttachment, discardAttachment, onEdit, onDecide, onOpenBots, onOpenContext }: ThreadViewProps): ReactElement {
+export function ThreadView({ bot, title, threadMeta, loadProviders, onPickThreadModel, voice, onCommand, thread, loaded, status, onSend, uploadAttachment, discardAttachment, onEdit, onDecide, onOpenBots, onOpenContext }: ThreadViewProps): ReactElement {
   const [modelOpen, setModelOpen] = useState(false);
   const autoSpeak = useAutoSpeak({ thread, voice, defaultBotId: bot.id, speaks: () => bot.speakReplies === true });
   const effectiveModel = threadMeta?.model ?? bot.model;
@@ -133,6 +135,7 @@ export function ThreadView({ bot, title, threadMeta, loadProviders, onPickThread
         uploadAttachment={uploadAttachment}
         discardAttachment={discardAttachment}
         onSend={(content, _mentions, attachmentIds) => onSend(content, attachmentIds)}
+        {...(onCommand === undefined ? {} : { onCommand })}
       />
     </section>
   );

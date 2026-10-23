@@ -1321,6 +1321,11 @@ export function createMockClient(): BrotClient {
       return structuredClone(next);
     },
 
+    async cancelRun(runId) {
+      const known = [...histories.values()].some((events) => events.some((event) => event.runId === runId));
+      if (!known) throw new Error(`Unknown run: ${runId}`);
+    },
+
     async deleteRoom(roomId) {
       if (!rooms.delete(roomId)) throw new Error(`Unknown room: ${roomId}`);
       threads.delete(roomId);

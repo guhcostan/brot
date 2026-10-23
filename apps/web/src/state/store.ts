@@ -28,6 +28,8 @@ export interface AppState {
   rooms: Room[];
   /** Every team, by name. A team groups bots under a shared brief. */
   teams: Team[];
+  /** Whether the room list has arrived: an empty array before that is "unknown", not "no rooms". */
+  roomsLoaded: boolean;
   selection: Selection | null;
   /** Every loaded thread's view, DMs and rooms alike, keyed by thread id. */
   threads: Record<string, ThreadState>;
@@ -42,6 +44,7 @@ export const initialAppState: AppState = {
   bots: [],
   rooms: [],
   teams: [],
+  roomsLoaded: false,
   selection: null,
   threads: {},
   threadLists: {},
@@ -105,7 +108,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     case 'bots-loaded':
       return { ...state, bots: action.bots, ready: true };
     case 'rooms-loaded':
-      return { ...state, rooms: action.rooms };
+      return { ...state, rooms: action.rooms, roomsLoaded: true };
     case 'room-added': {
       const others = state.rooms.filter((room) => room.thread.id !== action.room.thread.id);
       return { ...state, rooms: [action.room, ...others] };
@@ -156,7 +159,9 @@ export function appReducer(state: AppState, action: AppAction): AppState {
           list.map((thread) => (thread.id === action.thread.id ? action.thread : thread)),
         ]),
       );
-      return { ...state, threadLists };
+      // A room's title lives on the room, so a rename done through /rename updates both views.
+      const rooms = state.rooms.map((room) => (room.thread.id === action.thread.id ? { ...room, thread: action.thread } : room));
+      return { ...state, threadLists, rooms };
     }
     case 'history-loaded':
       return { ...state, threads: { ...state.threads, [action.threadId]: foldEvents(action.events) } };

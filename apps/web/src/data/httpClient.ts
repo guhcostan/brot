@@ -115,6 +115,9 @@ export interface HttpClientOptions {
  * listeners registered for that name, so every type needs a listener. The Record turns a missing
  * type into a compile error when the protocol adds one.
  */
+/** How many recently delivered event ids are remembered for replay dedupe. */
+export const RECENT_EVENT_LIMIT = 1000;
+
 const EVENT_NAMES: Record<CanonicalEventType, true> = {
   'run.started': true,
   'message.delta': true,
@@ -288,6 +291,25 @@ export function createHttpClient({
     });
   }
 
+  /**
+   * Event ids recently delivered, oldest first (FIFO, capped). A reconnect that replays frames after the
+   * server's Last-Event-ID is therefore idempotent for the client; an id evicted after this many newer
+   * events could be delivered again, which is acceptable because it takes >1000 events to forget it.
+   */
+  const recentEventIds = new Set<string>();
+  const recentEventQueue: string[] = [];
+
+  function rememberEventId(id: string): boolean {
+    if (recentEventIds.has(id)) return false;
+    recentEventIds.add(id);
+    recentEventQueue.push(id);
+    if (recentEventQueue.length > RECENT_EVENT_LIMIT) {
+      const evicted = recentEventQueue.shift();
+      if (evicted !== undefined) recentEventIds.delete(evicted);
+    }
+    return true;
+  }
+
   /** Events are delivered in arrival order, even when a thread lookup is needed first. */
   function receive(data: string): void {
     let parsed: unknown;
@@ -303,6 +325,9 @@ export function createHttpClient({
       return;
     }
     const event = result.data;
+    // Dedupe by id before scheduling: a replayed frame never reaches the fold a second time. Frames without
+    // an id cannot pass CanonicalEvent.parse, so they are dropped (with the warning above) before this point.
+    if (!rememberEventId(event.id)) return;
     delivery = delivery
       .then(async () => {
         const target = await targetOf(event.threadId);
@@ -525,6 +550,10 @@ export function createHttpClient({
         );
       }
       return thread;
+    },
+
+    async cancelRun(runId) {
+      await write('POST', `/api/runs/${encodeURIComponent(runId)}/cancel`, {});
     },
 
     async deleteRoom(roomId) {

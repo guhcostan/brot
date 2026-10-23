@@ -36,6 +36,8 @@ export interface RoomViewProps {
   initialDeleteOpen?: boolean;
   /** Voice availability and the speak call for listen/auto-speak. */
   voice?: VoiceContext;
+  /** Runs a recognized composer slash command; resolves to an inline message or null. */
+  onCommand?: (name: string, args: string) => Promise<string | null>;
 }
 
 /** Names a list for screen readers: "Capy, Onça and 2 more". */
@@ -59,6 +61,7 @@ export function RoomView({
   initialMenuOpen = false,
   initialDeleteOpen = false,
   voice,
+  onCommand,
 }: RoomViewProps): ReactElement {
   const [menuOpen, setMenuOpen] = useState(initialMenuOpen);
   const [deleting, setDeleting] = useState(initialDeleteOpen);
@@ -164,6 +167,8 @@ export function RoomView({
         onSend={(content, mentions, attachmentIds) =>
           onSend({ content, mentions, ...(attachmentIds.length > 0 ? { attachmentIds } : {}) })
         }
+        isRoom
+        {...(onCommand === undefined ? {} : { onCommand })}
       />
     </section>
   );

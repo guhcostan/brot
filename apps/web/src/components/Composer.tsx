@@ -1,4 +1,5 @@
 import {
+  useEffect,
   useId,
   useLayoutEffect,
   useMemo,
@@ -18,9 +19,20 @@ import {
 } from '@brot/protocol';
 import { BotAvatar, Button, cx } from '@brot/ui';
 import { avatarOf, formatBytes } from '../format';
-import { t } from '../i18n';
+import { getLocale, t } from '../i18n';
 import { activeMention, findMentions, insertMention, matchMembers } from '../mentions';
-import { Close, FileDoc, Paperclip } from './icons';
+import {
+  COMMANDS,
+  isValidModelRef,
+  isKnownCommand,
+  insertDictation,
+  parseCommand,
+  suggestCommands,
+  type CommandSpec,
+  type ParsedCommand,
+} from './composerCommands';
+import { finalTranscript, getSpeechRecognition, speechLanguage, type SpeechRecognitionLike } from './dictation';
+import { Close, FileDoc, Mic, Paperclip } from './icons';
 
 export interface ComposerProps {
   /** Who the message goes to, for the label and placeholder: a bot's name or a room's title. */
@@ -40,6 +52,20 @@ export interface ComposerProps {
   initialFiles?: readonly File[];
   /** Starts in the uploading state, for SSR previews and tests. */
   initialUploading?: boolean;
+  /** Runs a recognized slash command; resolves to an inline message, or null when it was handled. */
+  onCommand?: (name: string, args: string) => Promise<string | null>;
+  /** The conversation is a room, where direct-message commands are refused. */
+  isRoom?: boolean;
+  /** Placeholder draft text, for SSR previews and tests. */
+  initialDraft?: string;
+  /** Starts with this command hint shown, for SSR previews and tests. */
+  initialCommandHint?: string | null;
+  /** Starts with the command list open, for SSR previews and tests. */
+  initialHelpOpen?: boolean;
+  /** Dictation state to render before any click, for SSR previews and tests. */
+  initialDictation?: 'idle' | 'listening' | 'unsupported';
+  /** The object SpeechRecognition is looked up on; tests pass a fake scope. */
+  speechScope?: unknown;
 }
 
 const MAX_HEIGHT = 200;
@@ -69,8 +95,15 @@ export function Composer({
   onSend,
   initialFiles,
   initialUploading = false,
+  onCommand,
+  isRoom = false,
+  initialDraft,
+  initialCommandHint,
+  initialHelpOpen = false,
+  initialDictation = 'idle',
+  speechScope,
 }: ComposerProps): ReactElement {
-  const [draft, setDraft] = useState('');
+  const [draft, setDraft] = useState(initialDraft ?? '');
   const [caret, setCaret] = useState(0);
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(initialUploading);
@@ -86,6 +119,13 @@ export function Composer({
   const [dragging, setDragging] = useState(false);
   const [highlight, setHighlight] = useState(0);
   const [dismissedAt, setDismissedAt] = useState<number | null>(null);
+  const [commandHint, setCommandHint] = useState<string | null>(initialCommandHint ?? null);
+  const [commandDismissed, setCommandDismissed] = useState<string | null>(null);
+  const [commandHighlight, setCommandHighlight] = useState(0);
+  const [helpOpen, setHelpOpen] = useState(initialHelpOpen);
+  const [dictationError, setDictationError] = useState<string | null>(initialDictation === 'unsupported' ? t('composer.dictationUnsupported') : null);
+  const [listening, setListening] = useState(initialDictation === 'listening');
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const fieldRef = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const keyRef = useRef((initialFiles ?? []).length);
@@ -105,6 +145,14 @@ export function Composer({
     field.style.height = `${Math.min(field.scrollHeight, MAX_HEIGHT)}px`;
   }, [draft]);
 
+  useEffect(
+    () => () => {
+      recognitionRef.current?.abort();
+      recognitionRef.current = null;
+    },
+    [],
+  );
+
   const mention = members && members.length > 0 ? activeMention(draft, caret) : null;
   const options = useMemo(
     () => (mention && members ? matchMembers(members, mention.query).slice(0, MAX_OPTIONS) : []),
@@ -113,6 +161,13 @@ export function Composer({
   const mentionOpen = mention !== null && options.length > 0 && dismissedAt !== mention.start;
   const active = mentionOpen ? Math.min(highlight, options.length - 1) : -1;
   const optionId = (index: number) => `${listId}-opt-${index}`;
+  const commandPrefix = draft.trim().startsWith('/') && !draft.trim().includes(' ') ? draft.trim() : null;
+  const commandSuggestions = commandPrefix !== null ? suggestCommands(commandPrefix) : [];
+  const commandMenuOpen = !helpOpen && commandPrefix !== null && commandDismissed !== commandPrefix && commandSuggestions.length > 0;
+  const commandItems = helpOpen ? COMMANDS : commandSuggestions;
+  const availableCommands = commandItems.length;
+  const activeCommand = commandMenuOpen || helpOpen ? Math.min(commandHighlight, Math.max(0, availableCommands - 1)) : -1;
+  const commandListId = `${listId}-commands`;
 
   const choose = (bot: Bot) => {
     if (!mention) return;
@@ -126,6 +181,107 @@ export function Composer({
       field.focus();
       field.setSelectionRange(next.caret, next.caret);
     });
+  };
+
+  const selectCommand = (command: CommandSpec) => {
+    const text = command.name === 'rename' || command.name === 'model' ? `/${command.name} ` : `/${command.name}`;
+    setDraft(text);
+    setCaret(text.length);
+    setCommandDismissed(null);
+    setHelpOpen(false);
+    requestAnimationFrame(() => {
+      const field = fieldRef.current;
+      if (!field) return;
+      field.focus();
+      field.setSelectionRange(text.length, text.length);
+    });
+  };
+
+  const runCommand = async (command: ParsedCommand) => {
+    setHelpOpen(false);
+    if (command.name === 'help') {
+      setHelpOpen(true);
+      setCommandHint(null);
+      setDraft('');
+      setCaret(0);
+      return;
+    }
+    if (!isKnownCommand(command.name)) {
+      setCommandHint(t('composer.commands.unknown', { command: `/${command.name}` }));
+      return;
+    }
+    const spec = COMMANDS.find((entry) => entry.name === command.name);
+    if (spec?.directOnly === true && isRoom) {
+      setCommandHint(t('composer.commands.roomUnavailable'));
+      return;
+    }
+    if (command.name === 'rename' && command.args === '') {
+      setCommandHint(t('composer.commands.renameUsage'));
+      return;
+    }
+    if (command.name === 'model' && command.args !== 'default' && (command.args === '' || !isValidModelRef(command.args))) {
+      setCommandHint(t(command.args === '' ? 'composer.commands.modelUsage' : 'composer.commands.modelInvalid'));
+      return;
+    }
+    if (onCommand === undefined) {
+      setCommandHint(t('composer.commands.unavailable'));
+      return;
+    }
+    setBusy(true);
+    setCommandHint(null);
+    try {
+      const result = await onCommand(command.name, command.args);
+      if (result === null) {
+        setDraft('');
+        setCaret(0);
+      } else {
+        setCommandHint(result);
+      }
+    } catch (cause) {
+      setCommandHint(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const dictate = () => {
+    setDictationError(null);
+    setCommandHint(null);
+    if (listening) {
+      recognitionRef.current?.stop();
+      setListening(false);
+      return;
+    }
+    const Recognition = getSpeechRecognition(speechScope);
+    if (Recognition === undefined) {
+      setDictationError(t('composer.dictationUnsupported'));
+      return;
+    }
+    const recognition = new Recognition();
+    recognition.lang = speechLanguage(getLocale());
+    recognition.interimResults = false;
+    recognition.continuous = false;
+    recognition.onresult = (event) => {
+      const transcript = finalTranscript(event);
+      if (transcript === '') return;
+      const at = fieldRef.current?.selectionStart ?? draft.length;
+      const next = insertDictation(draft, at, transcript);
+      setDraft(next.text);
+      setCaret(next.caret);
+      requestAnimationFrame(() => fieldRef.current?.setSelectionRange(next.caret, next.caret));
+    };
+    recognition.onerror = (event) => {
+      setDictationError(event.error === 'not-allowed' || event.error === 'service-not-allowed' ? t('composer.dictationDenied') : t('composer.dictationFailed'));
+      setListening(false);
+    };
+    recognition.onend = () => setListening(false);
+    try {
+      recognition.start();
+      recognitionRef.current = recognition;
+      setListening(true);
+    } catch {
+      setDictationError(t('composer.dictationUnsupported'));
+    }
   };
 
   const addFiles = (files: FileList | readonly File[] | null | undefined) => {
@@ -160,6 +316,11 @@ export function Composer({
   const submit = async () => {
     const content = draft.trim();
     if (!content || busy || uploading || fileErrors) return;
+    const command = parseCommand(content);
+    if (command !== null) {
+      await runCommand(command);
+      return;
+    }
     setBusy(true);
     setError(null);
     setAttachError(null);
@@ -203,6 +364,43 @@ export function Composer({
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (helpOpen || commandMenuOpen) {
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        const step = event.key === 'ArrowDown' ? 1 : -1;
+        setCommandHighlight((activeCommand + step + availableCommands) % availableCommands);
+        return;
+      }
+      if ((event.key === 'Enter' || event.key === 'Tab') && !event.shiftKey && !event.nativeEvent.isComposing) {
+        const command = commandItems[activeCommand];
+        const exact = draft.trim().toLowerCase();
+        if (command !== undefined && (command.name === 'help' || command.name === 'new' || command.name === 'stop') && exact === `/${command.name}`) {
+          event.preventDefault();
+          setHelpOpen(false);
+          setCommandDismissed(null);
+          const runnable = parseCommand(draft);
+          if (runnable !== null) void runCommand(runnable);
+          return;
+        }
+        if (command !== undefined) {
+          event.preventDefault();
+          selectCommand(command);
+          return;
+        }
+      }
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        if (helpOpen) setHelpOpen(false);
+        else setCommandDismissed(commandPrefix);
+        return;
+      }
+    }
+    if (event.key === 'Escape' && (commandHint !== null || dictationError !== null)) {
+      event.preventDefault();
+      setCommandHint(null);
+      setDictationError(null);
+      return;
+    }
     if (mentionOpen) {
       if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
         event.preventDefault();
@@ -270,6 +468,32 @@ export function Composer({
       className="flex-none bg-bg px-3 pt-2 pb-3 md:px-6 md:pb-5"
     >
       <div className="relative mx-auto flex w-full max-w-[720px] flex-col gap-2">
+        {helpOpen || commandMenuOpen ? (
+          <ul
+            id={commandListId}
+            role="listbox"
+            aria-label={t('composer.commands.menuLabel')}
+            className="absolute right-0 bottom-full left-0 z-10 m-0 mb-2 flex max-w-[420px] list-none flex-col gap-0.5 rounded-lg border border-line bg-surface p-1 shadow-float"
+          >
+            {commandItems.map((command, index) => (
+              <li
+                key={command.name}
+                id={`${commandListId}-${index}`}
+                role="option"
+                aria-selected={index === activeCommand}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => selectCommand(command)}
+                onMouseEnter={() => setCommandHighlight(index)}
+                className="flex cursor-pointer items-baseline gap-2 rounded-md px-2 py-1.5 aria-selected:bg-surface-2"
+              >
+                <code className="flex-none font-mono text-xs text-ink-3">{command.usage}</code>
+                <span className="min-w-0 flex-1 truncate text-sm text-ink">{t(command.descriptionKey)}</span>
+              </li>
+            ))}
+            {helpOpen ? <li className="px-2 py-1 text-xs text-ink-3">{t('composer.commands.hint')}</li> : null}
+          </ul>
+        ) : null}
+
         {mentionOpen ? (
           <ul
             id={listId}
@@ -371,6 +595,18 @@ export function Composer({
               <Paperclip size={16} />
             </Button>
           ) : null}
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={dictate}
+            disabled={initialDictation === 'unsupported'}
+            aria-label={t(initialDictation === 'unsupported' ? 'composer.dictationUnsupported' : listening ? 'composer.dictationStop' : 'composer.dictate')}
+            title={t(initialDictation === 'unsupported' ? 'composer.dictationUnsupported' : listening ? 'composer.dictationStop' : 'composer.dictate')}
+            aria-pressed={listening}
+            className={cx('mb-0.5 !size-9 flex-none', listening && 'text-attention-text')}
+          >
+            <Mic size={16} />
+          </Button>
           <textarea
             ref={fieldRef}
             id={fieldId}
@@ -392,6 +628,8 @@ export function Composer({
               setDraft(event.target.value);
               setCaret(event.target.selectionStart);
               setHighlight(0);
+              setCommandDismissed(null);
+              setCommandHighlight(0);
             }}
             onKeyDown={onKeyDown}
             onKeyUp={(event) => {
@@ -413,6 +651,10 @@ export function Composer({
             <span id={errorId} role="alert" className="text-attention-text">
               {error}
             </span>
+          ) : commandHint !== null || dictationError !== null ? (
+            <span role="alert" className="text-attention-text">
+              {commandHint ?? dictationError}
+            </span>
           ) : (
             <span className="text-ink-3" aria-live="polite">
               {uploading ? t('composer.uploading') : note}
@@ -420,6 +662,8 @@ export function Composer({
           )}
           <span id={hintId} className="hidden text-ink-3 sm:inline">
             {members ? t('composer.hintMentions') : attachable ? t('composer.hintAttach') : t('composer.hint')}
+            {' · '}
+            {t('composer.commands.hint')}
           </span>
         </div>
       </div>

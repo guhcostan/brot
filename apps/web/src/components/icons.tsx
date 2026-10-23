@@ -93,6 +93,14 @@ export const Download = ({ size }: { size?: number }) => (
   </Icon>
 );
 
+/** A microphone: dictate into the composer. */
+export const Mic = ({ size }: { size?: number }) => (
+  <Icon size={size}>
+    <rect x="7.25" y="3" width="5.5" height="9" rx="2.75" />
+    <path d="M4.75 9.5a5.25 5.25 0 0 0 10.5 0M10 14.75V17" />
+  </Icon>
+);
+
 /** Three dots: the overflow menu. */
 export const More = ({ size }: { size?: number }) => (
   <Icon size={size}>

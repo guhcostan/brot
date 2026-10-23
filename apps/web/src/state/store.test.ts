@@ -258,3 +258,16 @@ describe('app store teams', () => {
     expect(state.teams.find((entry) => entry.id === 't2')?.chiefBotId).toBe('b');
   });
 });
+
+describe('app store room titles', () => {
+  it("keeps a room's thread title in step with a rename", () => {
+    const roomThread = thread('room_1', 'a', 'Old room');
+    let state = appReducer(initialAppState, {
+      type: 'rooms-loaded',
+      rooms: [{ thread: { ...roomThread, kind: 'room' }, memberIds: ['a', 'b'] }],
+    });
+    state = appReducer(state, { type: 'thread-updated', thread: { ...roomThread, title: 'Renamed room', kind: 'room' } });
+
+    expect(state.rooms[0]?.thread.title).toBe('Renamed room');
+  });
+});

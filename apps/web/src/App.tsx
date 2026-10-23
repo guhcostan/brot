@@ -28,6 +28,7 @@ import { GettingStartedPanel } from './components/GettingStartedPanel';
 import {
   readGettingStartedDismissed,
   shouldAutoOpenGettingStarted,
+  workspaceLoadKnown,
   workspaceLooksFresh,
   writeGettingStartedDismissed,
 } from './onboarding';
@@ -99,13 +100,24 @@ export function App(): ReactElement {
     setGettingStartedDismissalLoaded(true);
   }, []);
   const { state, select, openBot, newThread, loadThreads, loadHistory, send, sendToRoom, decide, createRoom, createTask, cancelTask, updateBot, createTeam, updateTeam, deleteTeam } = chat;
-  const workspaceFresh = workspaceLooksFresh({ rooms: state.rooms, threadLists: state.threadLists });
+  const gettingStartedLoad = {
+    bots: state.ready ? state.bots : null,
+    rooms: state.roomsLoaded ? state.rooms : null,
+    threadLists: state.threadLists,
+  };
+  const gettingStartedLoadKnown = workspaceLoadKnown(gettingStartedLoad);
+  const workspaceFresh = workspaceLooksFresh(gettingStartedLoad);
+  const gettingStartedDecided = useRef(false);
   useEffect(() => {
-    if (!state.ready || !gettingStartedDismissalLoaded) return;
+    // Decide once per load: if the workspace is still unknown, wait; once every input is known, either open
+    // or never auto-open again this session (even if a late render makes a partial check look fresh).
+    if (gettingStartedDecided.current) return;
+    if (!state.ready || !state.roomsLoaded || !gettingStartedDismissalLoaded || !gettingStartedLoadKnown) return;
+    gettingStartedDecided.current = true;
     if (shouldAutoOpenGettingStarted({ fresh: workspaceFresh, dismissed: gettingStartedDismissed, remindLater: gettingStartedRemindLater })) {
       setGettingStartedOpen(true);
     }
-  }, [state.ready, gettingStartedDismissalLoaded, workspaceFresh, gettingStartedDismissed, gettingStartedRemindLater]);
+  }, [state.ready, state.roomsLoaded, gettingStartedDismissalLoaded, gettingStartedLoadKnown, workspaceFresh, gettingStartedDismissed, gettingStartedRemindLater]);
   const [pane, setPane] = useState<Pane>('thread');
   const [locale, setLocaleState] = useState<Locale>(getLocale);
   const [theme, setThemeState] = useState<Theme>(getTheme);
@@ -199,6 +211,54 @@ export function App(): ReactElement {
     closeGettingStarted();
     goTo({ kind: 'settings' });
   };
+
+  /** Runs one composer slash command against the thread the person is looking at. */
+  const runSlashCommand = useCallback(
+    async (input: { room: boolean; botId?: string; threadId: string; name: string; args: string }): Promise<string | null> => {
+      const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
+      if (input.name === 'new') {
+        if (input.room) return t('composer.commands.roomUnavailable');
+        if (input.botId === undefined) return t('composer.commands.unavailable');
+        try {
+          await chat.newThread(input.botId);
+          return null;
+        } catch (error) {
+          return messageOf(error);
+        }
+      }
+      if (input.name === 'rename') {
+        const title = input.args.trim();
+        if (title === '') return t('composer.commands.renameUsage');
+        try {
+          await chat.updateThread(input.threadId, { title });
+          return null;
+        } catch (error) {
+          return messageOf(error);
+        }
+      }
+      if (input.name === 'model') {
+        if (input.room) return t('composer.commands.roomUnavailable');
+        try {
+          await chat.updateThread(input.threadId, { model: input.args === 'default' ? null : input.args });
+          return null;
+        } catch (error) {
+          return messageOf(error);
+        }
+      }
+      if (input.name === 'stop') {
+        const runIds = Object.keys(state.threads[input.threadId]?.activeRuns ?? {});
+        if (runIds.length === 0) return t('composer.commands.stopNothing');
+        try {
+          await Promise.all(runIds.map((runId) => client.cancelRun(runId)));
+          return null;
+        } catch (error) {
+          return messageOf(error);
+        }
+      }
+      return t('composer.commands.unknown', { command: `/${input.name}` });
+    },
+    [chat, client, state.threads],
+  );
 
   const startThread = useCallback(
     async (botId: string) => {
@@ -361,6 +421,7 @@ export function App(): ReactElement {
         onOpenContext={openContext}
         onDeleteRoom={deleteRoom}
         voice={voice}
+        onCommand={(name, args) => runSlashCommand({ room: true, threadId: room.thread.id, name, args })}
       />
     );
   } else if (bot && selectedThreadId !== null) {
@@ -373,6 +434,7 @@ export function App(): ReactElement {
         loadProviders={client.listProviders}
         onPickThreadModel={(model) => chat.updateThread(selectedThreadId, { model })}
         voice={voice}
+        onCommand={(name, args) => runSlashCommand({ room: false, botId: bot.id, threadId: selectedThreadId, name, args })}
         thread={state.threads[selectedThreadId] ?? emptyThread}
         loaded={state.threads[selectedThreadId] !== undefined}
         status={statusOfBot(state, bot.id)}

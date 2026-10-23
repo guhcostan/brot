@@ -19,7 +19,8 @@ const noop = async () => undefined;
 const upload = async (file: File): Promise<Attachment> => ({ ...uploaded, name: file.name, size: file.size });
 
 /** Server markup escapes quotes, so compare against the decoded text. */
-const textOf = (html: string): string => html.replaceAll('&#x27;', "'").replaceAll('&quot;', '"');
+const textOf = (html: string): string =>
+  html.replaceAll('&#x27;', "'").replaceAll('&quot;', '"').replaceAll('&lt;', '<').replaceAll('&gt;', '>').replaceAll('&amp;', '&');
 
 const sendButton = (html: string): string => html.match(/<button[^>]*aria-label="Send"[^>]*>/)?.[0] ?? '';
 
@@ -73,5 +74,59 @@ describe('composer attachments', () => {
 
     expect(html).not.toContain(`aria-label="${t('composer.attach')}"`);
     expect(textOf(html)).toContain(t('composer.hint'));
+  });
+});
+
+describe('composer slash commands', () => {
+  it('lists every command when /help opens the list', () => {
+    const text = textOf(render({ initialHelpOpen: true }));
+
+    expect(text).toContain(t('composer.commands.menuLabel'));
+    expect(text).toContain('/help');
+    expect(text).toContain('/new');
+    expect(text).toContain('/rename <title>');
+    expect(text).toContain('/model <provider>/<model> | default');
+    expect(text).toContain('/stop');
+    for (const key of ['helpDesc', 'newDesc', 'renameDesc', 'modelDesc', 'stopDesc'] as const) {
+      expect(text).toContain(t(`composer.commands.${key}`));
+    }
+  });
+
+  it('shows suggestions while a slash prefix is typed', () => {
+    const text = textOf(render({ initialDraft: '/re' }));
+
+    expect(text).toContain('/rename <title>');
+    expect(text).toContain(t('composer.commands.renameDesc'));
+  });
+
+  it('shows an inline hint for an unknown command', () => {
+    const text = textOf(render({ initialCommandHint: t('composer.commands.unknown', { command: '/wat' }) }));
+
+    expect(text).toContain('Unknown command: /wat. Try /help.');
+    expect(text).toContain('role="alert"');
+  });
+});
+
+describe('composer dictation', () => {
+  it('offers the mic button when dictation may be available', () => {
+    const html = render();
+
+    const mic = html.match(new RegExp(`<button[^>]*aria-label="${t('composer.dictate')}"[^>]*>`))?.[0] ?? '';
+    expect(mic).not.toBe('');
+    expect(mic).not.toContain('disabled=""');
+  });
+
+  it('renders a disabled mic with the reason when unsupported', () => {
+    const html = render({ initialDictation: 'unsupported' });
+
+    expect(html).toContain(`aria-label="${t('composer.dictationUnsupported')}"`);
+    expect(html).toMatch(new RegExp(`<button[^>]*disabled=""[^>]*aria-label="${t('composer.dictationUnsupported')}"`));
+  });
+
+  it('shows the listening state with a stop affordance', () => {
+    const html = render({ initialDictation: 'listening' });
+
+    expect(html).toContain(`aria-label="${t('composer.dictationStop')}"`);
+    expect(html).toContain('aria-pressed="true"');
   });
 });

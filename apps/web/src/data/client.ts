@@ -446,6 +446,8 @@ export interface BrotClient {
 
   /** Full-text message search, newest first; snippets are plain text. */
   searchMessages(filter: MessageSearchFilter): Promise<SearchHit[]>;
+  /** Stops a running run; the server reports it as a failed run so the transcript shows the cancellation. */
+  cancelRun(runId: string): Promise<void>;
 
   /** Voice settings and whether they can speak right now. */
   getVoiceSettings(): Promise<VoiceInfo>;

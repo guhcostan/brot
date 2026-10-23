@@ -1,7 +1,7 @@
 import type { Approval, Bot, CanonicalEvent, Message, Run, Task, Thread } from '@brot/protocol';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { BotEvent } from './client';
-import { createHttpClient, type EventStream, type FetchLike } from './httpClient';
+import { createHttpClient, RECENT_EVENT_LIMIT, type EventStream, type FetchLike } from './httpClient';
 
 const at = '2026-10-19T09:00:00.000Z';
 const later = (seconds: number) => new Date(Date.parse(at) + seconds * 1000).toISOString();
@@ -655,5 +655,93 @@ describe('team routes', () => {
       { threadId: 'room_1', roomId: 'room_1', event: roomEvent },
       { threadId: 'thr_far', event: taskEvent },
     ]);
+  });
+});
+
+describe('live event replay dedupe', () => {
+  const event = (id: string, content = 'Done'): CanonicalEvent => messageCompleted(id, content);
+
+  async function connected() {
+    const { fetch } = fakeFetch((call) => (call.path === '/api/bots/bot_1/threads' ? json([thread('thr_1')]) : json([])));
+    const client = createHttpClient({ fetch, EventSource: FakeEventSource });
+    const received: string[] = [];
+    const stop = client.onEvent((item) => received.push(item.event.id));
+    await client.listThreads('bot_1');
+    return { client, received, stop };
+  }
+
+  it('delivers a frame emitted twice only once', async () => {
+    const { received } = await connected();
+    const source = FakeEventSource.created[0];
+
+    source?.send('message.completed', JSON.stringify(event('evt_dup')));
+    source?.send('message.completed', JSON.stringify(event('evt_dup')));
+    await flush();
+
+    expect(received).toEqual(['evt_dup']);
+  });
+
+  it('dedupes by id, not by type or time', async () => {
+    const { received } = await connected();
+    const source = FakeEventSource.created[0];
+
+    source?.send('message.completed', JSON.stringify(event('evt_same')));
+    source?.send('run.completed', JSON.stringify({ id: 'evt_same', at, threadId: 'thr_1', type: 'run.completed' }));
+    await flush();
+
+    expect(received).toEqual(['evt_same']);
+  });
+
+  it('delivers each new id normally', async () => {
+    const { received } = await connected();
+    const source = FakeEventSource.created[0];
+
+    for (const id of ['a1', 'a2', 'a3']) source?.send('message.completed', JSON.stringify(event(id)));
+    await flush();
+
+    expect(received).toEqual(['a1', 'a2', 'a3']);
+  });
+
+  it('drops replayed frames after a reconnect and keeps delivering new ones', async () => {
+    const { client, received, stop } = await connected();
+    const first = FakeEventSource.created[0];
+    first?.send('message.completed', JSON.stringify(event('A')));
+    first?.send('message.completed', JSON.stringify(event('B')));
+    await flush();
+    expect(received).toEqual(['A', 'B']);
+    expect(first?.closed).toBe(false);
+
+    stop();
+    expect(first?.closed).toBe(true);
+
+    const stopAgain = client.onEvent((item) => received.push(item.event.id));
+    const second = FakeEventSource.created[1];
+    expect(second?.url).toBe('/api/events');
+    second?.send('message.completed', JSON.stringify(event('B')));
+    second?.send('message.completed', JSON.stringify(event('C')));
+    await flush();
+
+    expect(received).toEqual(['A', 'B', 'C']);
+    stopAgain();
+  });
+
+  it('delivers an id again only after it was evicted by newer events', async () => {
+    const { received } = await connected();
+    const source = FakeEventSource.created[0];
+
+    // One past the limit, so the oldest id (evt_0) has been evicted.
+    for (let index = 0; index <= RECENT_EVENT_LIMIT; index += 1) {
+      source?.send('message.completed', JSON.stringify(event(`evt_${index}`)));
+    }
+    await flush();
+    expect(received).toHaveLength(RECENT_EVENT_LIMIT + 1);
+
+    source?.send('message.completed', JSON.stringify(event('evt_0')));
+    source?.send('message.completed', JSON.stringify(event('evt_fresh')));
+    await flush();
+
+    expect(received).toHaveLength(RECENT_EVENT_LIMIT + 3);
+    expect(received.at(-2)).toBe('evt_0');
+    expect(received.at(-1)).toBe('evt_fresh');
   });
 });

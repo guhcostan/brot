@@ -27,10 +27,30 @@ export function writeGettingStartedDismissed(dismissed = true): boolean {
   }
 }
 
-/** A workspace looks fresh until it has a room or a bot thread list with anything in it. */
-export function workspaceLooksFresh(input: { rooms: readonly Room[]; threadLists: Readonly<Record<string, readonly unknown[]>> }): boolean {
-  if (input.rooms.length > 0) return false;
-  return Object.values(input.threadLists).every((threads) => threads.length === 0);
+/** The loaded state freshness is judged from; null means "not known yet", which is never fresh. */
+export interface WorkspaceLoadState {
+  bots: readonly Bot[] | null;
+  rooms: readonly Room[] | null;
+  threadLists: Readonly<Record<string, readonly unknown[]>>;
+}
+
+/**
+ * Whether the workspace state is known enough to decide freshness: bots and rooms have loaded, and every
+ * non-archived bot's thread list has arrived. Unknown state is not fresh, so the panel never auto-opens early.
+ */
+export function workspaceLoadKnown(input: WorkspaceLoadState): boolean {
+  if (input.bots === null || input.rooms === null) return false;
+  return input.bots.filter((bot) => !bot.archived).every((bot) => input.threadLists[bot.id] !== undefined);
+}
+
+/**
+ * A workspace looks fresh only when its state is fully known: no rooms, and every non-archived bot has a
+ * loaded thread list with nothing in it. Any unknown piece or any conversation makes it not fresh.
+ */
+export function workspaceLooksFresh(input: WorkspaceLoadState): boolean {
+  if (!workspaceLoadKnown(input)) return false;
+  if (input.rooms !== null && input.rooms.length > 0) return false;
+  return (input.bots ?? []).filter((bot) => !bot.archived).every((bot) => (input.threadLists[bot.id] ?? []).length === 0);
 }
 
 /** Whether the panel should open by itself: fresh, not permanently dismissed, not reminded later. */

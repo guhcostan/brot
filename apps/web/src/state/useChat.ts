@@ -158,7 +158,11 @@ export function useChat(client: BrotClient) {
     loadBots.catch((error: unknown) => {
       if (active) dispatch({ type: 'failed', message: messageOf(error) });
     });
-    for (const optional of [loadRooms, loadTasks, loadTeams]) {
+    loadRooms.catch((error: unknown) => {
+      console.warn('The room list did not load', error);
+      if (active) dispatch({ type: 'rooms-loaded', rooms: stateRef.current.rooms });
+    });
+    for (const optional of [loadTasks, loadTeams]) {
       optional.catch((error: unknown) => console.warn('Team data did not load', error));
     }
 
