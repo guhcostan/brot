@@ -38,8 +38,13 @@ const BOT_ID = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/;
 const ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const LOG_ARGS = ['--log-driver', 'json-file', '--log-opt', 'max-size=10m', '--log-opt', 'max-file=3'];
 
+/** Whether an id can be used as (part of) a docker object name. */
+export function isBotId(botId: string): boolean {
+  return BOT_ID.test(botId);
+}
+
 export function assertBotId(botId: string): string {
-  if (!BOT_ID.test(botId)) throw new Error('bot id cannot be used as a container name');
+  if (!isBotId(botId)) throw new Error('bot id cannot be used as a container name');
   return botId;
 }
 

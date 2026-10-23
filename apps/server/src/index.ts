@@ -1,10 +1,17 @@
 import { type ServerType, serve } from '@hono/node-server';
 import { createEngineRegistry, defaultEngines, type EngineRegistry } from '@brot/engines';
 import type { Repos } from '@brot/db';
+import { homedir } from 'node:os';
 import type { Server } from 'node:http';
+import { join, resolve as resolvePath } from 'node:path';
 import type { Hono } from 'hono';
 import { createApp } from './app';
-import { createDockerComputerProvider, createHostComputerProvider } from './computers';
+import {
+  createDockerComputerProvider,
+  createHostComputerProvider,
+  sweepOrphanedSandboxContainers,
+  type OrphanSweepOptions,
+} from './computers';
 import { createBrotMcp } from './mcp';
 import { createTeamTools } from './team';
 import type { AppEnv, Bindings } from './auth';
@@ -25,6 +32,12 @@ export interface StartOptions extends ConfigOverrides {
   team?: ServiceExtras['team'];
   /** Model relay options: extra providers and the outbound HTTP. Absent: seeded providers and `providers.json`. */
   llm?: ServiceExtras['llm'];
+  /**
+   * Reclaim `brot-computer-*` / `brot-egress-*` containers whose bot is gone or no longer uses a sandbox.
+   * Defaults to on only for the canonical `~/.brot` home, because containers are machine-global and a test or
+   * custom home shares the daemon with the real installation. Pass `{ exec }` in tests, `false` to opt out.
+   */
+  orphanSweep?: false | OrphanSweepOptions;
 }
 
 export interface ServerHandle {
@@ -37,7 +50,7 @@ export interface ServerHandle {
 
 /** Starts the API and the webhook receiver. Pass port 0 to let the OS choose a free port. */
 export async function startServer(options: StartOptions = {}): Promise<ServerHandle> {
-  const { engines: engineOverride, computers, mcp, team, llm, ...overrides } = options;
+  const { engines: engineOverride, computers, mcp, team, llm, orphanSweep, ...overrides } = options;
   const config = loadConfig(process.env, overrides);
   const services = await createServices(config, engineOverride ?? createEngineRegistry(defaultEngines()), {
     computers: computers ?? {
@@ -56,6 +69,11 @@ export async function startServer(options: StartOptions = {}): Promise<ServerHan
   if (recovered > 0) console.warn(`marked ${recovered} interrupted run(s) as failed`);
   await services.scheduler.sync();
   await sweepOrphanedAttachments(services);
+  const sweep = orphanSweep ?? (isCanonicalHome(config.home) ? {} : false);
+  if (sweep !== false) {
+    // Housekeeping only: a docker problem or a slow container must never delay the API from listening.
+    void sweepOrphanedSandboxContainers({ repos: services.repos, ...sweep }).catch(() => undefined);
+  }
 
   const app = createApp({ ...services, trustLoopback: true });
   const webhooks = createWebhookApp(services);
@@ -108,6 +126,15 @@ async function seedFirstBot(repos: Repos): Promise<void> {
     computer: 'none',
     instructions: 'You are Capy, a calm and capable chief of staff.',
   });
+}
+
+/**
+ * Containers are machine-global, so only the machine's canonical installation reclaims them. A test or custom
+ * BROT_HOME shares the same docker daemon with the real installation and must not delete its containers;
+ * `StartOptions.orphanSweep` opts such a home in explicitly.
+ */
+function isCanonicalHome(home: string): boolean {
+  return resolvePath(home) === resolvePath(join(homedir(), '.brot'));
 }
 
 type Fetch = (request: Request, env: Bindings) => Response | Promise<Response>;

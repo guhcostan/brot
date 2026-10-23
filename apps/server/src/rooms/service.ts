@@ -48,8 +48,8 @@ export interface RoomService {
 }
 
 /**
- * Room operations. The baton is kept in memory: it lasts until the next message in its room or the server
- * restarts, whichever comes first.
+ * Room operations. The handoff baton is stored in `room_batons`, so it survives a server restart: whoever holds
+ * it answers the room's next unmentioned message, and it is cleared once it is used or its holder leaves.
  */
 export function createRoomService(deps: {
   repos: Repos;
@@ -59,7 +59,6 @@ export function createRoomService(deps: {
   decider?: RoomDecider;
 }): RoomService {
   const { repos, bus } = deps;
-  const batons = new Map<string, string>();
 
   /** The bots in a room, archived ones included. */
   async function memberBots(threadId: string): Promise<Bot[]> {
@@ -188,9 +187,9 @@ export function createRoomService(deps: {
 
       const responder = thread.responder ?? 'lead';
       const leadBotId = thread.leadBotId ?? thread.botId;
-      const baton = batons.get(thread.id);
+      const baton = await repos.roomBatons.get(thread.id);
       const batonHolds = baton !== undefined && memberIds.has(baton);
-      if (baton !== undefined && !batonHolds) batons.delete(thread.id);
+      if (baton !== undefined && !batonHolds) await repos.roomBatons.clear(thread.id);
       const fallback = (): string[] =>
         chooseResponders({
           responder: 'lead',
@@ -210,8 +209,9 @@ export function createRoomService(deps: {
         const picked = await deciderChoice(thread.id, input.content, bots);
         responders = picked !== undefined && memberIds.has(picked) ? [picked] : fallback();
       }
+      // The baton is consumed by the message it answers; a mention leaves it in place for the next one.
       if (batonHolds && baton !== undefined && mentions.length === 0 && responders[0] === baton) {
-        batons.delete(thread.id);
+        await repos.roomBatons.clear(thread.id);
       }
       return { runId: await startReplies(thread.id, message, responders), message };
     },
@@ -221,7 +221,7 @@ export function createRoomService(deps: {
       if (!thread || thread.kind !== 'room') throw new RuleViolation('a baton can only pass within a room');
       const memberIds = new Set((await repos.rooms.listMembers(threadId)).map((member) => member.botId));
       if (!memberIds.has(toBotId)) throw new RuleViolation('the baton can only pass to a room member');
-      batons.set(threadId, toBotId);
+      await repos.roomBatons.set(threadId, toBotId);
     },
   };
 }

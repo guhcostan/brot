@@ -2142,3 +2142,28 @@ describe('approval decision log', () => {
     expect(decisions.some((row) => row.id === blank.id || row.id === unresolvable.id)).toBe(false);
   });
 });
+
+describe('room batons', () => {
+  it('stores, replaces and clears the baton', async () => {
+    const { bot, thread } = await seed();
+    expect(await repos.roomBatons.get(thread.id)).toBeUndefined();
+
+    await repos.roomBatons.set(thread.id, bot.id);
+    expect(await repos.roomBatons.get(thread.id)).toBe(bot.id);
+
+    const grace = await repos.bots.create({ name: 'Grace', job: 'Ops' });
+    await repos.roomBatons.set(thread.id, grace.id);
+    expect(await repos.roomBatons.get(thread.id)).toBe(grace.id);
+
+    expect(await repos.roomBatons.clear(thread.id)).toBe(true);
+    expect(await repos.roomBatons.clear(thread.id)).toBe(false);
+    expect(await repos.roomBatons.get(thread.id)).toBeUndefined();
+  });
+
+  it('removes the baton with its thread', async () => {
+    const { bot, thread } = await seed();
+    await repos.roomBatons.set(thread.id, bot.id);
+    expect(await repos.threads.remove(thread.id)).toBe(true);
+    expect(await repos.roomBatons.get(thread.id)).toBeUndefined();
+  });
+});

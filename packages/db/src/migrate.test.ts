@@ -58,6 +58,7 @@ describe('migrate', () => {
       'messages',
       'notifications',
       'policies',
+      'room_batons',
       'room_members',
       'routine_runs',
       'routines',
@@ -72,7 +73,7 @@ describe('migrate', () => {
     ]);
 
     const applied = await handle.client.execute('SELECT COUNT(*) AS count FROM __drizzle_migrations');
-    expect(Number(applied.rows[0]?.count)).toBe(21);
+    expect(Number(applied.rows[0]?.count)).toBe(22);
   });
 
   it('adds bot presets on a fresh database', async () => {
@@ -88,6 +89,20 @@ describe('migrate', () => {
       'created_at',
       'updated_at',
     ]);
+  });
+
+  it('adds room batons on a fresh database, cascading with their room', async () => {
+    const { handle } = await tempDb();
+    await migrate(handle.db);
+
+    expect(await columnNames(handle, 'room_batons')).toEqual(['thread_id', 'bot_id', 'updated_at']);
+    const foreignKeys = await handle.client.execute('PRAGMA foreign_key_list(room_batons)');
+    expect(foreignKeys.rows.find((row) => row.from === 'thread_id')).toMatchObject({
+      table: 'threads',
+      on_delete: 'CASCADE',
+    });
+    const primaryKey = await handle.client.execute("PRAGMA table_info('room_batons')");
+    expect(primaryKey.rows.filter((row) => Number(row.pk) > 0).map((row) => row.name)).toEqual(['thread_id']);
   });
 
   it('adds saved logins on a fresh database', async () => {
@@ -1049,6 +1064,50 @@ describe('migrate', () => {
       avatar: 'capivara:black',
     });
     expect(await repos.botPresets.remove(preset.id)).toBe(true);
+  });
+
+  it('adds room batons in place on an existing database', async () => {
+    const { handle } = await tempDb();
+    const journal = JSON.parse(await readFile(join(migrationsFolder, 'meta', '_journal.json'), 'utf8')) as {
+      entries: Array<{ tag: string; when: number }>;
+    };
+    const applied = journal.entries.slice(0, 21);
+    if (applied.length !== 21 || applied[20]?.tag !== '0020_ambiguous_gwen_stacy') {
+      throw new Error('journal must start with the 0000 to 0020 migrations');
+    }
+
+    for (const entry of applied) {
+      await handle.client.executeMultiple(await readFile(join(migrationsFolder, `${entry.tag}.sql`), 'utf8'));
+    }
+    await handle.client.execute(
+      'CREATE TABLE "__drizzle_migrations" ("id" INTEGER PRIMARY KEY AUTOINCREMENT, "hash" text NOT NULL, "created_at" numeric)',
+    );
+    for (const entry of applied) {
+      await handle.client.execute({
+        sql: 'INSERT INTO "__drizzle_migrations" ("hash", "created_at") VALUES (?, ?)',
+        args: [entry.tag, entry.when],
+      });
+    }
+    const stamp = '2026-10-19T10:00:00.000Z';
+    await handle.client.execute({
+      sql: `INSERT INTO bots (id, name, job, instructions, engine, computer, pinned, archived, created_at, updated_at)
+            VALUES ('bot_old', 'Ada', 'Researcher', '', 'mock', 'none', 0, 0, ?, ?)`,
+      args: [stamp, stamp],
+    });
+    await handle.client.execute({
+      sql: `INSERT INTO threads (id, bot_id, title, kind, created_at, updated_at)
+            VALUES ('room_old', 'bot_old', 'Old room', 'room', ?, ?)`,
+      args: [stamp, stamp],
+    });
+
+    await migrate(handle.db);
+
+    expect(await tableNames(handle)).toContain('room_batons');
+    const repos = createRepos(handle.db);
+    await repos.roomBatons.set('room_old', 'bot_old');
+    expect(await repos.roomBatons.get('room_old')).toBe('bot_old');
+    expect(await repos.threads.remove('room_old')).toBe(true);
+    expect(await repos.roomBatons.get('room_old')).toBeUndefined();
   });
 
   it('enables foreign keys on the connection', async () => {

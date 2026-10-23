@@ -389,6 +389,19 @@ export const roomMembers = sqliteTable(
 );
 
 /**
+ * A room's handoff baton: the member who answers the next message nobody mentions. One row per room; it is
+ * removed when it is used and overwritten by a new handoff. Plain `bot_id` (no FK): a deleted bot's baton is
+ * ignored and cleared by the room service because it is no longer a member.
+ */
+export const roomBatons = sqliteTable('room_batons', {
+  threadId: text('thread_id')
+    .primaryKey()
+    .references(() => threads.id, { onDelete: 'cascade' }),
+  botId: text('bot_id').notNull(),
+  updatedAt: text('updated_at').notNull(),
+});
+
+/**
  * One engine session per bot per thread. Rooms use this table so each member resumes its own session.
  * `engineSessionId` is null after a reset. The row stays so `updatedAt` still says when it changed.
  */

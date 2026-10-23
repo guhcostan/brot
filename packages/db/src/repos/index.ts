@@ -13,6 +13,7 @@ import { createMessageRepo } from './messages';
 import { createPolicyRepo } from './policies';
 import { createBotPresetRepo } from './presets';
 import { createRoomRepo } from './rooms';
+import { createRoomBatonRepo } from './room-batons';
 import { createRoutineRepo } from './routines';
 import { createRoutineRunRepo } from './routine-runs';
 import { createRunRepo } from './runs';
@@ -46,6 +47,7 @@ export function createRepos(db: Db) {
     devices: createDeviceRepo(db),
     events: createEventRepo(db),
     rooms: createRoomRepo(db),
+    roomBatons: createRoomBatonRepo(db),
     threadSessions: createThreadSessionRepo(db),
     settings: createSettingsRepo(db),
     tasks: createTaskRepo(db),
