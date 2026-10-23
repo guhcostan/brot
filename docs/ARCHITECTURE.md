@@ -70,6 +70,22 @@ interface EngineDriver {
 }
 ```
 
+### Vision (image attachments in prompts)
+Providers opt models into images per model entry in `$BROT_HOME/providers.json`:
+`{"id": "…", "vision": true}`. Every model without it is text-only; the seeded providers are text-only until a
+proxy that forwards image blocks is configured. `ResolvedRoute.vision` carries the flag for the run's attempt.
+
+- The server attaches images from **the current trigger message only**: `image/png`, `image/jpeg`, `image/webp`
+  or `image/gif`, at most **4 images** and at most **5 MiB per image**. Larger, unsupported, unreadable or extra
+  images are skipped and logged by attachment name and reason — never by content.
+- A text-only route gets no image bytes. Its prompt still lists each attachment's name, type and size, so the model
+  knows an image exists without seeing it.
+- Capability is recomputed per attempt: a fallback from a vision model to a text-only model drops the images.
+- The bytes travel in memory as base64 in `RunContext.images`; they are never persisted, never logged and never
+  part of an event. DSH sends them as ACP content blocks (`{type:"image", data, mimeType}` after the text block)
+  only on the first turn of a fresh session. A primed session stays text-only because its earlier turns already
+  hold the images. The mock engine ignores `ctx.images`.
+
 ### Permission broker
 - Every tool call passes through `broker.decide(call, botPolicy)`, which returns `allow | deny | ask`.
 - `ask` emits `approval.requested` and **suspends** the run (state persisted, so it survives restarts).
