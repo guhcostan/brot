@@ -483,12 +483,30 @@ mapped in `docs/MAUSBOT-PARITY.md` (34 bots / 7 teams, 33 bots with a browser an
 - Verified UI in headless Chrome: suggestion list and /help panel render five commands, /nope shows the
   unknown hint, /stop says no run is active, denied microphone shows the inline permission error.
 - Suite: 2425 tests (250 files) then 2434 web-relevant, typecheck 12/12, lint clean.
+## Wave 34: live browser and Docker E2E, save-as-skill (2026-10-22)
+
+- **Live host-browser run.** A DSH bot with `browser: true` and a one-host egress allowlist opened
+  https://example.com through the server's Chrome (browser_open + snapshots + scroll), read the page and
+  answered with the exact paragraph text; the run cost ~$0.006 and no approval was needed for the reads.
+- **Live Docker computer run.** A DSH bot with `computer: 'sandbox'` started its computer
+  (computer.status starting -> ready), ran `echo hello-brot > /tmp/brot.txt && cat /tmp/brot.txt` in the
+  container and answered exactly `hello-brot`; cost ~$0.002.
+- **Bug fixed (found in that run).** DELETE /api/bots/:id returned 204 but left the bot's
+  brot-computer-<id> and brot-egress-<id> containers running. The delete route now stops the sandbox and
+  host computers before removing the row (best effort, logged, still 204), and PATCH that changes a bot
+  away from the sandbox stops the old container. Verified live: containers Up before DELETE, exited right
+  after. Stale containers from the E2E were removed by hand; a boot-time orphan sweep is the follow-up.
+- **Save as a skill.** Completed assistant messages in DMs gain a bookmark action opening a prefilled
+  dialog (thread title, first assistant paragraph, last ten messages as a Markdown transcript with tool
+  lines), creating the skill for the thread's bot with inline success/errors. en/pt-BR/es.
+- Suite: 2447 tests (253 files), typecheck 12/12, lint clean.
 ## Next
 
 1. Re-run the eval suite on a live model once OpenCode Go has quota (`apps/evals`, `--base` to the server), including B8 and C; the 2026-10-20 results predate the read auto-allow and the fixes above.
 2. A live run of a desktop bot doing a web task end to end (snapshot → click → takeover on sign-in).
 3. Signed desktop builds and a first GitHub release; the site's download links point to releases.
-4. Persist the baton and takeover state; a per (thread, bot) relay URL.
+4. Persist the baton and takeover state; a per (thread, bot) relay URL; a boot-time sweep of orphaned
+   brot-computer-*/brot-egress-* containers.
 
 ## Decision: DeepSeek Harness is the only runtime (2026-10-19)
 
