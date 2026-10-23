@@ -405,6 +405,19 @@ mapped in `docs/MAUSBOT-PARITY.md` (34 bots / 7 teams, 33 bots with a browser an
 - Verified live: a $0 daily cap failed with zero tokens; a $0 run cap aborted after the first usage report
   with the exact message.
 - Suite: 2293 tests (235 files), typecheck 12/12, lint clean.
+## Wave 29: bot presets (2026-10-22)
+
+- **Presets.** A preset carries a name, job, instructions and the avatar look. GET/POST /api/presets,
+  PATCH/DELETE /api/presets/:id, and POST /api/presets/from-bot/:botId copying an existing bot under an
+  optional new name (oversized values clipped, non-conforming avatars dropped). Duplicate names allowed.
+  Migration 0020 adds bot_presets.
+- **UI.** Create dialog: a Start from a preset strip with avatar/name/job cards that applies the draft.
+  Edit dialog: Save as preset with an editable name and inline confirmation. Settings: a Bot presets section
+  to create/edit (name, job, instructions, look) and delete (consequence: existing bots are not affected);
+  shared avatar label maps extracted. en/pt-BR/es.
+- Verified live: create, from-bot copy of Teste's values, name-ordered list, rename, invalid avatar 400 and
+  deletes.
+- Suite: 2329 tests (239 files), typecheck 12/12, lint clean.
 ## Next
 
 1. Re-run the eval suite on a live model once OpenCode Go has quota (`apps/evals`, `--base` to the server), including B8 and C; the 2026-10-20 results predate the read auto-allow and the fixes above.

@@ -85,7 +85,7 @@ Legend: ✅ parity or better · 🟡 partial · ❌ absent · 🎯 current wave.
 | Attachments: images/screenshots/files in transcript, quota | ✅ | ✅ composer, transcript gallery, storage, text-in-prompt and orphan sweep | W6 done |
 | Notifications: in-app/desktop, per-bot, exact-thread routing | ✅ | ✅ inbox, unread badge, native banners, per-bot toggle | W6 done |
 | Analytics: usage ledger, decision log, admin activity, Today page | ✅ | ✅ Insights page (Today + usage + CSV); decision log and admin activity next | W8 |
-| Team sharing: `.md`/package import-export, presets, org library | ✅ | ✅ Markdown package export/import with preview in Settings; presets and org library next | W9 |
+| Team sharing: `.md`/package import-export, presets, org library | ✅ | 🟡 Markdown package export/import and bot presets are live; org library next | W9 |
 | Remote access: pairing, browser client, phone PWA, companions | ✅ | 🟡 mobile app + relay, loopback trust only | W10 |
 | Self-hosting: Docker, VPS, tunnel, backups | ✅ | 🟡 Docker + compose; no tunnel/backups | W10 |
 | Cloud (Boat), Team Cloud, enterprise/SSO | ✅ | ❌ out of scope for now (backlog: Brot Cloud) | later |
