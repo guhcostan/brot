@@ -39,6 +39,7 @@ import {
   PairingStartResponse,
   PostMessage,
   ResolveApproval,
+  myChromeEndpointIssue,
   RoomDeciderSettings,
   RoomMember,
   Routine,
@@ -56,6 +57,7 @@ import {
   UpdateBrowserProfile,
   UpdateMcpServer,
   UpdateMemory,
+  UpdateMyChromeSettings,
   UpdateRoomDeciderSettings,
   UpdateRoomMembers,
   UpdateRoutine,
@@ -79,6 +81,7 @@ import { skillFileFallbackFromId } from '../skillFileName';
 import { voiceTextAllowed } from '../voice';
 
 import {
+  MY_CHROME_DEFAULT_ENDPOINT,
   ScreenUnavailable,
   type BotEvent,
   type BrotClient,
@@ -368,7 +371,7 @@ export function createHttpClient({
     async createBot(input) {
       const parsed = CreateBot.parse(input);
       // 'ask' is the server default, so it is not sent: only an explicit 'edits' travels.
-      const { approvalMode, speakReplies, mcpServerIds, fallbackModels, runBudgetUsd, dailyBudgetUsd, ...defaults } = parsed;
+      const { approvalMode, speakReplies, mcpServerIds, fallbackModels, runBudgetUsd, dailyBudgetUsd, browserMode, ...defaults } = parsed;
       const body = {
         ...(approvalMode === 'edits' ? { approvalMode } : {}),
         ...(speakReplies ? { speakReplies: true } : {}),
@@ -376,6 +379,7 @@ export function createHttpClient({
         ...(fallbackModels === undefined || fallbackModels === null || fallbackModels.length === 0 ? {} : { fallbackModels }),
         ...(typeof runBudgetUsd === 'number' ? { runBudgetUsd } : {}),
         ...(typeof dailyBudgetUsd === 'number' ? { dailyBudgetUsd } : {}),
+        ...(browserMode === 'my-chrome' ? { browserMode } : {}),
         ...defaults,
       };
       const response = await write('POST', '/api/bots', body);
@@ -755,6 +759,19 @@ export function createHttpClient({
       return parseBrowserStatus(await response.json());
     },
 
+    async getMyChrome() {
+      const response = await request('/api/my-chrome', { headers: { Accept: 'application/json' } });
+      return parseMyChromeStatus(await response.json());
+    },
+
+    async updateMyChrome(input) {
+      const body = UpdateMyChromeSettings.parse(input);
+      const issue = myChromeEndpointIssue(body.endpoint);
+      if (issue !== undefined) throw new Error(issue);
+      const response = await write('PUT', '/api/my-chrome', body);
+      return parseMyChromeStatus(await response.json());
+    },
+
     async startBrowserLogin(botId) {
       const response = await write('POST', `${botPath(botId)}/browser/login`, {});
       return parseBrowserStatus(await response.json());
@@ -1004,6 +1021,30 @@ export function parseProviders(value: unknown): Provider[] {
       }),
     };
   });
+}
+
+/** Validates `GET /api/my-chrome`; an empty endpoint falls back to the protocol default. */
+export function parseMyChromeStatus(value: unknown): import('./client').MyChromeStatus {
+  const record = typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {};
+  const settings = typeof record.settings === 'object' && record.settings !== null ? (record.settings as Record<string, unknown>) : {};
+  return {
+    settings: {
+      endpoint: typeof settings.endpoint === 'string' && settings.endpoint !== '' ? settings.endpoint : MY_CHROME_DEFAULT_ENDPOINT,
+      ...(typeof settings.updatedAt === 'string' ? { updatedAt: settings.updatedAt } : {}),
+    },
+    available: record.available === true,
+    ...(typeof record.reason === 'string' ? { reason: record.reason } : {}),
+    ...(typeof record.automation === 'boolean' ? { automation: record.automation } : {}),
+    ...(typeof record.hint === 'string' ? { hint: record.hint } : {}),
+    ...(typeof record.browser === 'object' && record.browser !== null
+      ? (() => {
+          const browser = record.browser as Record<string, unknown>;
+          return typeof browser.version === 'string' && typeof browser.userAgent === 'string'
+            ? { browser: { version: browser.version, userAgent: browser.userAgent } }
+            : {};
+        })()
+      : {}),
+  };
 }
 
 /** Validates `GET /api/bots/:id/computer`. */

@@ -3,6 +3,7 @@ import type { Device, PairingStartResponse } from '@brot/protocol';
 import { BotAvatar, Button, Skeleton, cx } from '@brot/ui';
 import type { BrowserProfile, Provider } from '../data/client';
 import type { RoomDeciderSettings } from '@brot/protocol';
+import type { MyChromeStatus } from '../data/client';
 import type { McpServer, Memory, SavedLogin, Team } from '@brot/protocol';
 import type { BotPreset } from '@brot/protocol';
 import type { Decision } from '../data/client';
@@ -17,6 +18,7 @@ import { Check, Phone, Trash } from './icons';
 import { LanguageSwitcher } from './LanguageSwitcher';
 import { BrowserProfiles } from './BrowserProfiles';
 import { McpServers } from './McpServers';
+import { MyChromeSection } from './MyChromeSection';
 import { SavedLogins } from './SavedLogins';
 import { AboutMeSection } from './AboutMeSection';
 import { ActivitySection } from './ActivitySection';
@@ -48,6 +50,8 @@ export interface SettingsViewProps {
   initialProviders?: Provider[];
   /** Room routing settings before the client load resolves, e.g. in an SSR render. */
   initialRoomDecider?: RoomDeciderSettings;
+  /** My Chrome status before the client load resolves, e.g. in an SSR render. */
+  initialMyChrome?: MyChromeStatus;
   /** Called after the voice settings change, so the app can refresh listen availability. */
   onVoiceChanged?: () => void;
   /** Teams for the export scope before the client load resolves, e.g. in an SSR render. */
@@ -66,7 +70,7 @@ const THEME_LABEL: Record<Theme, TranslationKey> = {
   dark: 'settings.theme.dark',
 };
 
-export function SettingsView({ locale, onLocaleChange, theme, onThemeChange, onOpenBots, initialBrowserProfiles, initialMcpServers, initialSavedLogins, initialVoice, initialSecretNames, initialWorkspaceMemories, initialBotPresets, initialDecisions, initialProviders, initialRoomDecider, onVoiceChanged, initialTeams, initialTeamPackageContent }: SettingsViewProps): ReactElement {
+export function SettingsView({ locale, onLocaleChange, theme, onThemeChange, onOpenBots, initialBrowserProfiles, initialMcpServers, initialSavedLogins, initialVoice, initialSecretNames, initialWorkspaceMemories, initialBotPresets, initialDecisions, initialProviders, initialRoomDecider, initialMyChrome, onVoiceChanged, initialTeams, initialTeamPackageContent }: SettingsViewProps): ReactElement {
   return (
     <section className="flex min-h-0 min-w-0 flex-1 flex-col bg-bg">
       <PaneHeader onOpenBots={onOpenBots}>
@@ -81,6 +85,9 @@ export function SettingsView({ locale, onLocaleChange, theme, onThemeChange, onO
           <DesktopNotifications />
           <Section title={t('settings.browserProfiles')} description={t('settings.browserProfilesBody')}>
             <BrowserProfiles initialProfiles={initialBrowserProfiles} />
+          </Section>
+          <Section title={t('settings.myChrome')} description={t('settings.myChromeBody')}>
+            <MyChromeSection initialStatus={initialMyChrome} />
           </Section>
           <Section title={t('settings.savedLogins')} description={t('settings.savedLoginsBody')}>
             <SavedLogins initialLogins={initialSavedLogins} />

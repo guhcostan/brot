@@ -14,6 +14,7 @@ import type {
   Memory,
   McpServer,
   Message,
+  MyChromeSettings,
   Notification,
   PostMessage,
   ResolveApproval,
@@ -46,6 +47,8 @@ import {
   DecisionQuery,
   DESKTOP_HEIGHT,
   DESKTOP_WIDTH,
+  myChromeEndpointIssue,
+  UpdateMyChromeSettings,
   MAX_ROOM_BOTS,
   MIN_ROOM_BOTS,
   ImportSkill,
@@ -72,6 +75,7 @@ import {
   sanitizeAttachmentName,
 } from '@brot/protocol';
 import {
+  MY_CHROME_DEFAULT_ENDPOINT,
   ScreenUnavailable,
   type BotEvent,
   type BrotClient,
@@ -122,11 +126,22 @@ import { findMentions } from '../mentions';
 import { skillFileFilename } from '../skillFileName';
 
 
+
 import { buildSearchSnippet } from '../search';
 import { DEFAULT_SYSTEM_VOICE, silentWavBlob, voiceTextAllowed } from '../voice';
 
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 const now = () => new Date().toISOString();
+
+/** The demo's reachability rule: the Chrome on the default endpoint is listening; other ports are not. */
+function myChromeStatus(settings: MyChromeSettings): import('./client').MyChromeStatus {
+  const available = settings.endpoint === MY_CHROME_DEFAULT_ENDPOINT;
+  return {
+    settings: structuredClone(settings),
+    available,
+    ...(available ? {} : { reason: 'Chrome is not listening on that endpoint.' }),
+  };
+}
 
 /** When the demo team's threads were last active. */
 const SEEDED_AT = '2026-10-19T07:00:00.000Z';
@@ -301,6 +316,7 @@ export function createMockClient(): BrotClient {
   };
   const providers = DEMO_PROVIDERS.map((provider) => structuredClone(provider));
   let roomDecider: RoomDeciderSettings = {};
+  let myChrome: MyChromeSettings = { endpoint: MY_CHROME_DEFAULT_ENDPOINT };
 
   /** The server's fallback rules: at most 3 ordered refs, no repeats, each a known `<provider>/<model>`. */
   const validateFallbackModels = (models: readonly string[]): void => {
@@ -1756,6 +1772,18 @@ export function createMockClient(): BrotClient {
     async browserStatus(botId) {
       const bot = hostBrowserOf(botId);
       return { state: browserStateOf(bot), profile: browserProfileRefOf(bot) };
+    },
+
+    getMyChrome() {
+      return Promise.resolve(myChromeStatus(myChrome));
+    },
+
+    async updateMyChrome(input) {
+      const body = UpdateMyChromeSettings.parse(input);
+      const issue = myChromeEndpointIssue(body.endpoint);
+      if (issue !== undefined) throw new Error(issue);
+      myChrome = { endpoint: body.endpoint, updatedAt: now() };
+      return myChromeStatus(myChrome);
     },
 
     async startBrowserLogin(botId) {

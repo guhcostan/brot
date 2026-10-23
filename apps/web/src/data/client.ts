@@ -20,6 +20,7 @@ import type {
   McpServer,
   McpServerTestResult,
   Memory,
+  MyChromeSettings,
   Notification,
   PairingStartResponse,
   PostMessage,
@@ -46,6 +47,7 @@ import type {
   UpdateBrowserProfile,
   UpdateMcpServer,
   UpdateMemory,
+  UpdateMyChromeSettings as UpdateMyChromeSettingsInput,
   UpdateRoomDeciderSettings,
   UpdateRoomMembers,
   UpdateRoutine,
@@ -91,6 +93,7 @@ export type {
   UpdateBrowserProfile,
   UpdateMcpServer,
   UpdateMemory,
+  UpdateMyChromeSettings as UpdateMyChromeSettingsInput,
   UpdateRoutine,
   UpdateSavedLogin,
   UpdateSkill,
@@ -188,6 +191,33 @@ export type { Decision } from '@brot/protocol';
 
 /** The optional model that picks which member answers in an auto room. */
 export type { RoomDeciderSettings, UpdateRoomDeciderSettings } from '@brot/protocol';
+
+/** The person's own Chrome as a browser source for host-browser bots. */
+export type { BrowserMode, MyChromeSettings, UpdateMyChromeSettings } from '@brot/protocol';
+
+/**
+ * Brot's My Chrome default endpoint. It is 9333 on purpose: port 9222 is commonly taken by other automation
+ * browsers (other agent tools listen there). Re-exported under the web's historical name.
+ */
+export { DEFAULT_MY_CHROME_ENDPOINT as MY_CHROME_DEFAULT_ENDPOINT } from '@brot/protocol';
+
+/** The browser the probe actually reached, so the person can see which Chrome they are pointing at. */
+export interface MyChromeBrowserInfo {
+  version: string;
+  userAgent: string;
+}
+
+/** `GET /api/my-chrome`: the saved endpoint plus whether Brot can reach that Chrome right now. */
+export interface MyChromeStatus {
+  settings: MyChromeSettings;
+  available: boolean;
+  reason?: string;
+  browser?: MyChromeBrowserInfo;
+  /** The probe thinks this is an automation/headless browser rather than the person's own Chrome. */
+  automation?: boolean;
+  /** Server-provided guidance to show verbatim; falls back to the web copy when absent. */
+  hint?: string;
+}
 
 /** The filters the Activity log sends; `from`/`to` bound `decidedAt`. */
 export interface DecisionFilter {
@@ -399,6 +429,10 @@ export interface BrotClient {
 
   /** The bot's browser on the server machine. Throws when the bot has no host browser. */
   browserStatus(botId: string): Promise<BrowserStatus>;
+  /** The My Chrome endpoint settings plus whether that Chrome is reachable. */
+  getMyChrome(): Promise<MyChromeStatus>;
+  /** Saves the loopback CDP endpoint My Chrome should drive, then returns the fresh status. */
+  updateMyChrome(input: UpdateMyChromeSettingsInput): Promise<MyChromeStatus>;
   /** Opens a headed window so the person can sign in; the bot keeps the profile afterwards. */
   startBrowserLogin(botId: string): Promise<BrowserStatus>;
   /** Closes the browser, saving its profile. Shared profiles close for every bot using them. */

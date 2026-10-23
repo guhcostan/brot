@@ -435,3 +435,30 @@ describe('BotDialog presets', () => {
     expect(editText).toContain(t('botForm.saveAsPreset'));
   });
 });
+
+describe('BotDialog browser source', () => {
+  const browsing = { ...bot, browser: true };
+
+  it('offers own profile and My Chrome only while the browser is on', () => {
+    expect(textOf(render())).not.toContain(t('botForm.browserSource'));
+
+    const html = render({ bot: browsing });
+    const text = textOf(html);
+
+    expect(text).toContain(t('botForm.browserSource'));
+    expect(text).toContain(t('botForm.browserSourceOwn'));
+    expect(text).toContain(t('botForm.browserSourceOwnHint'));
+    expect(text).toContain(t('botForm.browserSourceMine'));
+    expect(text).toContain(t('botForm.browserSourceMineHint'));
+    expect(text).toContain(t('botForm.browserSourceMineNote'));
+    expect(html.match(/name="bot-browser-mode"/g)).toHaveLength(2);
+    expect(html).toMatch(/<input[^>]*name="bot-browser-mode"[^>]*checked=""\/>/);
+  });
+
+  it('prefills My Chrome and hides the shared profile picker', () => {
+    const text = textOf(render({ bot: { ...browsing, browserMode: 'my-chrome' } }));
+
+    expect(text).toContain(t('botForm.browserSourceMineHint'));
+    expect(text).not.toContain(t('botForm.browserProfile'));
+  });
+});

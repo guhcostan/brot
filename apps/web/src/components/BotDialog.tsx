@@ -1,5 +1,6 @@
 import { useEffect, useId, useState, type FormEvent, type KeyboardEvent, type ReactElement } from 'react';
-import { EgressHost, type ApprovalMode, type Bot, type CreateBotInput, type McpServer, type Team, type UpdateBot } from '@brot/protocol';
+import {  BrowserMode,
+ EgressHost, type ApprovalMode, type Bot, type CreateBotInput, type McpServer, type Team, type UpdateBot } from '@brot/protocol';
 import {
   AVATAR_COLOR_NAMES,
   AVATAR_SPECIES,
@@ -123,6 +124,7 @@ interface FormState {
   browser: boolean;
   /** The shared browser profile id, or an empty string for the bot's own profile. */
   browserProfileId: string;
+  browserMode: BrowserMode;
   hosts: string[];
   budget: string;
   pinned: boolean;
@@ -158,6 +160,7 @@ function initialState(bot: Bot | undefined, initialMcpMode: 'all' | 'custom' = '
       computer: 'sandbox',
       browser: false,
       browserProfileId: '',
+      browserMode: 'own',
       hosts: [],
       budget: '',
       pinned: false,
@@ -183,6 +186,7 @@ function initialState(bot: Bot | undefined, initialMcpMode: 'all' | 'custom' = '
     computer: computerOf(bot),
     browser: bot.browser === true,
     browserProfileId: bot.browserProfileId ?? '',
+    browserMode: bot.browserMode ?? 'own',
     hosts: bot.egress?.allow ?? [],
     budget: bot.teamBudgetUsd === undefined ? '' : String(bot.teamBudgetUsd),
     pinned: bot.pinned,
@@ -508,6 +512,7 @@ function BotForm({
           ...(form.model ? { engine: DSH_ENGINE, model: form.model } : {}),
           ...(budget === undefined ? {} : { teamBudgetUsd: budget }),
           ...(form.browserProfileId === '' ? {} : { browserProfileId: form.browserProfileId }),
+          ...(browser && form.browserMode === 'my-chrome' ? { browserMode: 'my-chrome' as const } : {}),
         };
         await onCreate(input);
       } else {
@@ -526,9 +531,15 @@ function BotForm({
           if (computer === 'sandbox') patch.desktop = desktop;
           if (computer === 'host') patch.hostAcknowledged = true;
         }
-        if (browserAvailable && browser !== (bot.browser === true)) {
-          patch.browser = browser;
-        } else if (!browserAvailable && form.computer !== computerOf(bot) && bot.browser === true) {
+        const storedBrowserMode = bot.browserMode ?? 'own';
+        if (browserAvailable) {
+          if (browser !== (bot.browser === true)) patch.browser = browser;
+          if (!browser) {
+            if (storedBrowserMode !== 'own') patch.browserMode = 'own';
+          } else if (form.browserMode !== storedBrowserMode) {
+            patch.browserMode = form.browserMode;
+          }
+        } else if (form.computer !== computerOf(bot) && bot.browser === true) {
           // Moving a host-browser bot to a desktop drops the browser it no longer needs.
           patch.browser = false;
         }
@@ -763,6 +774,11 @@ function BotForm({
         status={liveBrowserStatus}
         profiles={profiles}
         profileId={form.browserProfileId}
+        browserMode={form.browserMode}
+        onBrowserMode={(mode) => {
+          set('browserMode', mode);
+          if (mode === 'my-chrome') set('browserProfileId', '');
+        }}
         error={browserError}
         busy={browserBusy}
         onToggle={(value) => set('browser', value)}
@@ -1272,6 +1288,9 @@ interface BrowserPickerProps {
   profiles: BrowserProfile[] | null;
   /** The chosen shared profile id, or an empty string for the bot's own profile. */
   profileId: string;
+  /** Which browser the bot drives when the host browser is on. */
+  browserMode: BrowserMode;
+  onBrowserMode: (mode: BrowserMode) => void;
   error: string | null;
   busy: boolean;
   onToggle: (enabled: boolean) => void;
@@ -1283,7 +1302,7 @@ interface BrowserPickerProps {
 }
 
 /** Opt-in for the bot's browser on the server machine, its shared profile and its live state. */
-function BrowserPicker({ hasBrowser, enabled, desktop, status, profiles, profileId, error, busy, onToggle, onProfile, onLogin, onClose, onLiveView }: BrowserPickerProps): ReactElement {
+function BrowserPicker({ hasBrowser, enabled, desktop, status, profiles, profileId, browserMode, onBrowserMode, error, busy, onToggle, onProfile, onLogin, onClose, onLiveView }: BrowserPickerProps): ReactElement {
   const profileSelectId = useId();
   if (desktop) {
     return (
@@ -1294,7 +1313,7 @@ function BrowserPicker({ hasBrowser, enabled, desktop, status, profiles, profile
     );
   }
 
-  const live = enabled && hasBrowser;
+  const live = enabled && hasBrowser && browserMode !== 'my-chrome';
   const profileLabel = status === null ? null : status.profile.kind === 'shared' ? t('botForm.browserProfileSharedStatus', { name: status.profile.name }) : t('botForm.browserProfileOwnStatus');
   return (
     <fieldset className="m-0 flex flex-col gap-2 border-0 p-0">
@@ -1307,6 +1326,27 @@ function BrowserPicker({ hasBrowser, enabled, desktop, status, profiles, profile
         </span>
       </label>
       {enabled ? (
+        <fieldset className="m-0 flex flex-col gap-1.5 border-0 p-0">
+          <legend className="mb-1 p-0 text-sm font-medium">{t('botForm.browserSource')}</legend>
+          {(['own', 'my-chrome'] as const).map((mode) => (
+            <label key={mode} className="flex cursor-pointer items-start gap-2.5 rounded-md px-2 py-1.5 hover:bg-surface-2">
+              <input
+                type="radio"
+                name="bot-browser-mode"
+                className="room-check mt-1"
+                checked={browserMode === mode}
+                onChange={() => onBrowserMode(mode)}
+              />
+              <span className="flex flex-col gap-0.5">
+                <span className="text-sm font-medium">{t(mode === 'own' ? 'botForm.browserSourceOwn' : 'botForm.browserSourceMine')}</span>
+                <span className="text-xs text-ink-2">{t(mode === 'own' ? 'botForm.browserSourceOwnHint' : 'botForm.browserSourceMineHint')}</span>
+                {mode === 'my-chrome' ? <span className="text-xs text-ink-3">{t('botForm.browserSourceMineNote')}</span> : null}
+              </span>
+            </label>
+          ))}
+        </fieldset>
+      ) : null}
+      {enabled && browserMode === 'own' ? (
         <div className="flex flex-col gap-1">
           <label htmlFor={profileSelectId} className="text-sm font-medium">
             {t('botForm.browserProfile')}

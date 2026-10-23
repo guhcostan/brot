@@ -353,3 +353,32 @@ describe('settings room routing', () => {
     expect(textOf(html)).toContain(t('settings.roomRoutingUnsupportedBody'));
   });
 });
+
+describe('settings my chrome', () => {
+  it('shows the default endpoint and connected state', () => {
+    const html = render({
+      initialMyChrome: { settings: { endpoint: 'http://127.0.0.1:9333' }, available: true },
+    });
+    const text = textOf(html);
+
+    expect(text).toContain(t('settings.myChrome'));
+    expect(text).toContain(t('settings.myChromeBody'));
+    expect(html).toContain('value="http://127.0.0.1:9333"');
+    expect(text).toContain(t('settings.myChromeConnected'));
+  });
+
+  it('shows a configured endpoint and the unavailable reason', () => {
+    const text = textOf(
+      render({
+        initialMyChrome: {
+          settings: { endpoint: 'http://127.0.0.1:9444' },
+          available: false,
+          reason: 'Chrome is not listening on that endpoint.',
+        },
+      }),
+    );
+
+    expect(text).toContain('http://127.0.0.1:9444');
+    expect(text).toContain(t('settings.myChromeUnavailableReason', { reason: 'Chrome is not listening on that endpoint.' }));
+  });
+});
