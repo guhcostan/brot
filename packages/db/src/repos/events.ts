@@ -35,6 +35,41 @@ export function createEventRepo(db: Db) {
       return event;
     },
 
+    /** One event by id. */
+    async get(id: string): Promise<CanonicalEvent | undefined> {
+      const [row] = await db.select().from(events).where(eq(events.id, id)).limit(1);
+      return row ? toEvent(row) : undefined;
+    },
+
+    /**
+     * Events in log order strictly after the event with `afterId`, optionally for one thread. Undefined when
+     * `afterId` names no event. Ordering is `(at, rowid)`, so events sharing a timestamp are replayed completely
+     * and in log order — a resume cursor never skips or repeats one.
+     */
+    async listAfterEvent(
+      afterId: string,
+      options: { threadId?: string; limit?: number } = {},
+    ): Promise<CanonicalEvent[] | undefined> {
+      const [cursor] = await db
+        .select({ at: events.at, rowid: sql<number>`rowid` })
+        .from(events)
+        .where(eq(events.id, afterId))
+        .limit(1);
+      if (!cursor) return undefined;
+      const rows = await db
+        .select()
+        .from(events)
+        .where(
+          and(
+            options.threadId ? eq(events.threadId, options.threadId) : undefined,
+            or(gt(events.at, cursor.at), and(eq(events.at, cursor.at), gt(sql`rowid`, cursor.rowid))),
+          ),
+        )
+        .orderBy(asc(events.at), asc(sql`rowid`))
+        .limit(options.limit ?? DEFAULT_LIMIT);
+      return rows.map(toEvent);
+    },
+
     /** Events in log order. `after` is an ISO timestamp; only events strictly later are returned. */
     async list(options: { threadId?: string; after?: string; limit?: number } = {}): Promise<CanonicalEvent[]> {
       const rows = await db

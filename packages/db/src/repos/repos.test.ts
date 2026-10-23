@@ -1612,6 +1612,55 @@ describe('events after a cursor', () => {
     expect((await repos.events.listAfter(thread.id, 'evt-a', { limit: 1 }))?.map((e) => e.id)).toEqual(['evt-b']);
   });
 
+  it('gets one event by id', async () => {
+    const { thread, run } = await seed();
+    await repos.events.append({
+      id: 'evt-get',
+      at: '2026-10-19T12:00:00.000Z',
+      threadId: thread.id,
+      runId: run.id,
+      type: 'message.delta',
+      messageId: 'm1',
+      delta: 'hi',
+    });
+    expect((await repos.events.get('evt-get'))?.type).toBe('message.delta');
+    expect((await repos.events.get('nope'))).toBeUndefined();
+  });
+
+  it('lists the events strictly after an event id, including same-timestamp ties in rowid order', async () => {
+    const { bot, thread, run } = await seed();
+    const other = await repos.threads.create(bot.id, { title: 'Other' });
+    const at = '2026-10-19T12:00:00.000Z';
+    for (const id of ['tie-a', 'tie-b', 'tie-c']) {
+      await repos.events.append({
+        id,
+        at,
+        threadId: thread.id,
+        runId: run.id,
+        type: 'message.delta',
+        messageId: 'm1',
+        delta: id,
+      });
+    }
+    await repos.events.append({ id: 'later', at: '2026-10-19T12:00:01.000Z', threadId: thread.id, type: 'run.completed' });
+    await repos.events.append({ id: 'other-thread', at, threadId: other.id, type: 'run.completed' });
+
+    expect((await repos.events.listAfterEvent('tie-a'))?.map((event) => event.id)).toEqual([
+      'tie-b',
+      'tie-c',
+      'other-thread',
+      'later',
+    ]);
+    expect((await repos.events.listAfterEvent('tie-a', { threadId: thread.id }))?.map((event) => event.id)).toEqual([
+      'tie-b',
+      'tie-c',
+      'later',
+    ]);
+    expect((await repos.events.listAfterEvent('tie-c'))?.map((event) => event.id)).toEqual(['other-thread', 'later']);
+    expect((await repos.events.listAfterEvent('tie-a', { limit: 1 }))?.map((event) => event.id)).toEqual(['tie-b']);
+    expect(await repos.events.listAfterEvent('missing')).toBeUndefined();
+  });
+
   it('returns undefined for a cursor that is not in the thread', async () => {
     const { bot, thread } = await seed();
     const other = await repos.threads.create(bot.id, { title: 'Other' });

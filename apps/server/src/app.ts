@@ -1100,7 +1100,7 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     );
   });
 
-  // Live events: replays stored events after `after` (when given), then streams live ones.
+  // Live events: replays stored events after `after` (when given) or the SSE Last-Event-ID header, then streams live.
 
   app.get('/api/events', (c) => {
     const threadId = c.req.query('threadId') || undefined;
@@ -1108,6 +1108,10 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
     if (after !== undefined && !IsoDateTime.safeParse(after).success) {
       return c.json({ error: 'after must be an ISO timestamp' }, 400);
     }
+    // ?after= wins over the standard resume header, which is only consulted when `after` is absent. A malformed
+    // header is ignored: the stream simply starts live. An unknown id replays nothing, so the client refetches.
+    const resumeId = after === undefined ? c.req.header('last-event-id')?.trim() : undefined;
+    const resuming = after !== undefined || (resumeId !== undefined && resumeId !== '');
     return streamSSE(c, async (stream) => {
       let writes: Promise<unknown> = Promise.resolve();
       const enqueue = (task: () => Promise<unknown>): void => {
@@ -1123,7 +1127,7 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
       });
 
       // Subscribe before replaying so that no event falls between the replay snapshot and the live stream.
-      let replaying = after !== undefined;
+      let replaying = resuming;
       const buffered: CanonicalEvent[] = [];
       const seen = new Set<string>();
       const unsubscribe = bus.subscribe(
@@ -1152,6 +1156,20 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
           const last = page.at(-1);
           if (page.length < REPLAY_PAGE_SIZE || !last) break;
           cursor = last.at;
+        }
+      } else if (resumeId !== undefined && resumeId !== '') {
+        // The cursor event itself is never replayed: listAfterEvent is strictly after its (at, rowid).
+        let cursor: string | undefined = resumeId;
+        while (cursor !== undefined) {
+          const page = await repos.events.listAfterEvent(cursor, { threadId, limit: REPLAY_PAGE_SIZE });
+          if (page === undefined) break;
+          for (const event of page) {
+            seen.add(event.id);
+            sendEvent(event);
+          }
+          const last = page.at(-1);
+          if (page.length < REPLAY_PAGE_SIZE || last === undefined) break;
+          cursor = last.id;
         }
       }
       replaying = false;
