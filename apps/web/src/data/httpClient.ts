@@ -88,6 +88,7 @@ import {
 
 import { skillFileFallbackFromId } from '../skillFileName';
 import { parseTranscriptionStatus, validateUpdateTranscriptionSettings } from '../transcription';
+import { parseStarterTeamInstallCounts, parseStarterTeams } from '../starterTeams';
 
 import { voiceTextAllowed } from '../voice';
 
@@ -811,6 +812,16 @@ export function createHttpClient({
       if (issue !== undefined) throw new Error(issue);
       const response = await write('PUT', '/api/my-chrome', body);
       return parseMyChromeStatus(await response.json());
+    },
+
+    async listStarterTeams() {
+      const response = await request('/api/team-packages/starters', { headers: { Accept: 'application/json' } });
+      return parseStarterTeams(await response.json());
+    },
+
+    async installStarterTeam(starterId) {
+      const response = await write('POST', `/api/team-packages/starters/${encodeURIComponent(starterId)}/install`, {});
+      return parseStarterTeamInstallCounts(await response.json());
     },
 
     async listAdminActivity(filter = {}) {

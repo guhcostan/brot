@@ -305,6 +305,13 @@ export function useChat(client: BrotClient) {
     [client],
   );
 
+  /** Re-reads bots and teams after a workspace-level install (starter teams), keeping selection untouched. */
+  const reloadWorkspace = useCallback(async () => {
+    const [bots, teams] = await Promise.all([client.listBots({ includeArchived: true }), client.listTeams()]);
+    dispatch({ type: 'bots-loaded', bots });
+    dispatch({ type: 'teams-loaded', teams });
+  }, [client]);
+
   const updateRoomMembers = useCallback(
     async (roomId: string, change: { add?: string[]; remove?: string[] }) => {
       const memberIds = await client.updateRoomMembers(roomId, change);
@@ -336,5 +343,6 @@ export function useChat(client: BrotClient) {
     updateTeam,
     deleteTeam,
     updateRoomMembers,
+    reloadWorkspace,
   };
 }

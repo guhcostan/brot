@@ -135,6 +135,7 @@ import { skillFileFilename } from '../skillFileName';
 
 
 import { buildMemoryUpkeepReport } from './memoryUpkeepCompute';
+import type { StarterTeamInstallCounts, StarterTeamSummary } from '../starterTeams';
 import { modelSupportsTranscription, validateUpdateTranscriptionSettings, type TranscriptionSettings, type TranscriptionStatus } from '../transcription';
 import { buildSearchSnippet } from '../search';
 import { DEFAULT_SYSTEM_VOICE, silentWavBlob, voiceTextAllowed } from '../voice';
@@ -160,6 +161,89 @@ const nextId = (prefix: string) => `${prefix}_${(counter += 1).toString(36)}`;
 
 /** How long the seeded open question waits before Tamu answers it. */
 const OPEN_ASK_DELAY_MS = 30_000;
+
+/** Ready-made teams the demo can install; these mirror the server's built-in starter packages. */
+const STARTER_TEAMS: readonly {
+  summary: StarterTeamSummary;
+  team: { name: string; instructions: string };
+  bots: readonly { name: string; job: string }[];
+  room?: { title: string; leadIndex: number; responder: 'lead' | 'mention' };
+  routine: { botIndex: number; name: string; instruction: string; cron: string };
+  skills: readonly { name: string; description: string; body: string }[];
+}[] = [
+  {
+    summary: {
+      id: 'dev-team',
+      name: 'Dev team',
+      description: 'A chief of staff, an engineer and a reviewer who ship together and check the repository every weekday.',
+      teamCount: 1,
+      botCount: 3,
+      roomCount: 1,
+      routineCount: 1,
+      skillCount: 1,
+    },
+    team: {
+      name: 'Engineering',
+      instructions:
+        'Ship small, reviewable changes. Keep the Build room updated on what is in flight, and ask before any risky change.',
+    },
+    bots: [
+      { name: 'Capy', job: 'Chief of Staff' },
+      { name: 'Onça', job: 'Engineer' },
+      { name: 'Lobo', job: 'Reviewer' },
+    ],
+    room: { title: 'Build room', leadIndex: 0, responder: 'lead' },
+    routine: { botIndex: 1, name: 'Daily repo check', instruction: 'Check the repository and post a short summary to the Build room.', cron: '0 9 * * 1-5' },
+    skills: [{ name: 'Unified diff', description: 'How the engineering bots present changes.', body: '# Unified diff\n\nShow one focused diff.' }],
+  },
+  {
+    summary: {
+      id: 'content-studio',
+      name: 'Content studio',
+      description: 'An editor, a researcher and a social writer who turn ideas into reviewed posts.',
+      teamCount: 1,
+      botCount: 3,
+      roomCount: 1,
+      routineCount: 1,
+      skillCount: 1,
+    },
+    team: {
+      name: 'Content',
+      instructions: 'Stay in the Editorial room. Research before writing and never publish without approval.',
+    },
+    bots: [
+      { name: 'Arara', job: 'Editor' },
+      { name: 'Mico', job: 'Researcher' },
+      { name: 'Boto', job: 'Social' },
+    ],
+    room: { title: 'Editorial room', leadIndex: 0, responder: 'mention' },
+    routine: { botIndex: 0, name: 'Weekly content review', instruction: 'Review the week’s drafts and post the review in the Editorial room.', cron: '0 10 * * 1' },
+    skills: [{ name: 'Hook checklist', description: 'The questions the studio answers before any piece goes out.', body: '# Hook checklist\n\n- Who is this for?\n- What is the one claim?' }],
+  },
+  {
+    summary: {
+      id: 'ops-desk',
+      name: 'Ops desk',
+      description: 'Support triage and finance working a shared queue with a morning brief.',
+      teamCount: 1,
+      botCount: 2,
+      roomCount: 1,
+      routineCount: 1,
+      skillCount: 1,
+    },
+    team: {
+      name: 'Operations',
+      instructions: 'Work the queue in the Ops room and escalate money questions to Finance before acting.',
+    },
+    bots: [
+      { name: 'Tamu', job: 'Support triage' },
+      { name: 'Jabuti', job: 'Finance' },
+    ],
+    room: { title: 'Ops room', leadIndex: 0, responder: 'lead' },
+    routine: { botIndex: 0, name: 'Morning brief', instruction: 'Summarize yesterday’s support queue and post the brief to the Ops room.', cron: '0 8 * * 1-5' },
+    skills: [{ name: 'Refund triage', description: 'How the ops desk decides between answering, escalating and refunding.', body: '# Refund triage\n\nCheck the policy first.' }],
+  },
+];
 
 export const DEMO_PROVIDERS: Provider[] = [
   {
@@ -1165,6 +1249,93 @@ export function createMockClient(): BrotClient {
         .sort((a, b) => Date.parse(b.at) - Date.parse(a.at))
         .slice(0, query.limit)
         .map((entry) => structuredClone(entry));
+    },
+
+    async listStarterTeams() {
+      return STARTER_TEAMS.map((starter) => structuredClone(starter.summary));
+    },
+
+    async installStarterTeam(starterId) {
+      const starter = STARTER_TEAMS.find((candidate) => candidate.summary.id === starterId);
+      if (starter === undefined) throw new Error(`404 Unknown starter team: ${starterId}`);
+      const at = now();
+      const createdBots: Bot[] = starter.bots.map(({ name, job }) => {
+        const parsed = CreateBot.parse({ name, job });
+        const bot: Bot = {
+          ...parsed,
+          id: nextId('bot'),
+          egress: parsed.egress ?? defaultEgressPolicy(),
+          pinned: false,
+          archived: false,
+          createdAt: at,
+          updatedAt: at,
+        };
+        bots.set(bot.id, bot);
+        return bot;
+      });
+      const teamId = nextId('team');
+      const chief = createdBots[0];
+      teams.set(teamId, {
+        id: teamId,
+        name: starter.team.name,
+        instructions: starter.team.instructions,
+        ...(chief === undefined ? {} : { chiefBotId: chief.id }),
+        createdAt: at,
+        updatedAt: at,
+      });
+      for (const bot of createdBots) bots.set(bot.id, { ...bot, teamId });
+      if (starter.room !== undefined) {
+        const lead = createdBots[starter.room.leadIndex] ?? chief;
+        if (lead !== undefined) {
+          const roomThread: Thread = {
+            id: nextId('room'),
+            botId: lead.id,
+            title: starter.room.title,
+            kind: 'room',
+            leadBotId: lead.id,
+            responder: starter.room.responder,
+            createdAt: at,
+            updatedAt: at,
+          };
+          rooms.set(roomThread.id, { thread: roomThread, memberIds: createdBots.map((bot) => bot.id) });
+          histories.set(roomThread.id, []);
+          remember(roomThread);
+        }
+      }
+      const routineBot = createdBots[starter.routine.botIndex] ?? chief;
+      const routineId = nextId('routine');
+      routines.set(routineId, {
+        id: routineId,
+        botId: routineBot?.id ?? '',
+        name: starter.routine.name,
+        instruction: starter.routine.instruction,
+        trigger: { type: 'cron', cron: starter.routine.cron },
+        enabled: false,
+        catchUp: true,
+        rememberLastRun: false,
+        createdAt: at,
+        updatedAt: at,
+      });
+      for (const skill of starter.skills) {
+        const skillId = nextId('skill');
+        skills.set(skillId, {
+          id: skillId,
+          name: skill.name,
+          description: skill.description,
+          body: skill.body,
+          version: 1,
+          createdAt: at,
+          updatedAt: at,
+        });
+      }
+      recordAdminActivity({ action: 'created', targetType: 'team', targetId: teamId, summary: `Installed starter team ${starter.summary.name}`, actor: 'local' });
+      return {
+        teams: 1,
+        bots: createdBots.length,
+        rooms: starter.room === undefined ? 0 : 1,
+        routines: 1,
+        skills: starter.skills.length,
+      } satisfies StarterTeamInstallCounts;
     },
 
     async listMemoryJournal(filter = {}) {

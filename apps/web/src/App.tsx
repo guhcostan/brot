@@ -102,7 +102,7 @@ export function App(): ReactElement {
     setGettingStartedDismissed(readGettingStartedDismissed());
     setGettingStartedDismissalLoaded(true);
   }, []);
-  const { state, select, openBot, newThread, loadThreads, loadHistory, send, sendToRoom, decide, createRoom, createTask, cancelTask, updateBot, createTeam, updateTeam, deleteTeam } = chat;
+  const { state, select, openBot, newThread, loadThreads, loadHistory, send, sendToRoom, decide, createRoom, createTask, cancelTask, updateBot, createTeam, updateTeam, deleteTeam, reloadWorkspace } = chat;
   const gettingStartedLoad = {
     bots: state.ready ? state.bots : null,
     rooms: state.roomsLoaded ? state.rooms : null,
@@ -414,7 +414,19 @@ export function App(): ReactElement {
       />
     );
   } else if (selection?.kind === 'settings') {
-    main = <SettingsView locale={locale} onLocaleChange={changeLocale} theme={theme} onThemeChange={changeTheme} onOpenBots={openBots} onVoiceChanged={() => void loadVoice()} />;
+    main = (
+      <SettingsView
+        locale={locale}
+        onLocaleChange={changeLocale}
+        theme={theme}
+        onThemeChange={changeTheme}
+        onOpenBots={openBots}
+        onVoiceChanged={() => void loadVoice()}
+        onStarterTeamInstalled={async () => {
+          await reloadWorkspace();
+        }}
+      />
+    );
   } else if (room) {
     main = (
       <RoomView

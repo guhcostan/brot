@@ -45,6 +45,7 @@ function render(overrides: Partial<SettingsViewProps> = {}, bots = botsRecord): 
     initialBotPresets: DEMO_BOT_PRESETS,
     initialDecisions: DEMO_DECISIONS,
     initialAdminActivity: [],
+    initialStarterTeams: [],
     initialProviders: DEMO_PROVIDERS,
     initialRoomDecider: {},
     ...overrides,
@@ -323,6 +324,16 @@ describe('settings activity', () => {
     expect(text).toContain(t('settings.activityEmptyTitle'));
     expect(text).toContain(t('settings.activityEmptyBody'));
     expect(text).toContain(t('settings.activityDownload'));
+  });
+});
+
+describe('settings starter teams', () => {
+  it('includes the starter teams section with its explanation', () => {
+    const text = textOf(render());
+
+    expect(text).toContain(t('settings.starterTeams'));
+    expect(text).toContain(t('settings.starterTeamsBody'));
+    expect(text).toContain(t('settings.starterEmptyTitle'));
   });
 });
 

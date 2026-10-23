@@ -197,6 +197,9 @@ export type { Decision } from '@brot/protocol';
 /** The optional model that picks which member answers in an auto room. */
 export type { RoomDeciderSettings, UpdateRoomDeciderSettings } from '@brot/protocol';
 
+/** Ready-made teams that can be installed from Settings. */
+export type { StarterTeamInstallCounts, StarterTeamSummary } from '../starterTeams';
+
 /** One workspace change in the admin audit list. */
 export type { AdminAction, AdminActivity } from '@brot/protocol';
 
@@ -486,6 +489,11 @@ export interface BrotClient {
 
   /** Workspace admin changes (bots, settings, logins, devices...), newest first; read-only. */
   listAdminActivity(filter?: AdminActivityFilter): Promise<import('@brot/protocol').AdminActivity[]>;
+
+  /** Ready-made teams that can be installed from Settings. */
+  listStarterTeams(): Promise<import('../starterTeams').StarterTeamSummary[]>;
+  /** Installs one starter team, creating normal editable bots/teams/rooms/skills, and reports the counts. */
+  installStarterTeam(starterId: string): Promise<import('../starterTeams').StarterTeamInstallCounts>;
   /** Opens a headed window so the person can sign in; the bot keeps the profile afterwards. */
   startBrowserLogin(botId: string): Promise<BrowserStatus>;
   /** Closes the browser, saving its profile. Shared profiles close for every bot using them. */
