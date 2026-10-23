@@ -377,8 +377,9 @@ export type BrowserTakeover = z.infer<typeof BrowserTakeover>;
 export const MessageRole = z.enum(['user', 'assistant', 'system']);
 export type MessageRole = z.infer<typeof MessageRole>;
 
-/** An image is shown as a note; a file is anything else the chat accepts (text, JSON, PDF, ZIP). */
-export const AttachmentKind = z.enum(['image', 'file']);
+/** An image is shown as a note, audio as a transcript (when one is configured) or a name, and a file is
+ * anything else the chat accepts (text, JSON, PDF, ZIP). */
+export const AttachmentKind = z.enum(['image', 'audio', 'file']);
 export type AttachmentKind = z.infer<typeof AttachmentKind>;
 
 /**

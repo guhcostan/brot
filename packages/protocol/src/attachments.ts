@@ -10,6 +10,18 @@ export const ATTACHMENT_NAME_MAX_LENGTH = 200;
 /** Image types the chat accepts, shown to the model as an image note. */
 export const ATTACHMENT_IMAGE_MIME_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'] as const;
 
+/** Audio types the chat accepts as voice notes; an opt-in transcription model may turn them into text. */
+export const ATTACHMENT_AUDIO_MIME_TYPES = [
+  'audio/webm',
+  'audio/ogg',
+  'audio/mpeg',
+  'audio/wav',
+  'audio/x-wav',
+  'audio/mp4',
+  'audio/aac',
+  'audio/flac',
+] as const;
+
 /** Document types the chat accepts beyond `text/*`. Everything else is refused. */
 export const ATTACHMENT_FILE_MIME_TYPES = ['application/json', 'application/pdf', 'application/zip'] as const;
 
@@ -18,20 +30,29 @@ function baseMimeType(mimeType: string): string {
   return (mimeType.split(';')[0] ?? '').trim().toLowerCase();
 }
 
-/** Images, `text/*`, JSON, PDF and ZIP. A file outside this list cannot be attached. */
+/** Images, audio, `text/*`, JSON, PDF and ZIP. A file outside this list cannot be attached. */
 export function isAllowedAttachmentMime(mimeType: string): boolean {
   const base = baseMimeType(mimeType);
   if (base === '') return false;
   return (
     (ATTACHMENT_IMAGE_MIME_TYPES as readonly string[]).includes(base) ||
+    (ATTACHMENT_AUDIO_MIME_TYPES as readonly string[]).includes(base) ||
     base.startsWith('text/') ||
     (ATTACHMENT_FILE_MIME_TYPES as readonly string[]).includes(base)
   );
 }
 
-/** Images get an image note in the text prompt; everything else is a file. */
-export function attachmentKindFor(mimeType: string): 'image' | 'file' {
-  return baseMimeType(mimeType).startsWith('image/') ? 'image' : 'file';
+/** True when the attachment is one of the audio types above; a voice note. */
+export function isAudioAttachmentMime(mimeType: string): boolean {
+  return (ATTACHMENT_AUDIO_MIME_TYPES as readonly string[]).includes(baseMimeType(mimeType));
+}
+
+/** Images get an image note, audio a transcript or name, and everything else is a file. */
+export function attachmentKindFor(mimeType: string): 'image' | 'audio' | 'file' {
+  const base = baseMimeType(mimeType);
+  if (base.startsWith('image/')) return 'image';
+  if (isAudioAttachmentMime(base)) return 'audio';
+  return 'file';
 }
 
 /** `text/*` and JSON can be inlined into the prompt. PDFs and ZIPs are binary. */

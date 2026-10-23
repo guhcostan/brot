@@ -150,3 +150,31 @@ describe('formatAttachmentSize', () => {
     expect(formatAttachmentSize(20 * 1024 * 1024)).toBe('20.0 MB');
   });
 });
+
+describe('audio transcripts in the attachment list', () => {
+  const voice = attachment({
+    id: 'att_voice',
+    name: 'voice-note.webm',
+    mimeType: 'audio/webm',
+    kind: 'audio',
+    size: 120,
+  });
+
+  it('renders the transcript right under the attachment name', async () => {
+    const source = sourceOf({});
+    const result = await appendAttachmentContext(source, 'listen', [voice], {
+      transcripts: [{ name: 'voice-note.webm', transcript: 'hello from the voice note' }],
+    });
+    expect(result).toBe(
+      'listen\n\nAttachments:\n- voice-note.webm (audio/webm, 120 B)\n- voice-note.webm (transcript): hello from the voice note',
+    );
+    // Audio bytes are never read for the prompt; only the transcript text is rendered.
+    expect(source.calls).toEqual([]);
+  });
+
+  it('lists an untranscribed voice note by name and size only', async () => {
+    const result = await appendAttachmentContext(sourceOf({}), 'listen', [voice], { transcripts: [] });
+    expect(result).toBe('listen\n\nAttachments:\n- voice-note.webm (audio/webm, 120 B)');
+    expect(result).not.toContain('(transcript)');
+  });
+});

@@ -86,6 +86,27 @@ proxy that forwards image blocks is configured. `ResolvedRoute.vision` carries t
   only on the first turn of a fresh session. A primed session stays text-only because its earlier turns already
   hold the images. The mock engine ignores `ctx.images`.
 
+### Voice notes and opt-in transcription
+Audio attachments (`audio/webm`, `audio/ogg`, `audio/mpeg`, `audio/wav`, `audio/x-wav`, `audio/mp4`,
+`audio/aac`, `audio/flac`) are stored like any other attachment and get `kind: "audio"`. They share the 20 MiB
+upload cap and are never sent to a text model.
+
+Speech-to-text is opt-in and configured separately from a bot's chat model:
+
+- A provider model in `$BROT_HOME/providers.json` opts in with `{"id": "whisper-1", "transcription": true}`. The
+  provider must use the `openai-completions` API; Brot posts multipart `model` + `file` to
+  `<baseUrl>/audio/transcriptions`, with the provider key read from the vault at call time (60 s timeout).
+- The saved settings (`GET/PUT /api/transcription`) hold only `<provider>/<model>` under the `transcription`
+  settings key. `GET` also reports whether the model resolves and its vault secret exists, without a network call.
+- A run transcribes at most **2** audio attachments of the current trigger message, each up to the upload cap,
+  only when a transcription model is configured. A failed transcription skips that attachment (logs name and
+  reason only, never audio bytes or keys) and the run continues with the message text.
+- Transcribed text reaches the engine as `RunContext.audioTranscripts` and is rendered inside the prompt's
+  `Attachments:` list as `- <name> (transcript): <text>`, each transcript capped at 4,000 characters. Without a
+  transcription model the list shows only the attachment's name, media type and size.
+- Nothing is transcribed from history or tool results, and transcripts are not persisted as events. No STT
+  provider is configured by default; the behaviour is exercised with an injected fetch in tests.
+
 ### Permission broker
 - Every tool call passes through `broker.decide(call, botPolicy)`, which returns `allow | deny | ask`.
 - `ask` emits `approval.requested` and **suspends** the run (state persisted, so it survives restarts).

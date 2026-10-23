@@ -73,6 +73,14 @@ import { PairingError, type Pairing } from './pairing';
 import { triggerIssues, type Scheduler } from './scheduler';
 import type { BrotMcpService } from './mcp/types';
 import type { LlmRelay, ProviderSpec } from './llm';
+import { createProviderRegistry } from './llm/providers';
+import {
+  getTranscriptionSettings,
+  resolveTranscription,
+  saveTranscriptionSettings,
+  transcriptionAvailability,
+  UpdateTranscriptionSettings,
+} from './audio';
 import { MemoryUpkeepConflictError, applyMemoryUpkeep, buildMemoryUpkeepReport } from './memory/upkeep';
 import { botBrowserKind } from './browser/tools';
 import { BrowserError } from './browser/service';
@@ -1553,6 +1561,30 @@ export function createApp(deps: AppDeps): Hono<AppEnv> {
       if (error instanceof VoiceUnavailableError) return c.json({ error: error.message }, 503);
       throw error;
     }
+  });
+
+  // Speech-to-text: opt-in through a provider model with `transcription: true`. The settings hold only the model.
+
+  /** The saved transcription model, whether it can be used right now, and why not when it cannot. */
+  app.get('/api/transcription', async (c) => {
+    const settings = await getTranscriptionSettings(repos);
+    const providers = createProviderRegistry(deps.providers ?? []);
+    const availability = await transcriptionAvailability({ repos, providers, vault });
+    return c.json({ settings, available: availability.available, ...(availability.reason === undefined ? {} : { reason: availability.reason }) });
+  });
+
+  /** Saves the transcription model. Only a provider model with `transcription: true` is accepted; null removes it. */
+  app.put('/api/transcription', async (c) => {
+    const body = await parseBody(c, UpdateTranscriptionSettings);
+    if (!body.ok) return body.response;
+    if (body.data.model !== null) {
+      const providers = createProviderRegistry(deps.providers ?? []);
+      const resolved = resolveTranscription(providers, body.data.model);
+      if (!resolved.ok) {
+        return c.json({ error: 'Invalid request', issues: [{ path: ['model'], message: resolved.reason }] }, 400);
+      }
+    }
+    return c.json(await saveTranscriptionSettings(repos, body.data));
   });
 
   app.get('/api/providers', async (c) => {

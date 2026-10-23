@@ -1,4 +1,5 @@
 import { isTextAttachmentMime, type Attachment } from '@brot/protocol';
+import { transcriptAttachmentLine } from '@brot/engines';
 
 /** Most characters one attachment contributes to the prompt. */
 export const ATTACHMENT_INLINE_CHARS = 8_000;
@@ -24,21 +25,29 @@ export function formatAttachmentSize(size: number): string {
 /**
  * The prompt-visible list of a message's attachments, appended to its input. Text and JSON content is inlined
  * up to `ATTACHMENT_INLINE_CHARS` per attachment and `ATTACHMENT_INLINE_TOTAL_CHARS` overall; an image is noted,
- * and a PDF, ZIP or other binary only lists its name and size. With no attachments the input is returned as-is,
- * so prompts without attachments are unchanged. Names, media types and sizes only: no filesystem path enters.
+ * a transcribed voice note carries its transcript line, and a PDF, ZIP or other binary only lists its name and
+ * size. With no attachments the input is returned as-is, so prompts without attachments are unchanged. Names,
+ * media types and sizes only: no filesystem path enters.
  */
 export async function appendAttachmentContext(
   source: AttachmentBytes,
   input: string,
   attachments: readonly Attachment[] | undefined,
+  options: { transcripts?: ReadonlyArray<{ name: string; transcript: string }> } = {},
 ): Promise<string> {
   if (attachments === undefined || attachments.length === 0) return input;
+  const transcripts = new Map((options.transcripts ?? []).map((entry) => [entry.name, entry.transcript]));
   const lines: string[] = ['Attachments:'];
   let remaining = ATTACHMENT_INLINE_TOTAL_CHARS;
   for (const attachment of attachments) {
     lines.push(`- ${attachment.name} (${attachment.mimeType}, ${formatAttachmentSize(attachment.size)})`);
     if (attachment.kind === 'image') {
       lines.push('  image attached; the image itself is not part of this text prompt.');
+      continue;
+    }
+    const transcript = transcripts.get(attachment.name);
+    if (transcript !== undefined) {
+      lines.push(transcriptAttachmentLine(attachment.name, transcript));
       continue;
     }
     if (!isTextAttachmentMime(attachment.mimeType)) continue;

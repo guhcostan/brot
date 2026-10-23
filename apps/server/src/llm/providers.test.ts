@@ -101,6 +101,30 @@ describe('loadProviderFile', () => {
     ]);
   });
 
+  it('reads the transcription opt-in on a model, defaulting to absent', async () => {
+    const path = await write({
+      providers: [
+        {
+          id: 'local',
+          api: 'openai-completions',
+          baseUrl: 'http://127.0.0.1:11434/v1',
+          secretName: 'local',
+          models: [
+            { id: 'whisper-1', transcription: true },
+            { id: 'chat-only' },
+            { id: 'explicit-off', transcription: false },
+          ],
+        },
+      ],
+    });
+    const [provider] = await loadProviderFile(path);
+    expect(provider?.models?.map((model) => [model.id, model.transcription])).toEqual([
+      ['whisper-1', true],
+      ['chat-only', undefined],
+      ['explicit-off', false],
+    ]);
+  });
+
   it('rejects a model field that is not known', async () => {
     const path = await write({
       providers: [

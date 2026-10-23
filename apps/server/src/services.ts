@@ -191,6 +191,7 @@ export async function createServices(
     llm,
     vault,
     attachments,
+    providers: providerRegistry,
     teamTools: teamTools.length > 0,
     mode: config.mode,
     computerImage: config.computerImage,

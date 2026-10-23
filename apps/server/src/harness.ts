@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { Repos } from '@brot/db';
 import { modelHostsFor, type BrotRunContext, type EngineRegistry } from '@brot/engines';
+import { ATTACHMENT_MAX_BYTES } from '@brot/protocol';
 import type {
   Bot,
   ComputerHandle,
@@ -21,7 +22,12 @@ import type { EventBus } from './bus';
 import { DESKTOP_IMAGE } from './computers/docker-args';
 import type { ComputerProvider } from './computers/types';
 import type { ServerMode } from './config';
-import type { LlmRelay, ResolvedRoute, RunUsage } from './llm';
+import type { LlmRelay, ProviderRegistry, ResolvedRoute, RunUsage } from './llm';
+import {
+  TRANSCRIPTION_MAX_AUDIO_ATTACHMENTS,
+  getTranscriptionSettings,
+  transcribeAudio,
+} from './audio';
 import { appendAttachmentContext, type AttachmentStorage } from './attachments';
 import type { BrotMcp } from './mcp/types';
 import { enabledMcpServerSpecs } from './mcp-servers/specs';
@@ -52,6 +58,8 @@ export interface HarnessDeps {
   vault: Vault;
   /** Reads attachment bytes for the prompt. Only attachment ids reach it; no filesystem path does. */
   attachments: AttachmentStorage;
+  /** Provider registry for the opt-in audio transcription; the transcription model is a provider model entry. */
+  providers: ProviderRegistry;
   /** Whether the Brot team tools are attached to runs that have the Brot MCP server. Shown to the engine in the prompt. */
   teamTools?: boolean;
 }
@@ -330,6 +338,48 @@ const VISION_MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const VISION_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
 
 /**
+ * The transcripts a run's prompt carries: audio attachments of the trigger message only, at most two, each up to
+ * the upload cap. Transcription is opt-in: without a configured transcription model nothing is read or sent.
+ * Failures skip that attachment (the reason is logged by the transcription module, the name here) and the run
+ * continues with the message's text.
+ */
+async function audioTranscriptsFor(
+  storage: AttachmentStorage,
+  trigger: Message,
+  runDeps: Pick<HarnessDeps, 'repos' | 'providers' | 'vault'>,
+): Promise<BrotRunContext['audioTranscripts']> {
+  const audio = (trigger.attachments ?? []).filter((attachment) => attachment.kind === 'audio');
+  if (audio.length === 0) return undefined;
+  const settings = await getTranscriptionSettings(runDeps.repos);
+  if (settings.model === undefined || settings.model.trim() === '') return undefined;
+  for (const skipped of audio.slice(TRANSCRIPTION_MAX_AUDIO_ATTACHMENTS)) {
+    console.warn(`transcription: skipped ${skipped.name}: at most ${TRANSCRIPTION_MAX_AUDIO_ATTACHMENTS} audio attachments per run`);
+  }
+  const transcripts: NonNullable<BrotRunContext['audioTranscripts']> = [];
+  for (const attachment of audio.slice(0, TRANSCRIPTION_MAX_AUDIO_ATTACHMENTS)) {
+    if (attachment.size > ATTACHMENT_MAX_BYTES) {
+      console.warn(`transcription: skipped ${attachment.name}: over the ${ATTACHMENT_MAX_BYTES / (1024 * 1024)} MiB limit`);
+      continue;
+    }
+    const bytes = await storage.read(attachment.id).catch(() => undefined);
+    if (bytes === undefined || bytes.byteLength === 0) {
+      console.warn(`transcription: skipped ${attachment.name}: its bytes are unavailable`);
+      continue;
+    }
+    const transcript = await transcribeAudio(
+      { repos: runDeps.repos, providers: runDeps.providers, vault: runDeps.vault },
+      { bytes, mimeType: attachment.mimeType, filename: attachment.name },
+    );
+    if (transcript === undefined) {
+      console.warn(`transcription: skipped ${attachment.name}`);
+      continue;
+    }
+    transcripts.push({ name: attachment.name, transcript });
+  }
+  return transcripts.length === 0 ? undefined : transcripts;
+}
+
+/**
  * The images a run's first attempt may show: image attachments of the trigger message only, base64-encoded for an
  * engine content block. A non-vision model, and every attempt after an image-less route, gets none. Skips are
  * logged by attachment name and reason, never by content. Bytes stay in memory for this run.
@@ -431,6 +481,8 @@ async function visionImagesFor(
         ? [mcp.specForRun({ botId: bot.id, threadId: state.threadId, runId: state.runId }, place.brotBaseUrl)]
         : [];
       const mcpServers = [...brotMcpServers, ...userMcpServers];
+      // Opt-in speech-to-text runs before the engine turn; the transcripts join the prompt below.
+      const audioTranscripts = await audioTranscriptsFor(attachmentStorage, trigger, deps);
       const [room, team, skills] = await Promise.all([
         roomFor(repos, thread),
         teamFor(bot),
@@ -451,7 +503,9 @@ async function visionImagesFor(
           resumed: engineSessionId !== undefined,
           ...(previousTriggerId === undefined ? {} : { previousTriggerId }),
         });
-        const input = await appendAttachmentContext(attachmentStorage, turn.input, trigger.attachments);
+        const input = await appendAttachmentContext(attachmentStorage, turn.input, trigger.attachments, {
+          ...(audioTranscripts === undefined ? {} : { transcripts: audioTranscripts }),
+        });
         // Capability is recomputed for every attempt: a fallback model may be text-only even when the first was not.
         const images = relayed && route !== undefined ? await visionImagesFor(attachmentStorage, trigger, route.route.vision) : undefined;
         const [workspaceMemoryRows, ownMemoryRows] = await Promise.all([
@@ -482,6 +536,7 @@ async function visionImagesFor(
           skills,
           signal: state.controller.signal,
           ...(images === undefined ? {} : { images }),
+          ...(audioTranscripts === undefined ? {} : { audioTranscripts }),
           requestTool: (req) => requestTool(state, req),
           ...(engineSessionId === undefined ? {} : { engineSessionId }),
           ...(place.computer === undefined ? {} : { computer: place.computer }),

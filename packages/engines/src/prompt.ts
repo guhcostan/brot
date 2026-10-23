@@ -95,6 +95,19 @@ export function sessionInput(ctx: PromptInput): string {
   return ctx.room ? `[You are ${ctx.bot.name}]\n${ctx.input}` : ctx.input;
 }
 
+/** Most characters of one audio transcript that reach the prompt. */
+export const AUDIO_TRANSCRIPT_PROMPT_CHARS = 4_000;
+
+/**
+ * The Attachments-section line for a transcribed voice note: `- <name> (transcript): <text>`, cut to
+ * `AUDIO_TRANSCRIPT_PROMPT_CHARS` code points. Callers put it right under the attachment's name line.
+ */
+export function transcriptAttachmentLine(name: string, transcript: string): string {
+  const points = [...transcript];
+  const text = points.length > AUDIO_TRANSCRIPT_PROMPT_CHARS ? `${points.slice(0, AUDIO_TRANSCRIPT_PROMPT_CHARS).join('')}…` : transcript;
+  return `- ${name} (transcript): ${text}`;
+}
+
 /** Workspace facts are about the person, not about the bot answering, so they open the prompt's memory part. */
 const WORKSPACE_MEMORIES_INTRO = 'Workspace-wide facts about the person, shared by every bot.';
 

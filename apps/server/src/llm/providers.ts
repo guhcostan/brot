@@ -28,6 +28,8 @@ const ProviderModelSchema = z
     id: z.string().min(1).max(200),
     cost: ModelCost.optional(),
     vision: z.boolean().optional(),
+    /** The model can transcribe audio through an OpenAI-compatible `/audio/transcriptions` endpoint. */
+    transcription: z.boolean().optional(),
   })
   .strict();
 
@@ -104,6 +106,22 @@ export function parseModelRef(ref: string): ModelRef {
     throw new Error(`Model "${ref}" must be <provider>/<model>, for example opencode-go/deepseek-v4.1-flash.`);
   }
   return { provider: ref.slice(0, slash), model: ref.slice(slash + 1) };
+}
+
+/**
+ * The provider and model that transcribe audio for `ref`, or undefined when the provider is unknown, does not use
+ * the openai-completions API, or the model does not set `transcription: true`. The transcription model is separate
+ * from a bot's chat model: a provider may offer a chat model and a transcription model side by side.
+ */
+export function transcriptionTarget(
+  providers: ProviderRegistry,
+  ref: ModelRef,
+): { provider: ProviderSpec; model: string } | undefined {
+  const provider = providers.get(ref.provider);
+  if (provider === undefined || provider.api !== 'openai-completions') return undefined;
+  const model = provider.models?.find((entry) => entry.id === ref.model);
+  if (model?.transcription !== true) return undefined;
+  return { provider, model: ref.model };
 }
 
 /** Later layers replace earlier ones with the same id. Order follows first appearance. */

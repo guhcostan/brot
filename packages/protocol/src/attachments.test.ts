@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ATTACHMENT_AUDIO_MIME_TYPES,
   ATTACHMENT_MAX_BYTES,
   ATTACHMENT_MAX_PER_MESSAGE,
   ATTACHMENT_NAME_MAX_LENGTH,
   CreateAttachment,
   attachmentKindFor,
   isAllowedAttachmentMime,
+  isAudioAttachmentMime,
   isTextAttachmentMime,
   sanitizeAttachmentName,
 } from './attachments';
@@ -19,7 +21,7 @@ describe('attachment limits', () => {
 });
 
 describe('isAllowedAttachmentMime', () => {
-  it('accepts images, text, JSON, PDF and ZIP, with or without parameters', () => {
+  it('accepts images, audio, text, JSON, PDF and ZIP, with or without parameters', () => {
     for (const mimeType of [
       'image/png',
       'image/jpeg',
@@ -33,22 +35,54 @@ describe('isAllowedAttachmentMime', () => {
       'application/pdf',
       'application/zip',
       'IMAGE/PNG',
+      'audio/webm',
+      'audio/ogg',
+      'audio/mpeg',
+      'audio/wav',
+      'audio/x-wav',
+      'audio/mp4',
+      'audio/aac',
+      'audio/flac',
+      'audio/webm; codecs=opus',
+      'AUDIO/MPEG',
     ]) {
       expect(isAllowedAttachmentMime(mimeType)).toBe(true);
     }
   });
 
   it('refuses other media types', () => {
-    for (const mimeType of ['', 'application/octet-stream', 'video/mp4', 'audio/mpeg', 'image/svg+xml', 'application/x-msdownload']) {
+    for (const mimeType of ['', 'application/octet-stream', 'video/mp4', 'audio/midi', 'image/svg+xml', 'application/x-msdownload']) {
       expect(isAllowedAttachmentMime(mimeType)).toBe(false);
     }
   });
 });
 
+describe('audio attachments', () => {
+  it('exports the audio allowlist and classifies those types as audio', () => {
+    expect(ATTACHMENT_AUDIO_MIME_TYPES).toEqual([
+      'audio/webm',
+      'audio/ogg',
+      'audio/mpeg',
+      'audio/wav',
+      'audio/x-wav',
+      'audio/mp4',
+      'audio/aac',
+      'audio/flac',
+    ]);
+    expect(attachmentKindFor('audio/webm')).toBe('audio');
+    expect(attachmentKindFor('audio/mpeg; codecs=mp3')).toBe('audio');
+    expect(attachmentKindFor('audio/ogg')).toBe('audio');
+    expect(isAudioAttachmentMime('audio/wav')).toBe(true);
+    expect(isAudioAttachmentMime('audio/midi')).toBe(false);
+    expect(isAudioAttachmentMime('text/plain')).toBe(false);
+  });
+});
+
 describe('attachmentKindFor and isTextAttachmentMime', () => {
-  it('makes images images and everything else a file', () => {
+  it('makes images images, audio audio and everything else a file', () => {
     expect(attachmentKindFor('image/png')).toBe('image');
     expect(attachmentKindFor('image/webp; q=1')).toBe('image');
+    expect(attachmentKindFor('audio/mpeg')).toBe('audio');
     expect(attachmentKindFor('text/plain')).toBe('file');
     expect(attachmentKindFor('application/pdf')).toBe('file');
   });
@@ -87,6 +121,9 @@ describe('CreateAttachment', () => {
     expect(
       CreateAttachment.parse({ name: 'notes.txt', mimeType: 'text/plain', size: 10, threadId: 't1' }),
     ).toEqual({ name: 'notes.txt', mimeType: 'text/plain', size: 10, threadId: 't1' });
+    expect(
+      CreateAttachment.parse({ name: 'note.webm', mimeType: 'audio/webm', size: 10, threadId: 't1' }),
+    ).toEqual({ name: 'note.webm', mimeType: 'audio/webm', size: 10, threadId: 't1' });
     expect(() =>
       CreateAttachment.parse({ name: 'x.bin', mimeType: 'application/octet-stream', size: 10, threadId: 't1' }),
     ).toThrow(/unsupported attachment type/);

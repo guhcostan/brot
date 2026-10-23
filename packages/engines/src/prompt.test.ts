@@ -1,6 +1,14 @@
 import type { Message, Skill } from '@brot/protocol';
 import { describe, expect, it } from 'vitest';
-import { buildPrompt, HISTORY_LIMIT, sessionInput, type PromptRoom, type PromptTeam } from './prompt';
+import {
+  AUDIO_TRANSCRIPT_PROMPT_CHARS,
+  buildPrompt,
+  HISTORY_LIMIT,
+  sessionInput,
+  transcriptAttachmentLine,
+  type PromptRoom,
+  type PromptTeam,
+} from './prompt';
 import { testBot } from './test-utils';
 
 const AT = '2026-10-19T12:00:00.000Z';
@@ -383,5 +391,17 @@ describe('sessionInput', () => {
     expect(sessionInput({ bot: testBot, memories: [], skills: [], history: [], input: 'next', room })).toBe(
       '[You are Test bot]\nnext',
     );
+  });
+});
+
+describe('transcriptAttachmentLine', () => {
+  it('renders the Attachments-section line and cuts very long transcripts', () => {
+    expect(transcriptAttachmentLine('voice-note.webm', 'hello from a voice note')).toBe(
+      '- voice-note.webm (transcript): hello from a voice note',
+    );
+    const long = transcriptAttachmentLine('long.webm', 'a'.repeat(AUDIO_TRANSCRIPT_PROMPT_CHARS + 50));
+    expect(long.startsWith('- long.webm (transcript): ')).toBe(true);
+    expect([...long].length).toBe(('- long.webm (transcript): ').length + AUDIO_TRANSCRIPT_PROMPT_CHARS + 1);
+    expect(long.endsWith('…')).toBe(true);
   });
 });

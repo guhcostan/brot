@@ -97,6 +97,12 @@ export interface RunContext {
    * without image support ignore it; a text model receives no images and sees only the attachment names.
    */
   images?: Array<{ mimeType: string; data: string }>;
+  /**
+   * Transcripts of the current trigger message's audio attachments, when an opt-in transcription model is
+   * configured and the provider returned text. `name` is the attachment's display name; the text is capped by the
+   * server. In memory only, never persisted or logged. Absent for a message without transcribed audio.
+   */
+  audioTranscripts?: Array<{ name: string; transcript: string }>;
   memories: Memory[];
   skills: Skill[];
   signal: AbortSignal;

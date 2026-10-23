@@ -41,6 +41,15 @@ const VISION_PROVIDER: ProviderSpec = {
   models: [{ id: 'vision-model', vision: true }, { id: 'text-model' }],
 };
 
+/** A provider with a chat model and an opt-in transcription model for the voice-note tests. */
+const AUDIO_PROVIDER: ProviderSpec = {
+  id: 'fake',
+  api: 'openai-completions',
+  baseUrl: 'https://fake.example/v1',
+  secretName: 'fake',
+  models: [{ id: 'model-1' }, { id: 'whisper-1', transcription: true }],
+};
+
 /** Tests that never reach a provider get this fetch, so an accidental call fails loudly. */
 async function refuseFetch(): Promise<Response> {
   throw new Error('the harness tests do not reach a provider');
@@ -1822,5 +1831,120 @@ describe('per-bot MCP server grants', () => {
     await runToEnd(ctx, threadId);
 
     expect(engine.contexts[0]?.mcpServers?.map((server) => server.name)).toEqual(['brot', 'one', 'two']);
+  });
+});
+
+describe('audio transcripts in the run input', () => {
+  /** Stores an audio attachment's metadata and bytes the way an upload does. */
+  async function attachAudio(ctx: TestContext, threadId: string, name = 'note.webm'): Promise<Attachment> {
+    const bytes = new Uint8Array([0x1a, 0x45, 0xdf, 0xa3, 0x93, 0x42, 0x82, 0x88]);
+    const attachment = await ctx.services.repos.attachments.create({
+      threadId,
+      name,
+      mimeType: 'audio/webm',
+      size: bytes.byteLength,
+      sha256: 'b'.repeat(64),
+    });
+    await ctx.services.attachments.write(attachment.id, bytes);
+    return attachment;
+  }
+
+  async function configure(ctx: TestContext): Promise<void> {
+    await ctx.services.repos.settings.set('transcription', { model: 'fake/whisper-1' });
+  }
+
+  /** Stubs the global fetch the transcription module uses when no fetch is injected. */
+  function stubFetch(respond: () => Response = () => new Response(JSON.stringify({ text: '  buy milk and eggs  ' }), { status: 200 })) {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    const spy = vi.spyOn(globalThis, 'fetch').mockImplementation((async (input: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(input), init: init ?? {} });
+      return respond();
+    }) as typeof fetch);
+    return { calls, restore: () => spy.mockRestore() };
+  }
+
+  it('transcribes the trigger message audio and renders it in the Attachments section', async () => {
+    const engine = fakeEngine(replies);
+    const ctx = await contextWith({ engines: createEngineRegistry([engine.driver]), llm: { providers: [AUDIO_PROVIDER] } });
+    const { threadId } = await botAndThread(ctx, { model: 'fake/model-1' });
+    await configure(ctx);
+    const attachment = await attachAudio(ctx, threadId, 'voice-note.webm');
+    const { calls, restore } = stubFetch();
+    try {
+      const { terminal } = await runToEnd(ctx, threadId, 'Listen to this', [attachment.id]);
+      expect(terminal.type).toBe('run.completed');
+      expect(calls).toHaveLength(1);
+      expect(calls[0]?.url).toBe('https://fake.example/v1/audio/transcriptions');
+      expect(engine.contexts[0]?.audioTranscripts).toEqual([
+        { name: 'voice-note.webm', transcript: 'buy milk and eggs' },
+      ]);
+      const input = engine.contexts[0]?.input ?? '';
+      expect(input).toContain('- voice-note.webm (transcript): buy milk and eggs');
+    } finally {
+      restore();
+    }
+  });
+
+  it('does not read audio when no transcription model is configured', async () => {
+    const engine = fakeEngine(replies);
+    const ctx = await contextWith({ engines: createEngineRegistry([engine.driver]), llm: { providers: [AUDIO_PROVIDER] } });
+    const { threadId } = await botAndThread(ctx, { model: 'fake/model-1' });
+    const attachment = await attachAudio(ctx, threadId);
+    const { calls, restore } = stubFetch();
+    try {
+      await runToEnd(ctx, threadId, 'Listen', [attachment.id]);
+      expect(calls).toEqual([]);
+      expect(engine.contexts[0]?.audioTranscripts).toBeUndefined();
+      expect(engine.contexts[0]?.input).toContain('- note.webm (audio/webm');
+      expect(engine.contexts[0]?.input).not.toContain('(transcript)');
+    } finally {
+      restore();
+    }
+  });
+
+  it('skips a failed transcription by name and still completes the run', async () => {
+    const engine = fakeEngine(replies);
+    const ctx = await contextWith({ engines: createEngineRegistry([engine.driver]), llm: { providers: [AUDIO_PROVIDER] } });
+    const { threadId } = await botAndThread(ctx, { model: 'fake/model-1' });
+    await configure(ctx);
+    const attachment = await attachAudio(ctx, threadId, 'broken.webm');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { restore } = stubFetch(() => new Response('{"error":"nope"}', { status: 503 }));
+    try {
+      const { terminal } = await runToEnd(ctx, threadId, 'Listen', [attachment.id]);
+      expect(terminal.type).toBe('run.completed');
+      expect(engine.contexts[0]?.audioTranscripts).toBeUndefined();
+      const logged = warn.mock.calls.map((call) => call.join(' ')).join('\n');
+      expect(logged).toContain('broken.webm');
+      expect(logged).toContain('503');
+      expect(logged).not.toContain('sk-');
+      expect(logged).not.toContain('1a45dfa3');
+    } finally {
+      warn.mockRestore();
+      restore();
+    }
+  });
+
+  it('transcribes at most two audio attachments per run and logs the rest by name', async () => {
+    const engine = fakeEngine(replies);
+    const ctx = await contextWith({ engines: createEngineRegistry([engine.driver]), llm: { providers: [AUDIO_PROVIDER] } });
+    const { threadId } = await botAndThread(ctx, { model: 'fake/model-1' });
+    await configure(ctx);
+    const attachments = [
+      await attachAudio(ctx, threadId, 'one.webm'),
+      await attachAudio(ctx, threadId, 'two.webm'),
+      await attachAudio(ctx, threadId, 'three.webm'),
+    ];
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { calls, restore } = stubFetch();
+    try {
+      await runToEnd(ctx, threadId, 'Listen', attachments.map((attachment) => attachment.id));
+      expect(calls).toHaveLength(2);
+      expect(engine.contexts[0]?.audioTranscripts?.map((entry) => entry.name)).toEqual(['one.webm', 'two.webm']);
+      expect(warn.mock.calls.map((call) => call.join(' ')).join('\n')).toContain('three.webm');
+    } finally {
+      warn.mockRestore();
+      restore();
+    }
   });
 });
