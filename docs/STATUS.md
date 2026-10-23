@@ -711,10 +711,30 @@ mapped in `docs/MAUSBOT-PARITY.md` (34 bots / 7 teams, 33 bots with a browser an
 - Verified live: installing Dev team twice created the expected bots, team, Build room, paused Daily repo check
   and shared Unified diff skill, logged the install activity, and cleanup restored only Capy/Teste.
 - Suite: 2821 tests (304 files), typecheck 12/12, lint clean.
+## Wave 48: scheduled backups, B7 cost finding (2026-10-23)
+
+- **Scheduled backups.** The backup/restore core moved into @brot/server so the CLI (thin wrappers, unchanged
+  output) and the running server share one implementation: VACUUM INTO snapshot, attachments, providers.json
+  and the vault pair (0600), a manifest, a list and a prune helper that only touches brot-<ISO> directories.
+  Backup settings (enabled, intervalHours 1-168, keep 1-30) plus last-run bookkeeping live in the settings
+  table; an unref'd scheduler creates due backups every interval, prunes to keep, records admin activity and
+  never throws. GET /api/backups, PUT /api/backups (validated) and POST /api/backups/run (201 with the entry)
+  never expose paths, bytes or secrets. Settings gains a Backups section: explanation (including that backups
+  contain the vault and stay on this machine), enable toggle, interval/keep with validation, Save, Back up
+  now with busy/success/error, last/next/error status lines, and a recent backups list with an
+  includes-secrets badge. en/pt-BR/es.
+- **Verified live:** a manual run created a 553 KB backup with vault files at 0600 visible in the list and
+  marked includesSecrets; settings saved with nextRunAt, invalid values were 400s, and the secrets-bearing
+  copy was deleted immediately after the check.
+- **Eval B7 (content production, six bots) hit its per-case budget again at $1.1029** after 19 runs / 28 min
+  / 6.5M tokens in, so no checks were evaluated; the case is simply expensive and needs either a much larger
+  cap or a trimmed fixture. The runner cleaned up all six bots and containers.
+- Suite: 2866 tests (312 files), typecheck 12/12, lint clean.
 ## Next
 
 1. Re-run the eval suite on a live model once OpenCode Go has quota (`apps/evals`, `--base` to the server), including B8 and C; the 2026-10-20 results predate the read auto-allow and the fixes above.
 2. A live run of a desktop bot doing a web task end to end (snapshot → click → takeover on sign-in).
+   Eval B7 needs a bigger cap or a trimmed fixture (it stopped on budget at $1.10 / 28 min).
 3. Signed desktop builds and a first GitHub release; the site's download links point to releases.
 4. Persist the takeover state; a per (thread, bot) relay URL; a per-run inactivity watchdog (B1 stalled).
 
