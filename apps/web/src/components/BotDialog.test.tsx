@@ -350,3 +350,43 @@ describe('BotDialog fallback models', () => {
     expect(text).toContain('Claude Sonnet 5');
   });
 });
+
+describe('BotDialog budgets', () => {
+  const budgetInputs = (html: string): string[] => html.match(/<input[^>]*type="number"[^>]*placeholder="0.00"[^>]*>/g) ?? [];
+
+  it('shows two empty caps by default with dollar signs and hints', () => {
+    const html = render();
+    const text = textOf(html);
+
+    expect(text).toContain(t('botForm.budgets'));
+    expect(text).toContain(t('botForm.runBudget'));
+    expect(text).toContain(t('botForm.dailyBudget'));
+    expect(text).toContain(t('botForm.budgetsHint'));
+    expect(text).toContain('$');
+    expect(budgetInputs(html)).toHaveLength(2);
+    expect(budgetInputs(html).every((tag) => /value=""/.test(tag))).toBe(true);
+  });
+
+  it('prefills a bot with caps and shows the parsed USD hint', () => {
+    const html = render({ bot: { ...bot, runBudgetUsd: 0.5, dailyBudgetUsd: 2 } });
+    const text = textOf(html);
+
+    expect(html).toContain('value="0.5"');
+    expect(html).toContain('value="2"');
+    expect(text).toContain(t('botForm.budgetParsed', { amount: '$0.5000' }));
+    expect(text).toContain(t('botForm.budgetParsed', { amount: '$2.0000' }));
+  });
+
+  it('flags negative and over-precise drafts inline', () => {
+    const text = textOf(render({ initialBudgets: { runBudget: '-1', dailyBudget: '1.234' } }));
+
+    expect(text).toContain(t('botForm.budgetNegative'));
+    expect(text).toContain(t('botForm.budgetDecimals'));
+  });
+
+  it('flags a non-numeric draft inline', () => {
+    const text = textOf(render({ initialBudgets: { runBudget: 'abc' } }));
+
+    expect(text).toContain(t('botForm.budgetInvalidNumber'));
+  });
+});

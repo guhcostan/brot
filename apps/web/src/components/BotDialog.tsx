@@ -17,7 +17,7 @@ import {
 } from '@brot/ui';
 import type { BrowserProfile, BrowserStatus, Provider } from '../data/client';
 import { ROLE_TEMPLATES, type ComputerChoice, type RoleTemplate } from '../data/templates';
-import { avatarOf } from '../format';
+import { avatarOf, formatUsd } from '../format';
 import { t, type TranslationKey } from '../i18n';
 import { BrowserPanel } from './BrowserPanel';
 import { ConfirmDialog, Dialog } from './Dialog';
@@ -49,6 +49,8 @@ export interface BotDialogProps {
   initialMcpServers?: McpServer[];
   /** Providers to render before the load resolves, e.g. in an SSR render. */
   initialProviders?: Provider[];
+  /** Budget drafts to render, e.g. to SSR an invalid value's inline error. */
+  initialBudgets?: { runBudget?: string; dailyBudget?: string };
   /** The MCP mode to render for a new bot, e.g. in an SSR render. */
   initialMcpMode?: 'all' | 'custom';
   onClose: () => void;
@@ -95,6 +97,24 @@ const BROWSER_STATE_KEYS: Record<BrowserStatus['state'], TranslationKey> = {
 
 const DSH_ENGINE = 'dsh';
 
+const USD_AMOUNT = /^\d+(?:\.\d{1,2})?$/;
+const USD_DIGITS = /^\d+(?:\.\d+)?$/;
+
+/** The inline error for a USD budget input, or null when it is empty or valid. */
+function usdError(raw: string): string | null {
+  const value = raw.trim();
+  if (value === '') return null;
+  if (value.startsWith('-') || Number(value) < 0) return t('botForm.budgetNegative');
+  if (!USD_DIGITS.test(value)) return t('botForm.budgetInvalidNumber');
+  if (!USD_AMOUNT.test(value)) return t('botForm.budgetDecimals');
+  return null;
+}
+
+/** The parsed amount for a valid budget input; undefined when empty or invalid. */
+function usdAmount(raw: string): number | undefined {
+  return usdError(raw) === null && raw.trim() !== '' ? Number(raw.trim()) : undefined;
+}
+
 /** Whether two id lists select the same servers, order aside. */
 function sameIds(left: readonly string[] | null, right: readonly string[]): boolean {
   if (left === null || left.length !== right.length) return false;
@@ -127,6 +147,10 @@ interface FormState {
   mcpServerIds: string[];
   /** Ordered fallback model refs, tried after the main model fails. */
   fallbackModels: string[];
+  /** Per-run USD cap input; empty means no cap. */
+  runBudget: string;
+  /** Per-UTC-day USD cap input; empty means no cap. */
+  dailyBudget: string;
 }
 
 function computerOf(bot: Pick<Bot, 'computer' | 'desktop'>): ComputerChoice {
@@ -156,6 +180,8 @@ function initialState(bot: Bot | undefined, initialMcpMode: 'all' | 'custom' = '
       mcpMode: initialMcpMode,
       mcpServerIds: [],
       fallbackModels: [],
+      runBudget: '',
+      dailyBudget: '',
     };
   }
   const avatar = avatarOf(bot);
@@ -179,6 +205,8 @@ function initialState(bot: Bot | undefined, initialMcpMode: 'all' | 'custom' = '
     mcpMode: bot.mcpServerIds == null ? 'all' : 'custom',
     mcpServerIds: bot.mcpServerIds ?? [],
     fallbackModels: [...(bot.fallbackModels ?? [])],
+    runBudget: bot.runBudgetUsd === undefined ? '' : String(bot.runBudgetUsd),
+    dailyBudget: bot.dailyBudgetUsd === undefined ? '' : String(bot.dailyBudgetUsd),
   };
 }
 
@@ -215,9 +243,19 @@ function BotForm({
   initialMcpServers,
   initialMcpMode = 'all',
   initialProviders,
+  initialBudgets,
   onClose,
 }: BotDialogProps): ReactElement {
-  const [form, setForm] = useState<FormState>(() => initialState(bot, initialMcpMode));
+  const [form, setForm] = useState<FormState>(() => {
+    const initial = initialState(bot, initialMcpMode);
+    return initialBudgets === undefined
+      ? initial
+      : {
+          ...initial,
+          ...(initialBudgets.runBudget === undefined ? {} : { runBudget: initialBudgets.runBudget }),
+          ...(initialBudgets.dailyBudget === undefined ? {} : { dailyBudget: initialBudgets.dailyBudget }),
+        };
+  });
   const [template, setTemplate] = useState<string | null>(null);
   const [providers, setProviders] = useState<Provider[] | null>(initialProviders ?? null);
   const [providerError, setProviderError] = useState<string | null>(null);
@@ -362,7 +400,16 @@ function BotForm({
 
   const budget = form.budget.trim() === '' ? undefined : Number(form.budget);
   const budgetOk = budget === undefined || (Number.isFinite(budget) && budget >= 0);
-  const valid = form.name.trim().length > 0 && form.job.trim().length > 0 && budgetOk;
+  const runBudgetAmount = usdAmount(form.runBudget);
+  const dailyBudgetAmount = usdAmount(form.dailyBudget);
+  const runBudgetError = usdError(form.runBudget);
+  const dailyBudgetError = usdError(form.dailyBudget);
+  const valid =
+    form.name.trim().length > 0 &&
+    form.job.trim().length > 0 &&
+    budgetOk &&
+    runBudgetError === null &&
+    dailyBudgetError === null;
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -397,6 +444,8 @@ function BotForm({
           ...(form.speakReplies ? { speakReplies: true } : {}),
           ...(form.mcpMode === 'custom' ? { mcpServerIds: grants } : {}),
           ...(form.fallbackModels.length > 0 ? { fallbackModels: form.fallbackModels } : {}),
+          ...(runBudgetAmount === undefined ? {} : { runBudgetUsd: runBudgetAmount }),
+          ...(dailyBudgetAmount === undefined ? {} : { dailyBudgetUsd: dailyBudgetAmount }),
           egress,
           ...(form.teamId === '' ? {} : { teamId: form.teamId }),
           ...(form.model ? { engine: DSH_ENGINE, model: form.model } : {}),
@@ -444,6 +493,8 @@ function BotForm({
           currentFallbacks.length !== form.fallbackModels.length ||
           currentFallbacks.some((model, index) => model !== form.fallbackModels[index]);
         if (fallbacksChanged) patch.fallbackModels = form.fallbackModels.length === 0 ? null : [...form.fallbackModels];
+        if (runBudgetAmount !== bot.runBudgetUsd) patch.runBudgetUsd = runBudgetAmount ?? null;
+        if (dailyBudgetAmount !== bot.dailyBudgetUsd) patch.dailyBudgetUsd = dailyBudgetAmount ?? null;
         const profileId = bot.browserProfileId ?? '';
         if (form.browserProfileId !== profileId) {
           patch.browserProfileId = form.browserProfileId === '' ? null : form.browserProfileId;
@@ -590,6 +641,57 @@ function BotForm({
           </select>
           <span className="text-xs text-ink-3">{t('botForm.fallbackMax')}</span>
         </div>
+      </fieldset>
+
+      <fieldset className="m-0 flex flex-col gap-2 border-0 p-0">
+        <legend className="mb-1 p-0 text-sm font-medium">{t('botForm.budgets')}</legend>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="flex items-start gap-1.5">
+            <span aria-hidden="true" className="pt-2 text-sm text-ink-3">
+              $
+            </span>
+            <div className="min-w-0 flex-1">
+              <Input
+                label={t('botForm.runBudget')}
+                hint={t('botForm.runBudgetHint')}
+                type="number"
+                inputMode="decimal"
+                min={0}
+                step={0.01}
+                placeholder="0.00"
+                value={form.runBudget}
+                onChange={(event) => set('runBudget', event.target.value)}
+                error={runBudgetError ?? undefined}
+              />
+              {runBudgetAmount !== undefined ? (
+                <p className="m-0 text-xs text-ink-2">{t('botForm.budgetParsed', { amount: formatUsd(runBudgetAmount) })}</p>
+              ) : null}
+            </div>
+          </div>
+          <div className="flex items-start gap-1.5">
+            <span aria-hidden="true" className="pt-2 text-sm text-ink-3">
+              $
+            </span>
+            <div className="min-w-0 flex-1">
+              <Input
+                label={t('botForm.dailyBudget')}
+                hint={t('botForm.dailyBudgetHint')}
+                type="number"
+                inputMode="decimal"
+                min={0}
+                step={0.01}
+                placeholder="0.00"
+                value={form.dailyBudget}
+                onChange={(event) => set('dailyBudget', event.target.value)}
+                error={dailyBudgetError ?? undefined}
+              />
+              {dailyBudgetAmount !== undefined ? (
+                <p className="m-0 text-xs text-ink-2">{t('botForm.budgetParsed', { amount: formatUsd(dailyBudgetAmount) })}</p>
+              ) : null}
+            </div>
+          </div>
+        </div>
+        <p className="m-0 text-xs text-ink-3">{t('botForm.budgetsHint')}</p>
       </fieldset>
 
       <ComputerPicker value={form.computer} allowHost={bot?.computer === 'host'} onChange={(value) => set('computer', value)} />

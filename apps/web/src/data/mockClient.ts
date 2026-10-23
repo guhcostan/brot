@@ -844,7 +844,7 @@ export function createMockClient(): BrotClient {
         throw new Error(`Unknown browser profile: ${parsed.browserProfileId}`);
       }
       const at = now();
-      const { hostAcknowledged: _ack, approvalMode, speakReplies, fallbackModels, ...fields } = parsed;
+      const { hostAcknowledged: _ack, approvalMode, speakReplies, fallbackModels, runBudgetUsd, dailyBudgetUsd, ...fields } = parsed;
       const created: Bot = {
         ...fields,
         ...(approvalMode === 'edits' ? { approvalMode } : {}),
@@ -864,6 +864,8 @@ export function createMockClient(): BrotClient {
         validateFallbackModels(fallbackModels);
         created.fallbackModels = [...fallbackModels];
       }
+      if (typeof runBudgetUsd === 'number') created.runBudgetUsd = runBudgetUsd;
+      if (typeof dailyBudgetUsd === 'number') created.dailyBudgetUsd = dailyBudgetUsd;
       bots.set(created.id, created);
 
       if (created.browser === true) setBrowserStateOf(created, 'stopped');
@@ -873,7 +875,7 @@ export function createMockClient(): BrotClient {
     async updateBot(botId, patch) {
       const current = bots.get(botId);
       if (!current) throw new Error(`Unknown bot: ${botId}`);
-      const { teamBudgetUsd, teamId, hostAcknowledged: _ack, browserProfileId, approvalMode, speakReplies, mcpServerIds, fallbackModels, ...rest } = UpdateBot.parse(patch);
+      const { teamBudgetUsd, teamId, hostAcknowledged: _ack, browserProfileId, approvalMode, speakReplies, mcpServerIds, fallbackModels, runBudgetUsd, dailyBudgetUsd, ...rest } = UpdateBot.parse(patch);
       if (browserProfileId !== undefined && browserProfileId !== null && !browserProfiles.has(browserProfileId)) {
         throw new Error(`Unknown browser profile: ${browserProfileId}`);
       }
@@ -882,6 +884,10 @@ export function createMockClient(): BrotClient {
       else if (approvalMode === 'ask') delete next.approvalMode;
       if (speakReplies === true) next.speakReplies = true;
       else if (speakReplies === false) delete next.speakReplies;
+      if (runBudgetUsd === null) delete next.runBudgetUsd;
+      else if (runBudgetUsd !== undefined) next.runBudgetUsd = runBudgetUsd;
+      if (dailyBudgetUsd === null) delete next.dailyBudgetUsd;
+      else if (dailyBudgetUsd !== undefined) next.dailyBudgetUsd = dailyBudgetUsd;
       if (fallbackModels === null || (fallbackModels !== undefined && fallbackModels.length === 0)) delete next.fallbackModels;
       else if (fallbackModels !== undefined) {
         validateFallbackModels(fallbackModels);
