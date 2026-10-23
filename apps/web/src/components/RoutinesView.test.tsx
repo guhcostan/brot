@@ -107,3 +107,30 @@ describe('routines page', () => {
     expect(html).toContain('disabled=""');
   });
 });
+
+describe('routines webhook rows', () => {
+  const hook = routine({
+    id: 'r_webhook',
+    name: 'Deploy hook',
+    trigger: { type: 'webhook', secret: 'wh_secret_123' },
+  });
+
+  it('shows the webhook chip, URL, copy and rotate actions', () => {
+    const html = render({ initialRoutines: [hook], initialWebhookInfo: { port: 8992 } });
+    const text = textOf(html);
+
+    expect(text).toContain(t('routines.webhookChip'));
+    expect(text).toContain('http://127.0.0.1:8992/h/wh_secret_123');
+    expect(html).toContain(`aria-label="${t('routines.webhookCopyUrl')}"`);
+    expect(text).toContain(t('routines.webhookRotate'));
+  });
+
+  it('shows the secret and a port hint when the port cannot be loaded', () => {
+    const html = render({ initialRoutines: [hook], initialWebhookInfo: {} });
+    const text = textOf(html);
+
+    expect(text).toContain(t('routines.webhookPortMissing'));
+    expect(text).toContain('wh_secret_123');
+    expect(text).not.toContain('/h/wh_secret_123');
+  });
+});

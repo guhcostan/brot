@@ -1374,6 +1374,23 @@ export function createMockClient(): BrotClient {
       } satisfies StarterTeamInstallCounts;
     },
 
+    async getWebhookInfo() {
+      return { port: 8992 };
+    },
+
+    async rotateRoutineWebhook(routineId) {
+      const current = routines.get(routineId);
+      if (current === undefined) throw new Error(`404 Unknown routine: ${routineId}`);
+      if (current.trigger.type !== 'webhook') throw new Error('409 This routine is not a webhook routine');
+      const next: Routine = {
+        ...current,
+        trigger: { type: 'webhook', secret: nextId('whsec') },
+        updatedAt: now(),
+      };
+      routines.set(routineId, next);
+      return structuredClone(next);
+    },
+
     async getBackups() {
       return structuredClone(backupStatus());
     },

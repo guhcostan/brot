@@ -95,3 +95,31 @@ describe('routine dialog', () => {
     expect(text).toContain(t('routines.noBotsTitle'));
   });
 });
+
+describe('routine dialog webhook section', () => {
+  const hook = routine({
+    id: 'routine_hook',
+    name: 'Deploy hook',
+    trigger: { type: 'webhook', secret: 'wh_secret_123' },
+  });
+
+  it('shows the URL, credential warning, copy and rotate for a webhook routine', () => {
+    const html = render({ routine: hook, webhookPort: 8992, onRotateWebhook: async () => hook });
+    const text = textOf(html);
+
+    expect(text).toContain(t('routines.dialog.webhookTitle'));
+    expect(text).toContain(t('routines.dialog.webhookCredential'));
+    expect(text).toContain('http://127.0.0.1:8992/h/wh_secret_123');
+    expect(html).toContain(`aria-label="${t('routines.webhookCopyUrl')}"`);
+    expect(text).toContain(t('routines.webhookRotate'));
+  });
+
+  it('shows the secret and the port hint without a URL when the port is unknown', () => {
+    const html = render({ routine: hook, onRotateWebhook: async () => hook });
+    const text = textOf(html);
+
+    expect(text).toContain('wh_secret_123');
+    expect(text).toContain(t('routines.webhookPortMissing'));
+    expect(text).not.toContain('/h/wh_secret_123');
+  });
+});

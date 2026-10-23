@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactElement } from 'react';
 import type { Bot } from '@brot/protocol';
 import { Badge, BotAvatar, Button, EmptyState, Skeleton, cx } from '@brot/ui';
-import type { Routine, RoutineRun, RoutineRunStatus } from '../data/client';
+import type { Routine, RoutineRun, RoutineRunStatus, WebhookInfo } from '../data/client';
+import { webhookHostname, webhookUrl } from '../webhooks';
 import { avatarOf } from '../format';
 import { t, type TranslationKey } from '../i18n';
 import { describeSchedule, formatRunDuration, relativeNextRun } from '../schedule';
 import { useClient } from './client';
 import { Clock, Plus, Trash } from './icons';
+import { CopyButton } from './CopyButton';
 import { RoutineDialog } from './RoutineDialog';
 import { ConfirmDialog } from './Dialog';
 import { PaneHeader } from './ThreadView';
@@ -19,6 +21,8 @@ export interface RoutinesViewProps {
   initialRoutines?: Routine[];
   /** Run receipts to render before the client load resolves, e.g. in an SSR render. */
   initialRuns?: RoutineRun[];
+  /** Webhook receiver info to render before the client load resolves, e.g. in an SSR render. */
+  initialWebhookInfo?: WebhookInfo;
 }
 
 const RUN_STATUS_KEY: Record<RoutineRunStatus, TranslationKey> = {
@@ -57,7 +61,7 @@ export function RoutineStatusChip({ status }: { status: RoutineRunStatus }): Rea
  * The Routines page (PRODUCT.md E1): every scheduled instruction, its next run, and its receipts.
  * The data lives here rather than in the app reducer; it is only needed while this pane is open.
  */
-export function RoutinesView({ bots, onOpenBots, onNewBot, initialRoutines, initialRuns }: RoutinesViewProps): ReactElement {
+export function RoutinesView({ bots, onOpenBots, onNewBot, initialRoutines, initialRuns, initialWebhookInfo }: RoutinesViewProps): ReactElement {
   const client = useClient();
   const [routines, setRoutines] = useState<Routine[] | null>(initialRoutines ?? null);
   const [recentRuns, setRecentRuns] = useState<RoutineRun[]>(initialRuns ?? []);
@@ -70,15 +74,18 @@ export function RoutinesView({ bots, onOpenBots, onNewBot, initialRoutines, init
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<{ routineId: string; message: string } | null>(null);
+  const [webhookInfo, setWebhookInfo] = useState<WebhookInfo | null>(initialWebhookInfo ?? null);
+  const [rotating, setRotating] = useState<Routine | null>(null);
   const filterId = useId();
   const refreshTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(refreshTimer.current), []);
 
   const load = useCallback(async () => {
     try {
-      const [list, runs] = await Promise.all([client.listRoutines(), client.listRoutineRuns({ limit: 200 })]);
+      const [list, runs, hooks] = await Promise.all([client.listRoutines(), client.listRoutineRuns({ limit: 200 }), client.getWebhookInfo().catch(() => ({}))]);
       setRoutines(list);
       setRecentRuns(runs);
+      setWebhookInfo(hooks);
       setError(null);
     } catch (cause) {
       setError(messageOf(cause));
@@ -269,6 +276,8 @@ export function RoutinesView({ bots, onOpenBots, onNewBot, initialRoutines, init
               {visible.map((routine) => (
                 <li key={routine.id} className="animate-[brot-enter_var(--dur-base)_var(--ease)_both]">
                   <RoutineRow
+                    webhookPort={webhookInfo?.port}
+                    onRotateWebhook={() => setRotating(routine)}
                     routine={routine}
                     bot={botsById[routine.botId]}
                     lastRun={lastRunByRoutine.get(routine.id)}
@@ -295,6 +304,12 @@ export function RoutinesView({ bots, onOpenBots, onNewBot, initialRoutines, init
         bots={bots}
         routine={dialog?.routine}
         onClose={() => setDialog(null)}
+        webhookPort={webhookInfo?.port}
+        onRotateWebhook={async (routineId) => {
+          const updated = await client.rotateRoutineWebhook(routineId);
+          setRoutines((current) => current?.map((entry) => (entry.id === routineId ? updated : entry)) ?? current);
+          return updated;
+        }}
         onCreate={async (input) => {
           await client.createRoutine(input);
           await load();
@@ -319,12 +334,58 @@ export function RoutinesView({ bots, onOpenBots, onNewBot, initialRoutines, init
         }}
         onClose={() => setDeleting(null)}
       />
+      <ConfirmDialog
+        open={rotating !== null}
+        title={t('routines.webhookRotateTitle')}
+        description={t('routines.webhookRotateBody')}
+        confirmLabel={t('routines.webhookRotateConfirm')}
+        tone="danger"
+        onConfirm={async () => {
+          if (rotating !== null) {
+            const updated = await client.rotateRoutineWebhook(rotating.id);
+            setRoutines((current) => current?.map((entry) => (entry.id === updated.id ? updated : entry)) ?? current);
+            setRotating(null);
+          }
+        }}
+        onClose={() => setRotating(null)}
+      />
     </section>
+  );
+}
+
+/** The webhook chip, URL (or the secret plus a port hint) and its copy/rotate actions. */
+function WebhookRow({ secret, port, onRotate, busy }: { secret: string; port: number | undefined; onRotate: () => void; busy: boolean }): ReactElement {
+  const url = webhookUrl(webhookHostname(), port, secret);
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded-md border border-line bg-surface-2 px-2 py-1.5">
+      <Badge>{t('routines.webhookChip')}</Badge>
+      {port === undefined ? (
+        <>
+          <code className="min-w-0 flex-1 truncate font-mono text-xs" title={t('routines.webhookSecret')}>
+            {secret}
+          </code>
+          <span className="text-xs text-attention-text">{t('routines.webhookPortMissing')}</span>
+        </>
+      ) : (
+        <>
+          <code className="min-w-0 flex-1 truncate font-mono text-xs" title={url}>
+            {url}
+          </code>
+          <CopyButton text={url} label={t('routines.webhookCopyUrl')} iconOnly />
+        </>
+      )}
+      <Button variant="ghost" size="sm" onClick={onRotate} disabled={busy}>
+        {t('routines.webhookRotate')}
+      </Button>
+    </div>
   );
 }
 
 interface RoutineRowProps {
   routine: Routine;
+  /** Undefined when the server did not report the webhook receiver port. */
+  webhookPort: number | undefined;
+  onRotateWebhook: () => void;
   bot: Bot | undefined;
   lastRun: RoutineRun | undefined;
   expanded: boolean;
@@ -339,7 +400,7 @@ interface RoutineRowProps {
   onDelete: () => void;
 }
 
-function RoutineRow({ routine, bot, lastRun, expanded, history, historyLoading, busy, error, onRunNow, onToggleEnabled, onToggleHistory, onEdit, onDelete }: RoutineRowProps): ReactElement {
+function RoutineRow({ routine, webhookPort, onRotateWebhook, bot, lastRun, expanded, history, historyLoading, busy, error, onRunNow, onToggleEnabled, onToggleHistory, onEdit, onDelete }: RoutineRowProps): ReactElement {
   const name = bot?.name ?? t('team.unknownBot');
   const schedule = describeSchedule(routine.trigger);
   const next = relativeNextRun(routine.nextRunAt);
@@ -371,6 +432,14 @@ function RoutineRow({ routine, bot, lastRun, expanded, history, historyLoading, 
                 : t('routines.nextUnknown')
               : t('routines.pausedHint')}
           </span>
+          {routine.trigger.type === 'webhook' ? (
+            <WebhookRow
+              secret={routine.trigger.secret}
+              port={webhookPort}
+              onRotate={onRotateWebhook}
+              busy={busy}
+            />
+          ) : null}
         </div>
         <label className="flex flex-none items-center gap-2" htmlFor={enabledId}>
           <span className="brot-sr-only">{t('routines.enabled')}</span>

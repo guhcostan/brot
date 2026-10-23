@@ -90,6 +90,7 @@ import { skillFileFallbackFromId } from '../skillFileName';
 import { parseTranscriptionStatus, validateUpdateTranscriptionSettings } from '../transcription';
 import { parseStarterTeamInstallCounts, parseStarterTeams } from '../starterTeams';
 import { parseBackupEntryValue, parseBackupStatus, validateUpdateBackupSettings } from '../backups';
+import { parseWebhookInfo } from '../webhooks';
 
 import { voiceTextAllowed } from '../voice';
 
@@ -813,6 +814,16 @@ export function createHttpClient({
       if (issue !== undefined) throw new Error(issue);
       const response = await write('PUT', '/api/my-chrome', body);
       return parseMyChromeStatus(await response.json());
+    },
+
+    async getWebhookInfo() {
+      const response = await request('/api/webhooks', { headers: { Accept: 'application/json' } });
+      return parseWebhookInfo(await response.json());
+    },
+
+    async rotateRoutineWebhook(routineId) {
+      const response = await write('POST', `/api/routines/${encodeURIComponent(routineId)}/webhook/rotate`, {});
+      return Routine.parse(await response.json());
     },
 
     async getBackups() {

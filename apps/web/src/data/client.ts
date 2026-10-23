@@ -107,6 +107,7 @@ export type {
 } from '@brot/protocol';
 import type { UpdateVoiceSettings, VoiceInfo, VoiceSettings } from '@brot/protocol';
 import type { TranscriptionSettings, TranscriptionStatus, UpdateTranscriptionSettings } from '../transcription';
+import type { WebhookInfo } from '../webhooks';
 
 export type { UpdateVoiceSettings, VoiceInfo, VoiceProvider, VoiceSettings } from '@brot/protocol';
 export type { Team } from '@brot/protocol';
@@ -196,6 +197,9 @@ export type { Decision } from '@brot/protocol';
 
 /** The optional model that picks which member answers in an auto room. */
 export type { RoomDeciderSettings, UpdateRoomDeciderSettings } from '@brot/protocol';
+
+/** The webhook receiver port and webhook routine credentials. */
+export type { WebhookInfo } from '../webhooks';
 
 /** Server backups: settings, recent entries and the scheduled next run. */
 export type { BackupEntry, BackupSettings, BackupStatus, UpdateBackupSettings } from '../backups';
@@ -493,7 +497,12 @@ export interface BrotClient {
   /** Workspace admin changes (bots, settings, logins, devices...), newest first; read-only. */
   listAdminActivity(filter?: AdminActivityFilter): Promise<import('@brot/protocol').AdminActivity[]>;
 
-  /** Server backups: settings, recent entries and the scheduled next run. */
+  /** The webhook receiver port, used to build the URL a webhook routine is called on. */
+  getWebhookInfo(): Promise<WebhookInfo>;
+  /** Replaces a webhook routine's secret; cron routines refuse with 409 and unknown ids with 404. */
+  rotateRoutineWebhook(routineId: string): Promise<Routine>;
+
+  /** Backup settings, recent backups and the scheduled next run. */
   getBackups(): Promise<import('../backups').BackupStatus>;
   /** Saves backup settings; returns the saved settings. */
   updateBackupSettings(patch: import('../backups').UpdateBackupSettings): Promise<import('../backups').BackupSettings>;

@@ -13,7 +13,9 @@ import {
   weekdayName,
   type SchedulePreset,
 } from '../schedule';
-import { Dialog } from './Dialog';
+import { ConfirmDialog, Dialog } from './Dialog';
+import { CopyButton } from './CopyButton';
+import { webhookHostname, webhookUrl } from '../webhooks';
 
 export interface RoutineDialogProps {
   open: boolean;
@@ -23,6 +25,10 @@ export interface RoutineDialogProps {
   onClose: () => void;
   onCreate: (input: CreateRoutineInput) => Promise<unknown>;
   onUpdate: (routineId: string, patch: UpdateRoutine) => Promise<unknown>;
+  /** The webhook receiver port, when the server reported it. */
+  webhookPort?: number;
+  /** Rotates a webhook routine's secret and resolves with the refreshed routine. */
+  onRotateWebhook?: (routineId: string) => Promise<Routine>;
 }
 
 const PRESETS: ReadonlyArray<Exclude<SchedulePreset, 'custom'>> = ['every15', 'hourly', 'daily', 'weekdays', 'weekly'];
@@ -39,7 +45,7 @@ const PRESET_LABEL: Record<SchedulePreset, TranslationKey> = {
 const WEEKDAYS = [0, 1, 2, 3, 4, 5, 6] as const;
 
 /** The routine form: what the bot should do, on which schedule, in which timezone. */
-export function RoutineDialog({ open, bots, routine, onClose, onCreate, onUpdate }: RoutineDialogProps): ReactElement {
+export function RoutineDialog({ open, bots, routine, onClose, onCreate, onUpdate, webhookPort, onRotateWebhook }: RoutineDialogProps): ReactElement {
   return (
     <Dialog
       open={open}
@@ -48,14 +54,13 @@ export function RoutineDialog({ open, bots, routine, onClose, onCreate, onUpdate
       description={t('routines.dialog.description')}
       onClose={onClose}
     >
-      {open ? <RoutineForm bots={bots} routine={routine} onClose={onClose} onCreate={onCreate} onUpdate={onUpdate} /> : null}
+      {open ? <RoutineForm bots={bots} routine={routine} onClose={onClose} onCreate={onCreate} onUpdate={onUpdate} {...(webhookPort === undefined ? {} : { webhookPort })} {...(onRotateWebhook === undefined ? {} : { onRotateWebhook })} /> : null}
     </Dialog>
   );
 }
 
-function RoutineForm({ bots, routine, onClose, onCreate, onUpdate }: Omit<RoutineDialogProps, 'open'>): ReactElement {
+function RoutineForm({ bots, routine, onClose, onCreate, onUpdate, webhookPort, onRotateWebhook }: Omit<RoutineDialogProps, 'open'>): ReactElement {
   const cronTrigger = routine?.trigger.type === 'cron' ? routine.trigger : undefined;
-  const webhook = routine?.trigger.type === 'webhook';
   const initial = matchSchedule(cronTrigger?.cron ?? '0 9 * * 1-5');
   const choices = bots.filter((bot) => !bot.archived);
   const fixedBot = routine === undefined ? undefined : bots.find((bot) => bot.id === routine.botId);
@@ -74,6 +79,11 @@ function RoutineForm({ bots, routine, onClose, onCreate, onUpdate }: Omit<Routin
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [tried, setTried] = useState(false);
+  const [rotatedRoutine, setRotatedRoutine] = useState<Routine | undefined>(undefined);
+  const [rotateOpen, setRotateOpen] = useState(false);
+  const shownRoutine = rotatedRoutine ?? routine;
+  const webhookTrigger = shownRoutine?.trigger.type === 'webhook' ? shownRoutine.trigger : undefined;
+  const webhook = webhookTrigger !== undefined;
   const idBase = useId();
   const botFieldId = `${idBase}-bot`;
   const timezoneId = `${idBase}-timezone`;
@@ -167,8 +177,40 @@ function RoutineForm({ bots, routine, onClose, onCreate, onUpdate }: Omit<Routin
         rows={3}
       />
 
-      {webhook ? (
-        <p className="m-0 rounded-md border border-line bg-surface-2 px-3 py-2 text-sm text-ink-2">{t('routines.dialog.webhook')}</p>
+      {webhookTrigger !== undefined ? (
+        <div className="flex flex-col gap-2 rounded-md border border-line bg-surface-2 p-3">
+          <span className="text-sm font-medium">{t('routines.dialog.webhookTitle')}</span>
+          <p className="m-0 text-xs text-ink-2">{t('routines.dialog.webhookCredential')}</p>
+          {webhookPort === undefined ? (
+            <div className="flex flex-col gap-1">
+              <span className="text-xs text-ink-3">{t('routines.webhookSecret')}</span>
+              <code className="truncate font-mono text-xs">{webhookTrigger.secret}</code>
+              <p className="m-0 text-xs text-attention-text">{t('routines.webhookPortMissing')}</p>
+            </div>
+          ) : (
+            <div className="flex flex-wrap items-center gap-2">
+              <code className="min-w-0 flex-1 truncate font-mono text-xs">{webhookUrl(webhookHostname(), webhookPort, webhookTrigger.secret)}</code>
+              <CopyButton text={webhookUrl(webhookHostname(), webhookPort, webhookTrigger.secret)} label={t('routines.webhookCopyUrl')} />
+            </div>
+          )}
+          {onRotateWebhook !== undefined && routine !== undefined ? (
+            <Button variant="secondary" size="sm" className="self-start" onClick={() => setRotateOpen(true)}>
+              {t('routines.webhookRotate')}
+            </Button>
+          ) : null}
+          <ConfirmDialog
+            open={rotateOpen}
+            title={t('routines.webhookRotateTitle')}
+            description={t('routines.webhookRotateBody')}
+            confirmLabel={t('routines.webhookRotateConfirm')}
+            tone="danger"
+            onConfirm={async () => {
+              if (routine === undefined || onRotateWebhook === undefined) return;
+              setRotatedRoutine(await onRotateWebhook(routine.id));
+            }}
+            onClose={() => setRotateOpen(false)}
+          />
+        </div>
       ) : (
         <fieldset className="m-0 flex flex-col gap-3 border-0 p-0">
           <legend className="mb-1 p-0 text-sm font-medium">{t('routines.schedule')}</legend>
