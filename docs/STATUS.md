@@ -586,6 +586,23 @@ mapped in `docs/MAUSBOT-PARITY.md` (34 bots / 7 teams, 33 bots with a browser an
   (30-turn thread) passes, B4 passes after the fix. Total $0.126 across the three runs. Leftovers cleaned
   (only Capy/Teste remain).
 - Suite: 2615 tests (275 files), typecheck 12/12, lint clean.
+## Wave 40: memory upkeep, restart eval (2026-10-23)
+
+- **Memory upkeep.** Deterministic duplicate merge without a model: content is normalized
+  (trim/collapse whitespace/strip trailing punctuation/lowercase) and grouped by kind inside one scope, keeping
+  the newest of each group. GET /api/memories/upkeep returns the dry-run report; POST
+  /api/memories/upkeep validates the requested ids against a fresh report (all or nothing; 400 with the
+  offending ids) and removes only the duplicate side through the memory repo, so the journal records every
+  deletion. Bot/workspace/different-bot memories never mix; blanks never group. The bot Memory tab and
+  Settings About me gain a Tidy up dialog with the preview, per-group keep/remove cards, disabled-when-clean
+  button, result line and inline errors. en/pt-BR/es.
+- **Restart eval (C6) in two phases, live:** phase 1 held a real send approval, the dev server was
+  restarted, and phase 2 passed: the interrupted run is failed with "server restarted", the held send never
+  executed (0 successful results after 10 s) and the approval was not allowed. One review note: the stale
+  approval card stays pending in the list after a restart — a possible polish item.
+- Verified memory upkeep live: three textual variants of one preference plus a unique note merged to the
+  newest two, the journal showed the two deletions, and the follow-up report was clean.
+- Suite: 2650 tests (280 files), typecheck 12/12, lint clean. Eval leftovers cleaned (only Capy/Teste).
 ## Next
 
 1. Re-run the eval suite on a live model once OpenCode Go has quota (`apps/evals`, `--base` to the server), including B8 and C; the 2026-10-20 results predate the read auto-allow and the fixes above.

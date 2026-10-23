@@ -78,7 +78,7 @@ Legend: ✅ parity or better · 🟡 partial · ❌ absent · 🎯 current wave.
 | Routines: cron/weekday with timezone, receipts, recovery, calendar | ✅ | ✅ runs, receipts, catch-up, timezone, routines page; calendar next | W3 done |
 | Webhook triggers | ✅ | 🟡 receiver exists, no signed secret UX | W6 |
 | App-event triggers | ✅ | ❌ | W6 |
-| Memory: MEMORY.md + topics + recall + upkeep + journal/undo + About me | ✅ | 🟡 recall, caps, editors, About-me facts and a journal with undo are live; upkeep/consolidation next | W4 |
+| Memory: MEMORY.md + topics + recall + upkeep + journal/undo + About me | ✅ | ✅ recall, caps, editors, About-me facts, journal with undo and a deterministic upkeep merge | W4 done |
 | Skills: SKILL.md import/export, per-bot on/off, learned-skill approval | ✅ | ✅ SKILL.md import/export in the UI with prompt budgets; learned-skill review next | W4 |
 | Voice: TTS providers, spoken replies, voice notes, calls, dictation | ✅ | 🟡 system and OpenAI-compatible TTS, listen button, per-bot auto-speak; calls/voice notes/dictation next | W8 |
 | Message search across threads | ✅ | ✅ GET /api/search and the sidebar Messages section | W8 done |
