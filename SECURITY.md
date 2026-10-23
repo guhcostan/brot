@@ -28,9 +28,11 @@ nobody relies on a control that does not exist yet.
 - **Webhooks.** A separate listener on its own port with only `POST /h/:secret`; the secret is an
   unguessable path. There is no HMAC yet (see below).
 - **Pairing.** A single-use, two-minute token plus a 6-digit code shown as a QR payload; the token is
-  exchanged for a per-device bearer token. The 6-digit code is not verified server-side yet. The relay is
-  a blind WebSocket forwarder (it does not inspect frames), but the app does not yet add end-to-end
-  encryption on top of it.
+  exchanged for a per-device bearer token only when the code also matches (constant-time compare, the
+  token is consumed on any attempt, and a wrong token and a wrong code are indistinguishable). Failed
+  attempts are rate limited per caller address: five failures in a rolling minute lock that address for
+  ten minutes. The relay is a blind WebSocket forwarder (it does not inspect frames), but the app does
+  not yet add end-to-end encryption on top of it.
 - **Containment limits, stated plainly.** Browser automation on the server machine runs Chrome as the
   person's OS user, constrained by the bot's egress allowlist through an HTTP CONNECT proxy, not by a
   network namespace. The headed sign-in window is deliberately unproxied while the person drives it.

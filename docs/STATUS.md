@@ -448,6 +448,22 @@ mapped in `docs/MAUSBOT-PARITY.md` (34 bots / 7 teams, 33 bots with a browser an
 - Suite: 2379 tests (246 files), typecheck 12/12, lint clean; full `pnpm build` green.
 - Known flakes (seen under full-suite load, always green isolated/rerun): desktop takeover timing, browser
   viewer screen capture, tasks chain-max route.
+## Wave 32: pairing code validation and rate limiting (2026-10-22)
+
+- **The pairing code is now verified.** PairingComplete requires the six-digit code (400 when missing or
+  malformed); the pending token keeps its code and completion compares it in constant time. A wrong code
+  and an unknown/expired token produce the same 401, the token is consumed on every attempt, and only a
+  successful pairing creates a device. The QR payload carries the code ({v,host,port,token,code}).
+- **Attempt rate limiting.** Five failures in a rolling minute lock the normalized caller address for ten
+  minutes (429 with the remaining minutes); a locked caller cannot burn tokens, success clears the counter,
+  the map is bounded and pruned without timers.
+- **Clients.** The mobile payload schema requires the scanned code; the confirm step shows it read-only from
+  a QR or asks for it in a numeric six-digit field when a raw token is pasted; the session sends it. Settings
+  keeps the code prominent with a Copy code action and copy explaining manual entry needs it. en/pt-BR/es.
+- Verified live: wrong code 401 and token consumed, missing code 400, correct code issued a device token,
+  five failures then the correct code got the 429 lock message; device cleaned up.
+- Suite: 2390 tests (246 files), typecheck 12/12, lint clean (fixed a shadowing warning in the mobile pair
+  screen during integration).
 ## Next
 
 1. Re-run the eval suite on a live model once OpenCode Go has quota (`apps/evals`, `--base` to the server), including B8 and C; the 2026-10-20 results predate the read auto-allow and the fixes above.

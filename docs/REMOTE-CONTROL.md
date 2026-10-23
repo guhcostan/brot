@@ -23,12 +23,13 @@
 - **Desktop / self-host**: the server opens an **outbound** connection to the relay, so no port forwarding and no public IP are needed. The relay forwards opaque frames.
 - **Direct paths** when available: same LAN (mDNS discovery), Tailscale, or the user's own reverse proxy. The relay is the fallback.
 
-## Pairing flow
-1. Desktop: **Settings → Devices → Pair phone** shows a QR code plus a 6-word code. The QR contains `{serverId, relayUrl, ephemeralPubKey, pairingToken(ttl=120s)}`.
-2. The phone scans it, and the two sides run a **Noise XX / X25519** handshake over the relay. Both screens show a **4-emoji safety check**.
-3. The user confirms on desktop. The server stores a device record `{deviceId, pubKey, name, role, lastSeen}`.
-4. Each device then holds a long-lived keypair. Sessions rotate keys. Lost phone: **Revoke** in Settings.
-5. Per-device roles: `full` (chat + approvals + takeover) or `approver` (approvals only) or `viewer`.
+## Pairing flow (as built)
+1. Desktop: **Settings → Devices → Pair phone** shows a QR code plus a 6-digit code. The QR is `{v:1, host, port, token, code}` with a single-use token (ttl=120s); the code is also shown/copyable for manual entry.
+2. The phone scans the QR (or pastes the token and types the code), then calls `POST /api/pairing/complete` with the token, the code, its device name, its X25519 public key and the role. The server checks the code in constant time, consumes the token and stores the device record `{deviceId, pubKey, name, role}`; a wrong code and a wrong/expired token are the same 401, and repeated failures lock the caller address for ten minutes (429).
+3. The server returns a per-device bearer token, which the phone stores in secure storage; each device also holds its long-lived keypair. Lost phone: **Revoke** in Settings.
+4. Per-device roles: `full` (chat + approvals + takeover) or `approver` (approvals only) or `viewer`.
+
+Still planned, not built: the outbound relay with a Noise XX handshake and a 4-emoji safety check, and the cloud/relay fallback paths described above. Pairing today is direct to the server address in the QR.
 
 ## What the phone can do
 | Feature | P |
