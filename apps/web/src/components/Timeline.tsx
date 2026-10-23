@@ -17,6 +17,7 @@ import {
   type ToolItem,
 } from '../state/thread';
 import { approvalLabels } from './approvalLabels';
+import { ApprovalStatusBadge } from './approvalStatus';
 import { timelineLabels, toStep } from './toolLabels';
 import { taskStatusLabel } from './taskLabels';
 import { ArrowRight, Baton, Bookmark } from './icons';
@@ -136,17 +137,23 @@ export function Timeline({ thread, mode, defaultBotId, members, onDecide, voice,
             );
           case 'tool':
             return <ToolTimeline key={key} steps={[toStep(item)]} labels={stepLabels} />;
-          case 'approval':
+          case 'approval': {
+            // An expired approval has no decision, so the card shows no decision badge; the muted label
+            // explains where the card went instead (the pending list already dropped it).
+            const status = item.approval.status;
             return (
-              <ApprovalCard
-                key={key}
-                approval={item.approval}
-                labels={cardLabels}
-                onDecide={(decision, reply) => {
-                  void onDecide(item.approval.id, decision, reply);
-                }}
-              />
+              <div key={key} className="flex flex-col gap-1.5">
+                {status === 'expired' ? <ApprovalStatusBadge status="expired" className="self-start" /> : null}
+                <ApprovalCard
+                  approval={item.approval}
+                  labels={cardLabels}
+                  onDecide={(decision, reply) => {
+                    void onDecide(item.approval.id, decision, reply);
+                  }}
+                />
+              </div>
             );
+          }
           case 'exchange':
             return <ExchangeRow key={key} item={item} thread={thread} looking={gazes[item.fromBotId] === item.toBotId} renderText={renderText} />;
           case 'handoff':

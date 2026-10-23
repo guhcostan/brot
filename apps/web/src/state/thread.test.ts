@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Attachment, CanonicalEvent } from '@brot/protocol';
-import { botStatus, foldEvents, sumCost, type ApprovalItem, type MessageItem, type ToolItem } from './thread';
+import { botStatus, foldEvents, pendingApprovals, sumCost, type ApprovalItem, type MessageItem, type ToolItem } from './thread';
 
 const at = '2026-10-19T12:00:00.000Z';
 const base = { at, threadId: 't1', runId: 'r1' };
@@ -81,6 +81,23 @@ describe('foldEvents', () => {
     expect(resolved.run).toBe('running');
     expect(resolved.items[0] as ApprovalItem).toMatchObject({ approval: { status: 'allowed', decision: 'allow_once' } });
     expect(botStatus(resolved)).toBe('working');
+  });
+
+  it('clears an expired approval from the pending set without inventing a decision', () => {
+    const state = foldEvents([
+      { ...base, id: 'e1', type: 'approval.requested', approval },
+      {
+        ...base,
+        id: 'e2',
+        type: 'approval.resolved',
+        approval: { ...approval, status: 'expired', resolvedAt: at },
+      },
+    ]);
+    const item = state.items[0] as ApprovalItem;
+
+    expect(item.approval.status).toBe('expired');
+    expect(item.approval.decision).toBeUndefined();
+    expect(pendingApprovals(state)).toEqual([]);
   });
 
   it('marks failed runs and keeps the error visible as a system notice', () => {
