@@ -1,5 +1,6 @@
 import type {
   Approval,
+  AdminActivity,
   ApprovalDecision,
   ApprovalKind,
   Attachment,
@@ -32,6 +33,7 @@ import type {
   Thread,
 } from '@brot/protocol';
 import {
+  AdminActivityQuery,
   ComputerInput,
   CreateBot,
   CreateBotPreset,
@@ -128,6 +130,7 @@ import {
 } from './fixtures';
 import { findMentions } from '../mentions';
 import { skillFileFilename } from '../skillFileName';
+
 
 
 
@@ -303,6 +306,17 @@ export function createMockClient(): BrotClient {
   const bots = new Map<string, Bot>(DEMO_BOTS.map((bot) => [bot.id, structuredClone(bot)]));
   const botPresets = new Map<string, BotPreset>(DEMO_BOT_PRESETS.map((preset) => [preset.id, structuredClone(preset)]));
   const decisions: Decision[] = DEMO_DECISIONS.map((decision) => structuredClone(decision));
+  const activityAt = (minutesAgo: number) => new Date(Date.now() - minutesAgo * 60_000).toISOString();
+  const adminActivity: AdminActivity[] = [
+    { id: nextId('activity'), action: 'updated', targetType: 'settings', summary: 'Updated transcription settings', actor: 'local', at: activityAt(12) },
+    { id: nextId('activity'), action: 'created', targetType: 'bot', summary: 'Created bot Capy', actor: 'local', at: activityAt(65) },
+    { id: nextId('activity'), action: 'revoked', targetType: 'device', summary: 'Revoked phone Pixel 9', actor: 'Pixel 9', at: activityAt(190) },
+    { id: nextId('activity'), action: 'deleted', targetType: 'saved-login', summary: 'Deleted saved login for GitHub', actor: 'local', at: activityAt(430) },
+    { id: nextId('activity'), action: 'ran', targetType: 'routine', summary: 'Ran routine Morning brief', actor: 'local', at: activityAt(960) },
+  ];
+  const recordAdminActivity = (entry: Omit<AdminActivity, 'id' | 'at'>): void => {
+    adminActivity.unshift({ id: nextId('activity'), at: now(), ...entry });
+  };
   const teams = new Map<string, Team>(DEMO_TEAMS.map((team) => [team.id, structuredClone(team)]));
   const nameOf = (botId: string) => bots.get(botId)?.name ?? botId;
   const byTeamName = (a: Team, b: Team) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id);
@@ -927,6 +941,7 @@ export function createMockClient(): BrotClient {
       bots.set(created.id, created);
 
       if (created.browser === true) setBrowserStateOf(created, 'stopped');
+      recordAdminActivity({ action: 'created', targetType: 'bot', targetId: created.id, summary: `Created bot ${created.name}`, actor: 'local' });
       return structuredClone(created);
     },
 
@@ -976,12 +991,14 @@ export function createMockClient(): BrotClient {
           if (!browserStates.has(nextKey)) browserStates.set(nextKey, 'stopped');
         }
       }
+      recordAdminActivity({ action: 'updated', targetType: 'bot', targetId: botId, summary: `Updated bot ${next.name}`, actor: 'local' });
       return structuredClone(next);
     },
 
     async deleteBot(botId) {
       const removed = bots.get(botId);
       if (!bots.delete(botId)) throw new Error(`Unknown bot: ${botId}`);
+      if (removed !== undefined) recordAdminActivity({ action: 'deleted', targetType: 'bot', targetId: botId, summary: `Deleted bot ${removed.name}`, actor: 'local' });
       if (removed) {
         const key = browserStateKeyOf(removed);
         browserStates.delete(key);
@@ -1139,6 +1156,15 @@ export function createMockClient(): BrotClient {
         .filter((memory) => memory.scope === parsed.scope && (parsed.botId === undefined || memory.botId === parsed.botId))
         .map((memory) => structuredClone(memory));
       return { removed: removed.map((memory) => structuredClone(memory)), kept };
+    },
+
+    async listAdminActivity(filter = {}) {
+      const query = AdminActivityQuery.parse(filter);
+      return adminActivity
+        .slice()
+        .sort((a, b) => Date.parse(b.at) - Date.parse(a.at))
+        .slice(0, query.limit)
+        .map((entry) => structuredClone(entry));
     },
 
     async listMemoryJournal(filter = {}) {
@@ -1592,6 +1618,7 @@ export function createMockClient(): BrotClient {
         ...(typeof body.model === 'string' ? { model: body.model } : {}),
         updatedAt: now(),
       };
+      recordAdminActivity({ action: 'updated', targetType: 'settings', summary: 'Updated room routing settings', actor: 'local' });
       return structuredClone(roomDecider);
     },
 
@@ -1732,6 +1759,7 @@ export function createMockClient(): BrotClient {
     async runRoutineNow(routineId) {
       const routine = routines.get(routineId);
       if (!routine) throw new Error('404 Routine not found');
+      recordAdminActivity({ action: 'ran', targetType: 'routine', targetId: routineId, summary: `Ran routine ${routine.name}`, actor: 'local' });
       if (runningRoutines.has(routineId)) throw new Error('409 Routine is already running');
       runningRoutines.add(routineId);
       const startedAt = now();
@@ -1811,6 +1839,7 @@ export function createMockClient(): BrotClient {
         ...(patch.baseUrl ?? previous.baseUrl) === undefined ? {} : { baseUrl: patch.baseUrl ?? previous.baseUrl },
         updatedAt: now(),
       };
+      recordAdminActivity({ action: 'updated', targetType: 'settings', summary: 'Updated voice settings', actor: 'local' });
       return structuredClone(voiceSettings);
     },
 
@@ -1828,7 +1857,8 @@ export function createMockClient(): BrotClient {
     async removeDevice(deviceId) {
       const index = devices.findIndex((device) => device.id === deviceId);
       if (index < 0) throw new Error(`Unknown device: ${deviceId}`);
-      devices.splice(index, 1);
+      const [removed] = devices.splice(index, 1);
+      if (removed !== undefined) recordAdminActivity({ action: 'revoked', targetType: 'device', targetId: removed.id, summary: `Revoked phone ${removed.name}`, actor: removed.name });
     },
 
     async startPairing() {
@@ -1902,6 +1932,7 @@ export function createMockClient(): BrotClient {
         ...(body.model === null ? {} : { model: body.model }),
         updatedAt: now(),
       };
+      recordAdminActivity({ action: 'updated', targetType: 'settings', summary: 'Updated transcription settings', actor: 'local' });
       return transcriptionStatus();
     },
 
@@ -1910,6 +1941,7 @@ export function createMockClient(): BrotClient {
       const issue = myChromeEndpointIssue(body.endpoint);
       if (issue !== undefined) throw new Error(issue);
       myChrome = { endpoint: body.endpoint, updatedAt: now() };
+      recordAdminActivity({ action: 'updated', targetType: 'settings', summary: 'Updated My Chrome settings', actor: 'local' });
       return myChromeStatus(myChrome);
     },
 
@@ -2286,6 +2318,7 @@ export function createMockClient(): BrotClient {
         updatedAt: at,
       };
       savedLogins.set(id, created);
+      recordAdminActivity({ action: 'created', targetType: 'saved-login', targetId: id, summary: `Added saved login for ${created.name}`, actor: 'local' });
       return structuredClone(created);
     },
 
@@ -2318,7 +2351,9 @@ export function createMockClient(): BrotClient {
     },
 
     async deleteSavedLogin(loginId) {
+      const removed = savedLogins.get(loginId);
       if (!savedLogins.delete(loginId)) throw new Error(`Unknown saved login: ${loginId}`);
+      if (removed !== undefined) recordAdminActivity({ action: 'deleted', targetType: 'saved-login', targetId: loginId, summary: `Deleted saved login for ${removed.name}`, actor: 'local' });
       savedLoginSecrets.delete(loginId);
     },
 

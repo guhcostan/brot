@@ -107,6 +107,7 @@ export type {
 } from '@brot/protocol';
 import type { UpdateVoiceSettings, VoiceInfo, VoiceSettings } from '@brot/protocol';
 import type { TranscriptionSettings, TranscriptionStatus, UpdateTranscriptionSettings } from '../transcription';
+
 export type { UpdateVoiceSettings, VoiceInfo, VoiceProvider, VoiceSettings } from '@brot/protocol';
 export type { Team } from '@brot/protocol';
 
@@ -195,6 +196,14 @@ export type { Decision } from '@brot/protocol';
 
 /** The optional model that picks which member answers in an auto room. */
 export type { RoomDeciderSettings, UpdateRoomDeciderSettings } from '@brot/protocol';
+
+/** One workspace change in the admin audit list. */
+export type { AdminAction, AdminActivity } from '@brot/protocol';
+
+/** The filters GET /api/activity accepts; limit defaults to 50 on the server. */
+export interface AdminActivityFilter {
+  limit?: number;
+}
 
 /** The optional model that transcribes audio attachments before a run. */
 export type { TranscriptionSettings, TranscriptionStatus, UpdateTranscriptionSettings };
@@ -474,6 +483,9 @@ export interface BrotClient {
   getTranscriptionStatus(): Promise<TranscriptionStatus>;
   /** Saves the transcription model (null clears it) and returns the fresh status. */
   updateTranscriptionSettings(input: UpdateTranscriptionSettings): Promise<TranscriptionStatus>;
+
+  /** Workspace admin changes (bots, settings, logins, devices...), newest first; read-only. */
+  listAdminActivity(filter?: AdminActivityFilter): Promise<import('@brot/protocol').AdminActivity[]>;
   /** Opens a headed window so the person can sign in; the bot keeps the profile afterwards. */
   startBrowserLogin(botId: string): Promise<BrowserStatus>;
   /** Closes the browser, saving its profile. Shared profiles close for every bot using them. */

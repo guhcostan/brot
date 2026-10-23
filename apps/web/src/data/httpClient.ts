@@ -1,4 +1,6 @@
 import {
+  AdminActivity,
+  AdminActivityQuery,
   Approval,
   Attachment,
   Bot,
@@ -86,6 +88,7 @@ import {
 
 import { skillFileFallbackFromId } from '../skillFileName';
 import { parseTranscriptionStatus, validateUpdateTranscriptionSettings } from '../transcription';
+
 import { voiceTextAllowed } from '../voice';
 
 import {
@@ -808,6 +811,13 @@ export function createHttpClient({
       if (issue !== undefined) throw new Error(issue);
       const response = await write('PUT', '/api/my-chrome', body);
       return parseMyChromeStatus(await response.json());
+    },
+
+    async listAdminActivity(filter = {}) {
+      const query = AdminActivityQuery.parse(filter);
+      const suffix = querySuffix({ limit: String(query.limit) });
+      const response = await request(`/api/activity${suffix}`, { headers: { Accept: 'application/json' } });
+      return AdminActivity.array().parse(await response.json());
     },
 
     async getTranscriptionStatus() {

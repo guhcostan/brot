@@ -44,6 +44,7 @@ function render(overrides: Partial<SettingsViewProps> = {}, bots = botsRecord): 
     initialWorkspaceMemories: DEMO_WORKSPACE_MEMORIES,
     initialBotPresets: DEMO_BOT_PRESETS,
     initialDecisions: DEMO_DECISIONS,
+    initialAdminActivity: [],
     initialProviders: DEMO_PROVIDERS,
     initialRoomDecider: {},
     ...overrides,
@@ -322,6 +323,17 @@ describe('settings activity', () => {
     expect(text).toContain(t('settings.activityEmptyTitle'));
     expect(text).toContain(t('settings.activityEmptyBody'));
     expect(text).toContain(t('settings.activityDownload'));
+  });
+});
+
+describe('settings admin activity', () => {
+  it('includes the admin activity section after the decision Activity section', () => {
+    const text = textOf(render());
+
+    expect(text).toContain(t('settings.adminActivity'));
+    expect(text).toContain(t('settings.adminActivityBody'));
+    expect(text).toContain(t('settings.adminActivityRefresh'));
+    expect(text).toContain(t('settings.adminActivityEmptyTitle'));
   });
 });
 
