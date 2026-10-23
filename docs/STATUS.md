@@ -392,6 +392,19 @@ mapped in `docs/MAUSBOT-PARITY.md` (34 bots / 7 teams, 33 bots with a browser an
 - Verified live: a bot whose primary deepseek model has no key emitted run.started for deepseek, then
   run.started again with opencode-go on the same runId and completed with "fallback ok".
 - Suite: 2267 tests (232 files), typecheck 12/12, lint clean.
+## Wave 28: per-bot budget caps (2026-10-22)
+
+- **Caps.** Bots can cap spending per run and per UTC day. The daily cap is checked once at run start
+  before the engine or computer (sum of the bot's runs since UTC midnight, one query) and fails the run
+  instantly with a plain message; the run cap is checked after every usage report and aborts the active run
+  when cost crosses it, marking it failed with the exact spent/limit message, keeping partial text, never
+  cancelled and never falling back to another model. Caps are independent, 0 blocks spending, and uncapped
+  bots behave exactly as before. Migration 0019 adds bots.run_budget_usd and bots.daily_budget_usd; bot
+  routes validate both. The bot dialog gains a Budgets fieldset (two $ inputs with inline validation for
+  negatives/decimals/non-numbers, parsed-amount hint, create/patch-only-when-changed, null on clear).
+- Verified live: a $0 daily cap failed with zero tokens; a $0 run cap aborted after the first usage report
+  with the exact message.
+- Suite: 2293 tests (235 files), typecheck 12/12, lint clean.
 ## Next
 
 1. Re-run the eval suite on a live model once OpenCode Go has quota (`apps/evals`, `--base` to the server), including B8 and C; the 2026-10-20 results predate the read auto-allow and the fixes above.
