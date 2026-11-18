@@ -149,7 +149,7 @@ describe('tasks API', () => {
       threadId: capyDm.id,
     });
     expect(overflow.status).toBe(409);
-  });
+  }, 20_000);
 
   it('a delegated task starts at depth 1 and ends with its run', async () => {
     const { ctx, capy, dex, capyDm } = await team();

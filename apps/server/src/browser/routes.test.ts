@@ -125,6 +125,7 @@ function fakeHostBrowser(): FakeHostBrowser {
 let ctx: TestContext;
 let host: FakeHostBrowser;
 let app: ReturnType<typeof createApp>;
+let remoteApp: ReturnType<typeof createApp>;
 let browserBot: Bot;
 let plainBot: Bot;
 let desktopBot: Bot;
@@ -144,6 +145,12 @@ beforeEach(async () => {
     ...ctx.services,
     config: { host: '127.0.0.1', port: 8799, mode: 'server' },
     trustLoopback: true,
+    browser: host,
+  });
+  remoteApp = createApp({
+    ...ctx.services,
+    config: { host: '127.0.0.1', port: 8799, mode: 'server' },
+    trustLoopback: false,
     browser: host,
   });
   browserBot = await createBot({ browser: true });
@@ -426,7 +433,7 @@ describe('GET /api/bots/:id/browser/screen', () => {
   it('is readable by a viewer device, since viewers may watch', async () => {
     const token = randomBytes(24).toString('base64url');
     await ctx.services.repos.devices.create({ name: 'Phone', role: 'viewer', publicKey: 'test-public-key', tokenHash: hashDeviceToken(token) });
-    const res = await call(ctx.remote, 'GET', `/api/bots/${browserBot.id}/browser/screen`, undefined, {
+    const res = await call(remoteApp, 'GET', `/api/bots/${browserBot.id}/browser/screen`, undefined, {
       authorization: `Bearer ${token}`,
     });
     expect(res.status).toBe(200);
@@ -526,10 +533,10 @@ describe('POST /api/bots/:id/browser/input', () => {
     const token = randomBytes(24).toString('base64url');
     await ctx.services.repos.devices.create({ name: 'Phone', role: 'viewer', publicKey: 'test-public-key', tokenHash: hashDeviceToken(token) });
     const auth = { authorization: `Bearer ${token}` };
-    expect((await call(ctx.remote, 'GET', `/api/bots/${browserBot.id}/browser/takeover`, undefined, auth)).status).toBe(200);
-    expect((await call(ctx.remote, 'POST', `/api/bots/${browserBot.id}/browser/takeover`, { active: true }, auth)).status).toBe(403);
+    expect((await call(remoteApp, 'GET', `/api/bots/${browserBot.id}/browser/takeover`, undefined, auth)).status).toBe(200);
+    expect((await call(remoteApp, 'POST', `/api/bots/${browserBot.id}/browser/takeover`, { active: true }, auth)).status).toBe(403);
     expect(
-      (await call(ctx.remote, 'POST', `/api/bots/${browserBot.id}/browser/input`, { type: 'move', x: 1, y: 1 }, auth)).status,
+      (await call(remoteApp, 'POST', `/api/bots/${browserBot.id}/browser/input`, { type: 'move', x: 1, y: 1 }, auth)).status,
     ).toBe(403);
   });
 });

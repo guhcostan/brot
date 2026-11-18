@@ -541,7 +541,7 @@ export function createHostBrowserService(deps: HostBrowserDeps): HostBrowserServ
           const info = browsers.get(key);
           if (info !== undefined) await end(info, key);
           takeovers.delete(key);
-          await rm(profileDir(deps.home, key), { recursive: true, force: true });
+          await rm(profileDir(deps.home, key), { recursive: true, force: true, maxRetries: 15, retryDelay: 100 });
         });
       })();
     },
@@ -566,7 +566,7 @@ export function createHostBrowserService(deps: HostBrowserDeps): HostBrowserServ
         const info = browsers.get(profileId);
         if (info !== undefined) await end(info, profileId);
         takeovers.delete(profileId);
-        await rm(profileDir(deps.home, profileId), { recursive: true, force: true });
+        await rm(profileDir(deps.home, profileId), { recursive: true, force: true, maxRetries: 15, retryDelay: 100 });
       });
     },
 
