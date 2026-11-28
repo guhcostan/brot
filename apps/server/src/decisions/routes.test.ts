@@ -61,11 +61,23 @@ async function seedDecision(
   return (await ctx.services.repos.approvals.get(approval.id))!;
 }
 
+/**
+ * A timestamp from yesterday at the given UTC hour: inside the default 30-day window whatever today is,
+ * so these tests don't start failing once a hardcoded date falls out of it.
+ */
+function recent(referenceTime: number, hourUtc: number): string {
+  const day = new Date(referenceTime - 24 * 60 * 60 * 1000);
+  day.setUTCHours(hourUtc, 0, 0, 0);
+  return day.toISOString();
+}
+
 describe('GET /api/decisions', () => {
   it('lists resolved decisions newest first, with the audit fields and without args', async () => {
-    const older = await seedDecision({ resolvedAt: '2026-10-20T10:00:00.000Z' });
+    const now = Date.now();
+    const newerAt = recent(now, 11);
+    const older = await seedDecision({ resolvedAt: recent(now, 10) });
     const newer = await seedDecision({
-      resolvedAt: '2026-10-20T11:00:00.000Z',
+      resolvedAt: newerAt,
       decision: 'deny',
       reply: 'Not this one',
     });
@@ -84,7 +96,7 @@ describe('GET /api/decisions', () => {
       summary: 'Send the invoice',
       decision: 'deny',
       reply: 'Not this one',
-      decidedAt: '2026-10-20T11:00:00.000Z',
+      decidedAt: newerAt,
     });
     expect(decisions[0]).not.toHaveProperty('args');
     expect(decisions[1]?.reply).toBeUndefined();
@@ -102,9 +114,10 @@ describe('GET /api/decisions', () => {
   });
 
   it('filters by decision, bot and limit', async () => {
-    const denied = await seedDecision({ decision: 'deny', resolvedAt: '2026-10-20T10:00:00.000Z' });
-    await seedDecision({ resolvedAt: '2026-10-20T11:00:00.000Z' });
-    await seedDecision({ resolvedAt: '2026-10-20T12:00:00.000Z' });
+    const now = Date.now();
+    const denied = await seedDecision({ decision: 'deny', resolvedAt: recent(now, 10) });
+    await seedDecision({ resolvedAt: recent(now, 11) });
+    await seedDecision({ resolvedAt: recent(now, 12) });
 
     const onlyDenied = (await (await call(ctx.app, 'GET', '/api/decisions?decision=deny')).json()) as Decision[];
     expect(onlyDenied.map((item) => item.id)).toEqual([denied.id]);
@@ -119,7 +132,7 @@ describe('GET /api/decisions', () => {
       botId: other.id,
       threadId: otherThread.id,
       runId: otherRun.id,
-      resolvedAt: '2026-10-20T13:00:00.000Z',
+      resolvedAt: recent(now, 13),
     });
     const forBot = (await (
       await call(ctx.app, 'GET', `/api/decisions?botId=${other.id}`)
